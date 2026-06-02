@@ -1,0 +1,60 @@
+# 重明 (Mutong) 认证配置
+# 复制为 config.auth.yaml 并修改实际值
+
+auth:
+  # 认证模式: local / hybrid（同时支持本地和 Zitadel）
+  mode: local
+
+  # OAuth 2.0 发行者 URL (必填)
+  issuer: "https://mutong.example.com"
+
+  # Token 生命周期
+  access_token_lifespan: 15m
+  refresh_token_lifespan: 168h
+  auth_code_lifespan: 10m
+  device_code_lifespan: 10m
+
+  # 全局密钥 (32 bytes base64, 必填)
+  # 通过环境变量 MUTONG_AUTH_SECRET 设置
+  global_secret: ""
+
+  # RSA 私钥 (PEM格式, 必填, 用于 JWT 签名)
+  # 生成: openssl genrsa -out private.pem 2048
+  # 通过环境变量 MUTONG_AUTH_RSA_KEY_PATH 或文件路径设置
+  rsa_private_key_path: ""
+
+  # Zitadel OIDC 配置（hybrid 模式时必填）
+  zitadel:
+    issuer: "https://zitadel.example.com"
+    client_id: "mutong-web"
+    client_secret: ""
+    redirect_uri: "https://mutong.example.com/api/auth/oidc/callback"
+    audience: "mutong-api"
+    device_client: "mutongctl"
+    scopes:
+      - openid
+      - profile
+      - email
+      - offline_access
+
+  # 验证码配置
+  captcha:
+    enabled: true
+    ttl: 5m
+    require_after_failures: 3
+    lockout_after_failures: 5
+    lockout_duration: 15m
+
+  # 登录速率限制
+  login_ratelimit:
+    enabled: true
+    ip_max_per_minute: 10
+    redis_prefix: "ratelimit:login:"
+
+  # 密码策略
+  password:
+    algorithm: argon2id
+    argon2:
+      memory: 65536
+      iterations: 3
+      parallelism: 4

@@ -1,0 +1,184 @@
+# Mutong 资源画像配置（同心圆模型数据源定义）
+#
+# 定义各 K8s 资源类型的指标查询、拓扑关系和证据来源
+# 使用方式：复制为 config.profiles.yaml
+
+resourceProfiles:
+  Pod:
+    metrics:
+      - name: cpu_usage_cores
+        promql: 'sum(rate(container_cpu_usage_seconds_total{pod="{{name}}",namespace="{{namespace}}"}[5m]))'
+        unit: "cores"
+      - name: mem_usage_bytes
+        promql: 'container_memory_working_set_bytes{pod="{{name}}",namespace="{{namespace}}"}'
+        unit: "bytes"
+      - name: net_receive_bytes
+        promql: 'rate(container_network_receive_bytes_total{pod="{{name}}",namespace="{{namespace}}"}[5m])'
+        unit: "bytes/sec"
+      - name: restart_count
+        promql: 'kube_pod_container_status_restarts_total{pod="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+    topology:
+      - relation: "OwnedBy"
+        direction: "outbound"
+        label: "controller"
+      - relation: "RunsOn"
+        direction: "outbound"
+        label: "node"
+      - relation: "SvcToPods"
+        direction: "inbound"
+        label: "services"
+    evidence:
+      - source: "elasticsearch"
+        index: "k8s-logs-*"
+        query: 'kubernetes.pod.name:"{{name}}" AND kubernetes.namespace:"{{namespace}}" AND log.level:"error"'
+        limit: 50
+        fallback: "k8s_events"
+
+  Node:
+    metrics:
+      - name: cpu_usage_percent
+        promql: '100 - (avg(rate(node_cpu_seconds_total{instance="{{name}}",mode="idle"}[5m])) * 100)'
+        unit: "percent"
+      - name: mem_usage_percent
+        promql: '(1 - node_memory_MemAvailable_bytes{instance="{{name}}"} / node_memory_MemTotal_bytes{instance="{{name}}"}) * 100'
+        unit: "percent"
+      - name: disk_usage_percent
+        promql: '(1 - node_filesystem_avail_bytes{instance="{{name}}",mountpoint="/"} / node_filesystem_size_bytes{instance="{{name}}",mountpoint="/"}) * 100'
+        unit: "percent"
+    topology:
+      - relation: "RunsOn"
+        direction: "inbound"
+        label: "pods_on_node"
+        maxResults: 20
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"Node" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  Deployment:
+    metrics:
+      - name: replicas_desired
+        promql: 'kube_deployment_status_replicas{deployment="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: replicas_ready
+        promql: 'kube_deployment_status_replicas_ready{deployment="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: replicas_available
+        promql: 'kube_deployment_status_replicas_available{deployment="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: rollout_status
+        promql: 'kube_deployment_status_observed_generation{deployment="{{name}}",namespace="{{namespace}}"} == kube_deployment_metadata_generation{deployment="{{name}}",namespace="{{namespace}}"}'
+        unit: "boolean"
+    topology:
+      - relation: "OwnedBy"
+        direction: "outbound"
+        label: "namespace"
+      - relation: "OwnedBy"
+        direction: "inbound"
+        label: "replicasets"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"Deployment" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  Service:
+    metrics:
+      - name: endpoint_ready_count
+        promql: 'kube_endpoint_address_available{endpoint="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: endpoint_not_ready_count
+        promql: 'kube_endpoint_address_not_ready{endpoint="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+    topology:
+      - relation: "SvcToPods"
+        direction: "outbound"
+        label: "backend_pods"
+      - relation: "BelongsTo"
+        direction: "outbound"
+        label: "namespace"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"Service" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  PVC:
+    metrics:
+      - name: capacity_bytes
+        promql: 'kube_persistentvolumeclaim_resource_requests_storage_bytes{persistentvolumeclaim="{{name}}",namespace="{{namespace}}"}'
+        unit: "bytes"
+    topology:
+      - relation: "MountsPVC"
+        direction: "inbound"
+        label: "mounted_by_pods"
+      - relation: "BelongsTo"
+        direction: "outbound"
+        label: "namespace"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"PersistentVolumeClaim" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  Ingress:
+    metrics:
+      - name: requests_per_second
+        promql: 'sum(rate(nginx_ingress_controller_requests{ingress="{{name}}",namespace="{{namespace}}"}[5m]))'
+        unit: "req/sec"
+      - name: error_rate
+        promql: 'sum(rate(nginx_ingress_controller_requests{ingress="{{name}}",namespace="{{namespace}}",status=~"5.."}[5m]))'
+        unit: "req/sec"
+    topology:
+      - relation: "BelongsTo"
+        direction: "outbound"
+        label: "namespace"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"Ingress" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  StatefulSet:
+    metrics:
+      - name: replicas_ready
+        promql: 'kube_statefulset_status_replicas_ready{statefulset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: replicas_current
+        promql: 'kube_statefulset_status_replicas_current{statefulset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: replicas_desired
+        promql: 'kube_statefulset_replicas{statefulset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+    topology:
+      - relation: "OwnedBy"
+        direction: "outbound"
+        label: "namespace"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"StatefulSet" AND involvedObject.name:"{{name}}"'
+        limit: 20
+
+  DaemonSet:
+    metrics:
+      - name: nodes_ready
+        promql: 'kube_daemonset_status_number_ready{daemonset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: nodes_available
+        promql: 'kube_daemonset_status_number_available{daemonset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+      - name: nodes_desired
+        promql: 'kube_daemonset_status_desired_number_scheduled{daemonset="{{name}}",namespace="{{namespace}}"}'
+        unit: "count"
+    topology:
+      - relation: "RunsOn"
+        direction: "outbound"
+        label: "nodes"
+    evidence:
+      - source: "k8s_events"
+        level: "Warning"
+        query: 'involvedObject.kind:"DaemonSet" AND involvedObject.name:"{{name}}"'
+        limit: 20

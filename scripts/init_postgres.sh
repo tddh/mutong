@@ -1,0 +1,34 @@
+#!/bin/bash
+set -e
+
+DB_HOST="${DB_HOST:-localhost}"
+DB_PORT="${DB_PORT:-5432}"
+DB_NAME="${DB_NAME:-mutong}"
+DB_USER="${DB_USER:-mutong}"
+DB_PASS="${DB_PASS:-$MUTONG_DB_PASSWORD}"
+
+echo "Initializing PostgreSQL database..."
+
+PGPASSWORD="${DB_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U postgres <<EOF
+SELECT 'CREATE DATABASE ${DB_NAME} ENCODING ''UTF8'''
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
+
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
+        CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';
+    END IF;
+END
+\$\$;
+
+GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
+
+\c ${DB_NAME}
+GRANT ALL ON SCHEMA public TO ${DB_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${DB_USER};
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${DB_USER};
+
+CREATE EXTENSION IF NOT EXISTS vector;
+EOF
+
+echo "PostgreSQL initialization complete"

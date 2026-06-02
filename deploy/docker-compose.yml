@@ -1,0 +1,162 @@
+services:
+  # ─── 主服务 ───
+  mutong:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: mutong
+    ports:
+      - "${MUTONG_PORT:-8888}:8888"
+    environment:
+      MUTONG_PORT: "8888"
+      MUTONG_DB_USER: ${POSTGRES_USER:-mutong}
+      MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}
+      MUTONG_NEBULA_USER: ${NEBULA_USER:-root}
+      MUTONG_NEBULA_PASS: ${NEBULA_PASSWORD:-nebula}
+    volumes:
+      - mutong_config:/app/configs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nebula-graphd:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── PostgreSQL 15 + pgvector ───
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: mutong-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mutong}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}
+      POSTGRES_DB: ${POSTGRES_DB:-mutong}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mutong}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # ─── Nebula Graph ───
+  nebula-metad:
+    image: vesoft/nebula-metad:v3.8.0
+    container_name: mutong-nebula-metad
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-metad", "--port=9559", "--data_path=/data/meta", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-metad:19559/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - nebula_meta:/data/meta
+      - nebula_meta_logs:/logs
+    restart: unless-stopped
+
+  nebula-storaged:
+    image: vesoft/nebula-storaged:v3.8.0
+    container_name: mutong-nebula-storaged
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-storaged", "--port=9779", "--data_path=/data/storage", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-storaged:19779/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - nebula_storage:/data/storage
+      - nebula_storage_logs:/logs
+    restart: unless-stopped
+
+  nebula-graphd:
+    image: vesoft/nebula-graphd:v3.8.0
+    container_name: mutong-nebula-graphd
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-graphd", "--port=9669", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+      nebula-storaged:
+        condition: service_healthy
+    ports:
+      - "9669:9669"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-graphd:19669/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - nebula_graph_logs:/logs
+    restart: unless-stopped
+
+  # ─── Kafka（Redpanda 轻量替代）───
+  kafka:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.5
+    container_name: mutong-kafka
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - kafka_data:/var/lib/redpanda/data
+    restart: unless-stopped
+
+  # ─── Redis（可选：诊断会话缓存）───
+  redis:
+    image: redis:7-alpine
+    container_name: mutong-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    profiles:
+      - full
+
+  # ─── 初始化 Nebula Graph Schema ───
+  nebula-init:
+    image: vesoft/nebula-console:v3.8.0
+    container_name: mutong-nebula-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "等待 Nebula Graph 就绪..."
+        sleep 15
+        nebula-console -addr nebula-graphd -port 9669 -u ${NEBULA_USER:-root} -p ${NEBULA_PASSWORD:-nebula} -e "CREATE SPACE IF NOT EXISTS mutong(partition_num=3, replica_factor=2, vid_type=FIXED_STRING(128));" || true
+        echo "Nebula 初始化完成"
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+
+volumes:
+  pg_data:
+  mutong_config:
+  nebula_meta:
+  nebula_meta_logs:
+  nebula_storage:
+  nebula_storage_logs:
+  nebula_graph_logs:
+  kafka_data:
+  redis_data:

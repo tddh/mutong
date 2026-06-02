@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资源监控 - 牧童平台</title>
+    <script type="module" crossorigin src="./monitoring.js"></script>
+    <link rel="modulepreload" crossorigin href="/view/assets/modulepreload-polyfill-B5Qt9EMX.js">
+    <link rel="modulepreload" crossorigin href="/view/assets/common-Co0gRJD4.js">
+    <link rel="modulepreload" crossorigin href="/view/assets/api-CWUkSNXl.js">
+    <link rel="stylesheet" crossorigin href="/view/assets/common-Cxju-u-v.css">
+    <link rel="stylesheet" crossorigin href="./monitoring.css">
+</head>
+<body>
+    <div id="vue-nav"><nav-bar></nav-bar></div>
+    <div id="app">
+        <div class="monitoring-container">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h3>📊 资源选择器</h3>
+                </div>
+                <div class="sidebar-content">
+                    <div class="control-group">
+                        <label>命名空间</label>
+                        <select v-model="selectedNs" class="search-input">
+                            <option value="all">所有命名空间</option>
+                            <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>资源类型</label>
+                        <select v-model="selectedType" class="search-input">
+                            <option value="Pod">Pod</option>
+                            <option value="Node">Node</option>
+                            <option value="Deployment">Deployment</option>
+                            <option value="StatefulSet">StatefulSet</option>
+                            <option value="DaemonSet">DaemonSet</option>
+                            <option value="Service">Service</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>资源名称</label>
+                        <select v-model="selectedResource" class="search-input">
+                            <option value="">请选择资源</option>
+                            <option v-for="r in filteredResources" :key="r.id" :value="r">{{ r.label }}</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <button class="btn-refresh" @click="loadMetrics" :disabled="loading || !selectedResource">
+                            {{ loading ? '加载中...' : '🔄 加载指标' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="main-content">
+                <div v-if="!selectedResource" class="empty-state">
+                    <div class="empty-icon">📈</div>
+                    <div>请选择资源查看监控指标</div>
+                </div>
+                <div v-else-if="loading" class="loading-state">
+                    <div class="loading-icon">⏳</div>
+                    <div>加载指标数据...</div>
+                </div>
+                <div v-else-if="error" class="error-state">
+                    <div class="error-icon">⚠️</div>
+                    <div>{{ error }}</div>
+                </div>
+                <div v-else class="metrics-dashboard">
+                    <div class="dashboard-header">
+                        <h2>{{ selectedResource.kind }}: {{ selectedResource.label }}</h2>
+                        <span class="namespace-badge">{{ selectedResource.namespace }}</span>
+                    </div>
+                    <div class="metrics-grid">
+                        <div v-for="metric in metrics" :key="metric.metricName" class="metric-card">
+                            <div class="metric-header">
+                                <span class="metric-name">{{ getMetricDisplayName(metric.metricName) }}</span>
+                                <span class="metric-status" :class="'status-' + metric.status">{{ metric.status }}</span>
+                            </div>
+                            <div class="metric-value">{{ formatMetricValue(metric.metricName, metric.value) }}</div>
+                            <div class="metric-labels">
+                                <span v-for="(val, key) in metric.labels" :key="key" class="label-tag">{{ key }}={{ val }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="metrics.length === 0" class="no-metrics">
+                        <div class="no-metrics-icon">📭</div>
+                        <div>暂无指标数据</div>
+                        <div class="no-metrics-hint">请检查 Prometheus 配置和资源是否存在</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

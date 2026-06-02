@@ -1,0 +1,60 @@
+agent:
+  service_name: ${SW_AGENT_NAME:mutong}
+  instance_env_name: SW_AGENT_INSTANCE_NAME
+  sampler: ${SW_AGENT_SAMPLE:1}
+  meter:
+    collect_interval: ${SW_AGENT_METER_COLLECT_INTERVAL:20}
+  correlation:
+    max_key_count: ${SW_AGENT_CORRELATION_MAX_KEY_COUNT:3}
+    max_value_size: ${SW_AGENT_CORRELATION_MAX_VALUE_SIZE:128}
+  ignore_suffix: ${SW_AGENT_IGNORE_SUFFIX:.jpg,.jpeg,.js,.css,.png,.bmp,.gif,.ico,.mp3,.mp4,.html,.svg}
+  trace_ignore_path: ${SW_AGENT_TRACE_IGNORE_PATH:}
+
+reporter:
+  discard: ${SW_AGENT_REPORTER_DISCARD:false}
+  grpc:
+    # SkyWalking OAP 后端地址，请根据实际环境修改
+    backend_service: ${SW_AGENT_REPORTER_GRPC_BACKEND_SERVICE:your-skywalking-oap:11800}
+    max_send_queue: ${SW_AGENT_REPORTER_GRPC_MAX_SEND_QUEUE:5000}
+    check_interval: ${SW_AGENT_REPORTER_GRPC_CHECK_INTERVAL:20}
+    authentication: ${SW_AGENT_REPORTER_GRPC_AUTHENTICATION:}
+    cds_fetch_interval: ${SW_AGENT_REPORTER_GRPC_CDS_FETCH_INTERVAL:20}
+    tls:
+      enable: ${SW_AGENT_REPORTER_GRPC_TLS_ENABLE:false}
+      ca_path: ${SW_AGENT_REPORTER_GRPC_TLS_CA_PATH:}
+      client_key_path: ${SW_AGENT_REPORTER_GRPC_TLS_CLIENT_KEY_PATH:}
+      client_cert_chain_path: ${SW_AGENT_REPORTER_GRPC_TLS_CLIENT_CERT_CHAIN_PATH:}
+      insecure_skip_verify: ${SW_AGENT_REPORTER_GRPC_TLS_INSECURE_SKIP_VERIFY:false}
+
+log:
+  type: ${SW_AGENT_LOG_TYPE:auto}
+  tracing:
+    enable: ${SW_AGENT_LOG_TRACING_ENABLE:true}
+    key: ${SW_AGENT_LOG_TRACING_KEY:SW_CTX}
+  reporter:
+    enable: ${SW_AGENT_LOG_REPORTER_ENABLE:true}
+    label_keys: ${SW_AGENT_LOG_REPORTER_LABEL_KEYS:}
+
+plugin:
+  excluded: ${SW_AGENT_PLUGIN_EXCLUDES:}
+  config:
+    http:
+      server_collect_parameters: ${SW_AGENT_PLUGIN_CONFIG_HTTP_SERVER_COLLECT_PARAMETERS:true}
+    mongo:
+      collect_statement: ${SW_AGENT_PLUGIN_CONFIG_MONGO_COLLECT_STATEMENT:false}
+    gorm:
+      collect_parameter: ${SW_AGENT_PLUGIN_CONFIG_GORM_COLLECT_PARAMETER:false}
+    sql:
+      collect_parameter: ${SW_AGENT_PLUGIN_CONFIG_SQL_COLLECT_PARAMETER:false}
+    redis:
+      max_args_bytes: ${SW_AGENT_PLUGIN_CONFIG_REDIS_MAX_ARGS_BYTES:1024}
+    gin: 
+      collect_request_headers: ${SW_AGENT_PLUGIN_CONFIG_GIN_COLLECT_REQUEST_HEADERS:}
+      header_length_threshold: ${SW_AGENT_PLUGIN_CONFIG_GIN_HEADER_LENGTH_THRESHOLD:2048}
+    iris: 
+      collect_request_headers: ${SW_AGENT_PLUGIN_CONFIG_GIN_COLLECT_REQUEST_HEADERS:}
+      header_length_threshold: ${SW_AGENT_PLUGIN_CONFIG_GIN_HEADER_LENGTH_THRESHOLD:2048}
+    goframe:
+      collect_request_parameters: ${SW_AGENT_PLUGIN_CONFIG_GOFRAME_COLLECT_REQUEST_PARAMETERS:false}
+      collect_request_headers: ${SW_AGENT_PLUGIN_CONFIG_GOFRAME_COLLECT_REQUEST_HEADERS:}
+      header_length_threshold: ${SW_AGENT_PLUGIN_CONFIG_GOFRAME_HEADER_LENGTH_THRESHOLD:2048}

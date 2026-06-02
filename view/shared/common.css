@@ -1,0 +1,57 @@
+:root {
+    --primary-color: #1890ff;
+    --bg-color: #f0f2f5;
+    --card-bg: #ffffff;
+    --text-primary: #333333;
+    --text-secondary: #666666;
+    --border-color: #e8e8e8;
+    --success-color: #52c41a;
+    --warning-color: #faad14;
+    --error-color: #ff4d4f;
+    --nav-height: 60px;
+    --card-radius: 8px;
+    --shadow-sm: 0 2px 8px rgba(0,0,0,0.08);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+.card {
+    background: var(--card-bg);
+    border-radius: var(--card-radius);
+    box-shadow: var(--shadow-sm);
+    padding: 20px;
+}
+/* Navbar */
+.navbar {
+    display: flex; align-items: center; justify-content: space-between;
+    height: var(--nav-height); background: var(--card-bg);
+    padding: 0 24px; box-shadow: var(--shadow-sm); margin-bottom: 20px;
+    position: sticky; top: 0; z-index: 100;
+}
+.nav-brand { font-size: 20px; font-weight: bold; color: var(--primary-color); cursor: pointer; }
+.nav-links a {
+    margin-left: 24px; text-decoration: none; color: var(--text-secondary);
+    padding: 8px 0; border-bottom: 2px solid transparent; transition: all 0.3s;
+}
+.nav-links a:hover, .nav-links a.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+/* StatCard */
+.stat-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.stat-card {
+    background: var(--card-bg); border-radius: var(--card-radius); padding: 20px;
+    box-shadow: var(--shadow-sm); display: flex; align-items: center; justify-content: space-between;
+}
+.stat-title { font-size: 14px; color: var(--text-secondary); display: block; margin-bottom: 8px; }
+.stat-value { font-size: 28px; font-weight: bold; color: var(--text-primary); }
+.stat-value .unit { font-size: 14px; color: var(--text-secondary); font-weight: normal; margin-left: 4px; }
+.dashboard-header { font-size: 24px; margin-bottom: 24px; font-weight: 600; }
+.quick-links { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 32px; }
+.quick-link {
+    padding: 16px 24px; background: #e6f7ff; border: 1px solid #91d5ff;
+    border-radius: 6px; text-decoration: none; color: #0050b3;
+    font-weight: 500; transition: all 0.3s;
+}
+.quick-link:hover { background: #bae7ff; transform: translateY(-2px); }

@@ -1,0 +1,16 @@
+namespace:
+  include:
+    pattern: "prod-*"
+  exclude:
+    pattern: ""
+
+config:
+  discovery:
+    services:
+      - k8s_namespace: ".*"
+        exports: [traces]
+  routes:
+    ignored_patterns: ["/health", "/metrics"]
+  otel:
+    traces_export:
+      endpoint: "http://$(OTEL_COLLECTOR_HOST):4318"

@@ -1,0 +1,12 @@
+# Mutong 复盘分析配置
+#
+# 使用方式：复制为 config.retrospective.yaml
+
+retrospective:
+  retentionDays: 180
+  autoTrigger:
+    enabled: false
+    delayMinutes: 10
+    minSeverity: "warning"
+    maxPerHour: 10
+    skipIfDiagnosisOlderThan: "24h"

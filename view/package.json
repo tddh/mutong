@@ -1,0 +1,29 @@
+{
+  "name": "mutong-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "bun build.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "echo \"No linter configured yet\" && exit 0"
+  },
+  "dependencies": {
+    "@antv/g6": "^4.8.24",
+    "d3-force": "^3.0.0",
+    "d3-zoom": "^3.0.0",
+    "force-graph": "^1.51.4",
+    "marked": "^18.0.3",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "@vue/test-utils": "^2.4.10",
+    "jsdom": "^29.1.1",
+    "vite": "^5.2.0",
+    "vitest": "^4.1.7"
+  }
+}

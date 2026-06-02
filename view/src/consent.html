@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>授权确认 - 重明平台</title>
+    <link rel="stylesheet" href="/view/src/styles/common.css">
+    <style>
+        .consent-wrapper { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--bg-color); }
+        .consent-card { width: 440px; background: var(--card-bg); border-radius: var(--card-radius); box-shadow: var(--shadow-sm); padding: 40px 32px; text-align: center; }
+        .consent-card h2 { font-size: 20px; margin-bottom: 16px; }
+        .consent-card p { font-size: 14px; color: var(--text-secondary); margin-bottom: 24px; line-height: 1.6; }
+        .consent-actions { display: flex; gap: 12px; justify-content: center; }
+        .btn-approve { padding: 10px 32px; background: var(--primary-color); color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 500; }
+        .btn-deny { padding: 10px 32px; background: #fff; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="consent-wrapper">
+            <div class="consent-card">
+                <h2>授权确认</h2>
+                <p><strong>{{ clientName }}</strong> 请求访问您的 Mutong 账号</p>
+                <p>权限范围: {{ scopes }}</p>
+                <div class="consent-actions">
+                    <button class="btn-deny" @click="deny">拒绝</button>
+                    <button class="btn-approve" @click="approve">允许</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="./consent.js"></script>
+</body>
+</html>

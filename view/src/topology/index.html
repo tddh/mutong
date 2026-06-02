@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>资源拓扑 - 重明平台</title>
+</head>
+<body>
+    <div id="vue-nav"><nav-bar></nav-bar></div>
+    <div id="app">
+        <div class="main-container">
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <div class="btn-row">
+                        <button class="btn-refresh" @click="handleRefresh" :disabled="loading">
+                            {{ loading ? '加载中...' : '🔄 刷新数据' }}
+                        </button>
+                        <button class="btn-reset" @click="handleReset">🔄 重置</button>
+                    </div>
+                    <div class="status-row">
+                        <span>节点: <strong>{{ graphDataCount }}</strong></span>
+                        <span>关联: <strong>{{ graphEdgeCount }}</strong></span>
+                    </div>
+                </div>
+                <div class="sidebar-content">
+                    <div class="control-group">
+                        <h3>📂 命名空间</h3>
+                        <select v-model="selectedNs" class="search-input" style="height: 40px; cursor: pointer;">
+                            <option value="all">所有命名空间</option>
+                            <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <h3>🔍 搜索资源</h3>
+                        <div class="search-wrapper">
+                            <input type="text" v-model.trim="kindFilter" class="search-input"
+                                   placeholder="输入名称或 UID..."
+                                   @keydown="handleSuggestKeydown"
+                                   @focus="suggestions.length > 0 && (suggestVisible = true)"
+                                   @blur="setTimeout(() => suggestVisible = false, 200)">
+                            <div class="suggestions-dropdown" v-if="suggestVisible && suggestions.length > 0">
+                                <div v-for="(node, idx) in suggestions" :key="node.id"
+                                     class="suggestion-item"
+                                     :class="{ active: idx === suggestActiveIdx }"
+                                     @mousedown.prevent="handleSuggestionSelect(node)">
+                                    <span class="color-dot" :style="{ background: getKindColor(node.kind) }"></span>
+                                    <span class="kind-label">{{ node.kind }}</span>
+                                    <span class="name">{{ node.label }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <h3>📋 资源列表</h3>
+                        <div class="resource-list">
+                            <div v-if="nodesInNs.length === 0" style="padding:20px; text-align:center; color:#999; font-size:13px;">暂无资源</div>
+                            <div 
+                                v-for="node in nodesInNs" 
+                                :key="node.id" 
+                                class="resource-item"
+                                :class="{ active: selectedResourceUid === node.id }"
+                                @click="handleResourceSelect(node)"
+                            >
+                                <span class="color-dot" :style="{ background: getKindColor(node.kind) }"></span>
+                                <span class="kind-label" :title="node.apiVersion || node.kind">{{ node.kind }}</span>
+                                <span class="name" :title="node.label">{{ node.label }}</span>
+                                <span v-if="node.apiVersion" class="kind-meta" :title="node.apiVersion">{{ node.apiVersion }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <h3>🔗 关系层次</h3>
+                        <div class="depth-selector">
+                            <button
+                                v-for="d in [1,2,3,4]"
+                                :key="d"
+                                class="depth-btn"
+                                :class="{ active: depth === d }"
+                                @click="handleDepthChange(d)"
+                            >{{ d }}</button>
+                            <span style="font-size: 12px; color: #999;">层</span>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <h3>🌊 动画模式</h3>
+                        <div class="depth-selector">
+                            <button
+                                v-for="mode in animModes"
+                                :key="mode.key"
+                                class="depth-btn"
+                                :class="{ active: animMode === mode.key }"
+                                @click="handleAnimModeChange(mode.key)"
+                                :title="mode.label"
+                            >{{ mode.icon }}</button>
+                            <span style="font-size: 11px; color: #999; margin-left: 4px;">{{ animMode === 'float' ? '漂动' : animMode === 'wave' ? '波纹' : '静止' }}</span>
+                        </div>
+                    </div>
+                    <div class="control-group" v-if="kinds.length > 1">
+                        <h3>🏷️ 资源类型</h3>
+                        <div class="kind-tags">
+                            <div v-for="k in visibleKinds" :key="k" class="kind-tag" :class="{ active: selectedKinds.length === 0 || selectedKinds.includes(k) }" @click="toggleKind(k)">
+                                <span class="dot" :style="{ background: getKindColor(k) }"></span>
+                                <span class="name">{{ k }}</span>
+                            </div>
+                        </div>
+                        <div v-if="hasHiddenKinds" class="kind-expand-toggle">
+                            <button @click="showAllKinds = !showAllKinds">{{ showAllKinds ? '收起' : '显示全部 (' + kinds.length + ')' }}</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <h3>✨ 视觉效果</h3>
+                        <div class="depth-selector">
+                            <button class="depth-btn" :class="{ active: showParticles }" @click="showParticles = !showParticles" title="粒子流动">🔗</button>
+                            <button class="depth-btn" :class="{ active: showCurves }" @click="showCurves = !showCurves" title="曲线边">🔀</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="graph-area">
+                <div id="graph-container"></div>
+                <div class="toolbar">
+                    <select v-model="viewMode" @change="handleViewModeChange(viewMode)" style="width: auto; padding: 4px 8px; border: none; background: transparent; font-size: 13px; cursor: pointer; color: #555;" title="视图模式">
+                        <option value="physical">物理拓扑</option>
+                        <option value="business">业务拓扑</option>
+                    </select>
+                    <select v-if="viewMode === 'physical' && businessUnits.length > 0" v-model="businessUnitFilter" style="width: auto; padding: 4px 8px; border: none; background: transparent; font-size: 13px; cursor: pointer; color: #555; margin-left: 4px;" title="按业务单元筛选">
+                        <option value="">全部业务</option>
+                        <option v-for="unit in businessUnits" :key="unit" :value="unit">{{ unit }}</option>
+                    </select>
+                    <select v-if="viewMode === 'business'" v-model="businessUnitFilter" @change="handleBusinessUnitChange(businessUnitFilter)" style="width: auto; padding: 4px 8px; border: none; background: transparent; font-size: 13px; cursor: pointer; color: #555; margin-left: 4px;" title="业务单元筛选">
+                        <option value="all">所有业务单元</option>
+                        <option v-for="unit in businessUnits" :key="unit" :value="unit">{{ unit }}</option>
+                    </select>
+                    <button title="缩小" @click="handleZoomOut">➖</button>
+                    <button title="适配视图" @click="handleFitView">🔲</button>
+                    <button title="放大" @click="handleZoomIn">➕</button>
+                </div>
+                <div class="status-bar" v-if="graph">
+                    <div class="status-item">节点: <span>{{ graphDataCount }}</span></div>
+                    <div class="status-item">关联: <span>{{ graphEdgeCount }}</span></div>
+                    <div v-if="selectedNode" class="status-item" style="color: #1890ff;">
+                        🔗 <span>{{ depth }}层</span>
+                        <span style="cursor: pointer; margin-left: 4px;" title="返回全图" @click="selectedNode = null; handleReset();">×</span>
+                    </div>
+                </div>
+                <div v-if="loading" class="no-data" style="z-index:5;pointer-events:auto;">
+                    <div class="no-data-icon">⏳</div>
+                    <div>加载中...</div>
+                </div>
+                <div v-if="error" class="no-data" style="color: var(--error-color);z-index:5;">
+                    <div class="no-data-icon">⚠️</div>
+                    <div style="font-weight: 500;">{{ error }}</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #aaa;">请检查 K8s 集群连接后刷新</div>
+                </div>
+                <div v-if="!loading && !error && !selectedResourceUid && graphDataCount === 0" class="no-data">
+                    <div class="no-data-icon">👆</div>
+                    <div style="font-weight: 500; font-size: 16px;">请在左侧选择资源</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #aaa;">选择命名空间后，点击资源列表中的项展开拓扑</div>
+                </div>
+                <div v-if="!loading && !error && selectedResourceUid && graphDataCount === 0" class="no-data">
+                    <div class="no-data-icon">📭</div>
+                    <div>暂无关联资源</div>
+                    <div style="font-size: 12px; margin-top: 8px;">请调整层级数或选择其他资源</div>
+                </div>
+            </div>
+            <div v-if="selectedNode" class="detail-panel">
+                <div class="detail-header">
+                    <h2 style="margin:0 0 4px 0; font-size: 16px;">{{ selectedNode.kind }}</h2>
+                    <h3 style="margin:0 0 0 0; color: #666; font-weight: normal; font-size: 13px;">{{ selectedNode.label }}</h3>
+                    <button @click="selectedNode = null" style="position:absolute;top:12px;right:12px;font-size:18px;background:none;border:none;cursor:pointer;color:#999;">×</button>
+                </div>
+                <div class="detail-body">
+                    <div v-if="detailLoading" style="text-align:center;padding:40px 0;color:#999;">
+                        <div style="font-size:24px;margin-bottom:8px;">⏳</div>
+                        <div>加载详情...</div>
+                    </div>
+                    <div v-else>
+                    <div class="detail-section">
+                        <h4 class="section-title">📋 基本信息</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr><td style="padding: 5px 0; color: #888; width: 65px;">UID</td><td style="padding: 5px 0; word-break: break-all; font-size: 10px;">{{ selectedNode.id || '未知' }}</td></tr>
+                            <tr><td style="padding: 5px 0; color: #888;">命名空间</td><td style="padding: 5px 0;">{{ selectedNode.namespace || '未知' }}</td></tr>
+                            <tr><td style="padding: 5px 0; color: #888;">类型</td><td style="padding: 5px 0;">{{ selectedNode.kind || '未知' }}</td></tr>
+                            <tr v-if="selectedNode.apiVersion"><td style="padding: 5px 0; color: #888;">API版本</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.apiVersion }}</td></tr>
+                            <tr v-if="selectedNode.group"><td style="padding: 5px 0; color: #888;">API组</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.group }}</td></tr>
+                            <tr v-if="selectedNode.status"><td style="padding: 5px 0; color: #888;">状态</td><td style="padding: 5px 0;"><span :class="['status-badge', 'status-' + selectedNode.status.toLowerCase()]">{{ selectedNode.status }}</span></td></tr>
+                            <tr v-if="selectedNode.created"><td style="padding: 5px 0; color: #888;">创建时间</td><td style="padding: 5px 0;">{{ selectedNode.created }}</td></tr>
+                            <tr v-if="selectedNode.labels"><td style="padding: 5px 0; color: #888;">标签</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.labels }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.appName || selectedNode.team || selectedNode.businessUnit || selectedNode.criticality || selectedNode.environment || selectedNode.source">
+                        <h4 class="section-title">💼 业务上下文</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.appName"><td style="padding: 5px 0; color: #888; width: 65px;">应用</td><td style="padding: 5px 0;">{{ selectedNode.appName }}</td></tr>
+                            <tr v-if="selectedNode.businessUnit"><td style="padding: 5px 0; color: #888;">业务单元</td><td style="padding: 5px 0;">{{ selectedNode.businessUnit }}</td></tr>
+                            <tr v-if="selectedNode.team"><td style="padding: 5px 0; color: #888;">团队</td><td style="padding: 5px 0;">{{ selectedNode.team }}</td></tr>
+                            <tr v-if="selectedNode.criticality"><td style="padding: 5px 0; color: #888;">关键等级</td><td style="padding: 5px 0;"><span :class="['status-badge', 'status-' + (selectedNode.criticality === 'critical' ? 'failed' : selectedNode.criticality === 'high' ? 'pending' : 'running')]">{{ selectedNode.criticality }}</span></td></tr>
+                            <tr v-if="selectedNode.environment"><td style="padding: 5px 0; color: #888;">环境</td><td style="padding: 5px 0;">{{ selectedNode.environment }}</td></tr>
+                            <tr v-if="selectedNode.source"><td style="padding: 5px 0; color: #888;">来源</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.source }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.annotationsCount !== undefined || selectedNode.owners || selectedNode.conditionsSummary">
+                        <h4 class="section-title">🧾 通用元数据</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.annotationsCount !== undefined"><td style="padding: 5px 0; color: #888; width: 65px;">注解数</td><td style="padding: 5px 0;">{{ selectedNode.annotationsCount }}</td></tr>
+                            <tr v-if="selectedNode.owners"><td style="padding: 5px 0; color: #888;">归属</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.owners }}</td></tr>
+                            <tr v-if="selectedNode.conditionsSummary"><td style="padding: 5px 0; color: #888;">条件</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.conditionsSummary }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.kind === 'Pod'">
+                        <h4 class="section-title">📦 Pod 详情</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.podIP"><td style="padding: 5px 0; color: #888; width: 65px;">Pod IP</td><td style="padding: 5px 0;">{{ selectedNode.podIP }}</td></tr>
+                            <tr v-if="selectedNode.nodeName"><td style="padding: 5px 0; color: #888;">所在节点</td><td style="padding: 5px 0;">{{ selectedNode.nodeName }}</td></tr>
+                            <tr v-if="selectedNode.restartCount !== undefined"><td style="padding: 5px 0; color: #888;">重启次数</td><td style="padding: 5px 0;">{{ selectedNode.restartCount }}</td></tr>
+                            <tr v-if="selectedNode.containers"><td style="padding: 5px 0; color: #888;">容器</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.containers }}</td></tr>
+                            <tr v-if="selectedNode.images"><td style="padding: 5px 0; color: #888;">镜像</td><td style="padding: 5px 0; word-break: break-word; font-size: 10px;">{{ selectedNode.images }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="['Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet'].includes(selectedNode.kind)">
+                        <h4 class="section-title">🔁 副本状态</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.replicas !== undefined"><td style="padding: 5px 0; color: #888; width: 65px;">期望副本</td><td style="padding: 5px 0;">{{ selectedNode.replicas }}</td></tr>
+                            <tr v-if="selectedNode.readyReplicas !== undefined"><td style="padding: 5px 0; color: #888;">就绪副本</td><td style="padding: 5px 0;">{{ selectedNode.readyReplicas }}</td></tr>
+                            <tr v-if="selectedNode.availableReplicas !== undefined"><td style="padding: 5px 0; color: #888;">可用副本</td><td style="padding: 5px 0;">{{ selectedNode.availableReplicas }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.kind === 'Node'">
+                        <h4 class="section-title">🖥️ 节点详情</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.nodeIP"><td style="padding: 5px 0; color: #888; width: 65px;">内部 IP</td><td style="padding: 5px 0;">{{ selectedNode.nodeIP }}</td></tr>
+                            <tr v-if="selectedNode.cpuCapacity"><td style="padding: 5px 0; color: #888;">CPU</td><td style="padding: 5px 0;">{{ selectedNode.cpuCapacity }}</td></tr>
+                            <tr v-if="selectedNode.memoryCapacity"><td style="padding: 5px 0; color: #888;">内存</td><td style="padding: 5px 0;">{{ selectedNode.memoryCapacity }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.kind === 'Service'">
+                        <h4 class="section-title">🔌 Service 详情</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.serviceType"><td style="padding: 5px 0; color: #888; width: 65px;">类型</td><td style="padding: 5px 0;">{{ selectedNode.serviceType }}</td></tr>
+                            <tr v-if="selectedNode.clusterIP"><td style="padding: 5px 0; color: #888;">ClusterIP</td><td style="padding: 5px 0;">{{ selectedNode.clusterIP }}</td></tr>
+                            <tr v-if="selectedNode.ports"><td style="padding: 5px 0; color: #888;">端口</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.ports }}</td></tr>
+                            <tr v-if="selectedNode.selector"><td style="padding: 5px 0; color: #888;">选择器</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.selector }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="['ConfigMap', 'Secret'].includes(selectedNode.kind)">
+                        <h4 class="section-title">📄 数据</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.dataKeys !== undefined"><td style="padding: 5px 0; color: #888; width: 65px;">数据项</td><td style="padding: 5px 0;">{{ selectedNode.dataKeys }} 个</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.kind === 'PersistentVolumeClaim'">
+                        <h4 class="section-title">💾 存储详情</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.storageRequest"><td style="padding: 5px 0; color: #888; width: 65px;">存储请求</td><td style="padding: 5px 0;">{{ selectedNode.storageRequest }}</td></tr>
+                        </table>
+                    </div>
+
+                    <div class="detail-section" v-if="selectedNode.kind === 'CiliumEndpoint'">
+                        <h4 class="section-title">🕸️ Cilium Endpoint 详情</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr v-if="selectedNode.endpointIPv4"><td style="padding: 5px 0; color: #888; width: 65px;">IPv4</td><td style="padding: 5px 0;">{{ selectedNode.endpointIPv4 }}</td></tr>
+                            <tr v-if="selectedNode.endpointIPv6"><td style="padding: 5px 0; color: #888;">IPv6</td><td style="padding: 5px 0;">{{ selectedNode.endpointIPv6 }}</td></tr>
+                            <tr v-if="selectedNode.endpointNode"><td style="padding: 5px 0; color: #888;">所在节点</td><td style="padding: 5px 0;">{{ selectedNode.endpointNode }}</td></tr>
+                            <tr v-if="selectedNode.identityId !== undefined"><td style="padding: 5px 0; color: #888;">Identity</td><td style="padding: 5px 0;">{{ selectedNode.identityId }}</td></tr>
+                            <tr v-if="selectedNode.externalPodName"><td style="padding: 5px 0; color: #888;">关联Pod</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.externalPodName }}</td></tr>
+                            <tr v-if="selectedNode.namedPorts"><td style="padding: 5px 0; color: #888;">命名端口</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.namedPorts }}</td></tr>
+                        </table>
+                    </div>
+                    <div class="detail-section" v-if="relatedResources.upstream.length || relatedResources.downstream.length">
+                        <h4 class="section-title">🔗 关联资源</h4>
+                        <div v-if="relatedResources.upstream.length" class="related-group">
+                            <span class="related-label">上游 ({{ relatedResources.upstream.length }})</span>
+                            <div class="related-list">{{ relatedResources.upstream.map(r => r.kind + ':' + r.label).join(', ') }}</div>
+                        </div>
+                        <div v-if="relatedResources.downstream.length" class="related-group">
+                            <span class="related-label">下游 ({{ relatedResources.downstream.length }})</span>
+                            <div class="related-list">{{ relatedResources.downstream.map(r => r.kind + ':' + r.label).join(', ') }}</div>
+                        </div>
+                    </div>
+                    <div class="detail-section" v-if="selectedNode.kind === 'Pod' || selectedNode.kind === 'Node' || selectedNode.kind === 'Deployment'">
+                        <h4 class="section-title">📊 Prometheus 指标</h4>
+                        <div v-if="metricsLoading" class="metrics-loading">加载中...</div>
+                        <div v-else-if="metrics && metrics.length > 0" class="metrics-badges">
+                            <div v-for="m in metrics" :key="m.metricName" class="metric-badge" :class="'metric-' + m.status">
+                                <span class="metric-badge-dot" :style="{ background: getMetricStatusColor(m.status) }"></span>
+                                <span class="metric-badge-label">{{ getMetricLabel(m) }}</span>
+                                <span class="metric-badge-value" :style="{ color: getMetricStatusColor(m.status) }">{{ getMetricDisplayValue(m) }}</span>
+                            </div>
+                        </div>
+                        <div v-else class="metrics-unavailable">暂无 Prometheus 指标数据</div>
+                    </div>
+                    </div>
+                    </div>
+                </div>
+                         </div>
+                        <div class="pagination" v-if="totalPages > 1" style="display:flex;justify-content:center;align-items:center;gap:4px;padding:8px 0;">
+                            <button @click="handlePageChange(1)" :disabled="currentPage <= 1" style="padding:2px 6px;font-size:11px;">«</button>
+                            <button @click="handlePageChange(currentPage - 1)" :disabled="currentPage <= 1" style="padding:2px 6px;font-size:11px;">‹</button>
+                            <span style="font-size:11px;color:#666;">{{ currentPage }} / {{ totalPages }}</span>
+                            <button @click="handlePageChange(currentPage + 1)" :disabled="currentPage >= totalPages" style="padding:2px 6px;font-size:11px;">›</button>
+                            <button @click="handlePageChange(totalPages)" :disabled="currentPage >= totalPages" style="padding:2px 6px;font-size:11px;">»</button>
+                        </div>
+                    </div>
+    <script type="module" src="./topology.js"></script>
+</body>
+</html>

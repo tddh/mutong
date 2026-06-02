@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Web Terminal</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+    <link rel="stylesheet" href="./terminal.css" />
+  </head>
+  <body>
+    <div id="vue-nav"><nav-bar></nav-bar></div>
+    <div class="terminal-container">
+      <div class="terminal-toolbar">
+        <label for="namespaceSelect">Namespace:</label>
+        <select id="namespaceSelect"></select>
+        <label for="podSelect">Pod:</label>
+        <select id="podSelect"></select>
+        <label for="containerSelect">Container:</label>
+        <select id="containerSelect"></select>
+        <label for="shellSelect">Shell:</label>
+        <select id="shellSelect">
+          <option value="/bin/sh">sh</option>
+          <option value="/bin/bash">bash</option>
+          <option value="/bin/ash">ash</option>
+          <option value="/bin/zsh">zsh</option>
+        </select>
+        <button id="connectBtn">Connect</button>
+        <span class="status" id="status">disconnected</span>
+      </div>
+      <div id="terminal"></div>
+    </div>
+    <script type="module" src="./terminal.js"></script>
+  </body>
+  </html>

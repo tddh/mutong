@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes资源表格展示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f0f2f5;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            padding: 20px;
+            border-bottom: 1px solid #e8e8e8;
+            background-color: #fafafa;
+        }
+        .header h1 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 16px;
+        }
+        .filter-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .filter-item {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .filter-item label {
+            font-size: 14px;
+            color: #666;
+            font-weight: 500;
+        }
+        .filter-item select,
+        .filter-item input {
+            padding: 8px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+            min-width: 150px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background-color: #1890ff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #40a9ff;
+        }
+        .btn-secondary {
+            background-color: #52c41a;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background-color: #73d13d;
+        }
+        .btn-group {
+            display: flex;
+            gap: 8px;
+        }
+        .content {
+            padding: 20px;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background-color: #fafafa;
+            padding: 12px;
+            text-align: left;
+            border-bottom: 2px solid #e8e8e8;
+            font-weight: 600;
+            color: #333;
+            position: relative;
+            cursor: pointer;
+            user-select: none;
+        }
+        th:hover {
+            background-color: #f0f0f0;
+        }
+        th .sort-icon {
+            margin-left: 4px;
+            color: #999;
+        }
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e8e8e8;
+            color: #666;
+            word-break: break-all;
+        }
+        tr:hover {
+            background-color: #fafafa;
+        }
+        .pagination {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            margin-top: 20px;
+            gap: 8px;
+        }
+        .pagination-info {
+            color: #666;
+            font-size: 14px;
+        }
+        .pagination-btn {
+            padding: 6px 12px;
+            border: 1px solid #d9d9d9;
+            background-color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .pagination-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .pagination-btn.active {
+            background-color: #1890ff;
+            color: white;
+            border-color: #1890ff;
+        }
+        .status-bar {
+            padding: 12px 20px;
+            background-color: #fafafa;
+            border-top: 1px solid #e8e8e8;
+            font-size: 14px;
+            color: #666;
+        }
+        .resource-kind-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .empty-data {
+            text-align: center;
+            padding: 60px;
+            color: #999;
+        }
+        .expandable {
+            max-width: 200px;
+            position: relative;
+        }
+        .expandable-content {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .expandable:hover .expandable-content {
+            position: absolute;
+            background-color: #fff;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            padding: 8px;
+            z-index: 10;
+            max-width: 400px;
+            white-space: normal;
+            word-break: break-word;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Kubernetes资源表格</h1>
+            <div class="filter-section">
+                <div class="filter-item">
+                    <label for="namespace-filter">命名空间</label>
+                    <select id="namespace-filter">
+                        <option value="all">所有命名空间</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label for="kind-filter">资源类型</label>
+                    <select id="kind-filter">
+                        <option value="all">所有类型</option>
+                        <option value="Pod">Pod</option>
+                        <option value="Service">Service</option>
+                        <option value="Deployment">Deployment</option>
+                        <option value="ReplicaSet">ReplicaSet</option>
+                        <option value="StatefulSet">StatefulSet</option>
+                        <option value="DaemonSet">DaemonSet</option>
+                        <option value="ConfigMap">ConfigMap</option>
+                        <option value="Secret">Secret</option>
+                        <option value="PersistentVolumeClaim">PersistentVolumeClaim</option>
+                        <option value="Namespace">Namespace</option>
+                        <option value="Node">Node</option>
+                        <option value="Label">Label</option>
+                    </select>
+                </div>
+                <div class="filter-item">
+                    <label for="search-input">搜索</label>
+                    <input type="text" id="search-input" placeholder="输入资源名称...">
+                </div>
+                <div class="btn-group">
+                    <button id="apply-filter-btn" class="btn btn-primary">应用过滤</button>
+                    <button id="refresh-btn" class="btn btn-secondary">刷新数据</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="table-container">
+                <table id="resource-table">
+                    <thead>
+                        <tr>
+                            <th data-field="name">资源名称 <span class="sort-icon">↕</span></th>
+                            <th data-field="kind">资源类型 <span class="sort-icon">↕</span></th>
+                            <th data-field="namespace">命名空间 <span class="sort-icon">↕</span></th>
+                            <th data-field="apiVersion">API版本 <span class="sort-icon">↕</span></th>
+                            <th data-field="group">API组 <span class="sort-icon">↕</span></th>
+                            <th data-field="labels">标签</th>
+                            <th data-field="uid">UID</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resource-table-body">
+                        <tr>
+                            <td colspan="7" class="loading">加载中...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="pagination">
+                <span class="pagination-info">共 <span id="total-count">0</span> 条记录</span>
+                <button id="prev-page" class="pagination-btn" disabled>上一页</button>
+                <div id="page-numbers"></div>
+                <button id="next-page" class="pagination-btn" disabled>下一页</button>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <span>当前显示: <span id="display-count">0</span> / <span id="filtered-count">0</span> 条记录</span>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let allResources = []; // 原始数据
+        let filteredResources = []; // 过滤后的数据
+        let currentPage = 1;
+        const pageSize = 20;
+        let sortField = '';
+        let sortOrder = 'asc';
+        
+        // 初始化页面
+        async function initPage() {
+            await fetchResources();
+            initEventListeners();
+        }
+        
+        // 从后端获取资源数据
+        async function fetchResources() {
+            try {
+                showLoading();
+                // 调用现有API获取所有资源节点
+                const response = await fetch('/k8s/resources/graph/nodes');
+                if (!response.ok) {
+                    throw new Error('获取资源数据失败');
+                }
+                
+                // 后端返回 { nodes: [...], edges: [...] }，这里提取 nodes
+                const data = await response.json();
+                const nodes = Array.isArray(data) ? data : (data.nodes || []);
+                
+                // 转换为表格需要的数据结构
+                allResources = nodes
+                    .filter(node => node.kind !== 'Label' && node.kind !== 'Namespace')
+                    .map(node => ({
+                        name: node.label,
+                        kind: node.kind,
+                        namespace: node.namespace || 'default',
+                        apiVersion: node.apiVersion || '-',
+                        group: node.group || '-',
+                        uid: node.id,
+                        labels: node.labels || {}
+                    }));
+                
+                // 复制到过滤数组
+                filteredResources = [...allResources];
+                
+                // 渲染表格
+                renderTable();
+                
+                // 更新状态
+                updateStatus();
+            } catch (error) {
+                console.error('获取资源数据失败:', error);
+                document.getElementById('resource-table-body').innerHTML = 
+                    '<tr><td colspan="7" class="empty-data">获取资源数据失败，请稍后重试</td></tr>';
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // 渲染表格
+        function renderTable() {
+            const tableBody = document.getElementById('resource-table-body');
+            
+            if (filteredResources.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="empty-data">没有找到匹配的资源</td></tr>';
+                return;
+            }
+            
+            // 排序
+            if (sortField) {
+                filteredResources.sort((a, b) => {
+                    let aVal = a[sortField];
+                    let bVal = b[sortField];
+                    
+                    if (typeof aVal === 'string' && typeof bVal === 'string') {
+                        aVal = aVal.toLowerCase();
+                        bVal = bVal.toLowerCase();
+                    }
+                    
+                    if (aVal < bVal) return sortOrder === 'asc' ? -1 : 1;
+                    if (aVal > bVal) return sortOrder === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
+            
+            // 分页
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = Math.min(startIndex + pageSize, filteredResources.length);
+            const pageData = filteredResources.slice(startIndex, endIndex);
+            
+            // 生成表格行
+            let html = '';
+            for (const resource of pageData) {
+                // 格式化标签
+                let labelsHtml = '{}';
+                if (typeof resource.labels === 'object' && resource.labels !== null) {
+                    labelsHtml = JSON.stringify(resource.labels);
+                } else if (typeof resource.labels === 'string') {
+                    labelsHtml = resource.labels;
+                }
+                
+                // 根据资源类型设置徽章颜色
+                const kindColor = getKindColor(resource.kind);
+                
+                html += `
+                <tr>
+                    <td>${resource.name}</td>
+                    <td>
+                        <span class="resource-kind-badge" style="background-color: ${kindColor}">
+                            ${resource.kind}
+                        </span>
+                    </td>
+                    <td>${resource.namespace}</td>
+                    <td>${resource.apiVersion}</td>
+                    <td>${resource.group}</td>
+                    <td class="expandable">
+                        <div class="expandable-content">${labelsHtml}</div>
+                    </td>
+                    <td>${resource.uid}</td>
+                </tr>
+                `;
+            }
+            
+            tableBody.innerHTML = html;
+            
+            // 更新分页
+            updatePagination();
+        }
+        
+        // 根据资源类型获取颜色
+        function getKindColor(kind) {
+            const colorMap = {
+                'Pod': '#ff7875',
+                'Service': '#52c41a',
+                'Deployment': '#1890ff',
+                'ReplicaSet': '#faad14',
+                'StatefulSet': '#722ed1',
+                'DaemonSet': '#13c2c2',
+                'ConfigMap': '#eb2f96',
+                'Secret': '#73d13d',
+                'PersistentVolumeClaim': '#fa8c16',
+                'Namespace': '#597ef7',
+                'Node': '#f759ab',
+                'Label': '#9254de' // 与图表视图保持一致的紫色
+            };
+            return colorMap[kind] || '#999';
+        }
+        
+        // 更新分页
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredResources.length / pageSize);
+            const pageNumbers = document.getElementById('page-numbers');
+            const prevPageBtn = document.getElementById('prev-page');
+            const nextPageBtn = document.getElementById('next-page');
+            
+            // 重置分页按钮
+            pageNumbers.innerHTML = '';
+            
+            // 更新前后页按钮状态
+            prevPageBtn.disabled = currentPage === 1;
+            nextPageBtn.disabled = currentPage === totalPages;
+            
+            // 生成页码按钮
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+            
+            if (endPage - startPage + 1 < maxVisiblePages) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+            
+            // 首页按钮
+            if (startPage > 1) {
+                addPageButton(1);
+                if (startPage > 2) {
+                    pageNumbers.appendChild(document.createTextNode('...'));
+                }
+            }
+            
+            // 中间页码按钮
+            for (let i = startPage; i <= endPage; i++) {
+                addPageButton(i);
+            }
+            
+            // 尾页按钮
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    pageNumbers.appendChild(document.createTextNode('...'));
+                }
+                addPageButton(totalPages);
+            }
+        }
+        
+        // 添加页码按钮
+        function addPageButton(pageNum) {
+            const pageNumbers = document.getElementById('page-numbers');
+            const button = document.createElement('button');
+            button.className = `pagination-btn ${pageNum === currentPage ? 'active' : ''}`;
+            button.textContent = pageNum;
+            button.addEventListener('click', () => {
+                currentPage = pageNum;
+                renderTable();
+            });
+            pageNumbers.appendChild(button);
+        }
+        
+        // 应用过滤
+        function applyFilter() {
+            const namespaceFilter = document.getElementById('namespace-filter').value;
+            const kindFilter = document.getElementById('kind-filter').value;
+            const searchTerm = document.getElementById('search-input').value.toLowerCase();
+            
+            // 重置当前页
+            currentPage = 1;
+            
+            // 应用过滤条件
+            filteredResources = allResources.filter(resource => {
+                // 命名空间过滤
+                // 对于Label类型资源，即使选择了特定命名空间，也应该保留它们
+                // 这样可以确保标签与相关资源一起显示
+                if (namespaceFilter !== 'all' && resource.kind !== 'Label' && resource.namespace !== namespaceFilter) {
+                    return false;
+                }
+                
+                // 资源类型过滤
+                if (kindFilter !== 'all' && resource.kind !== kindFilter) {
+                    return false;
+                }
+                
+                // 搜索过滤
+                if (searchTerm && !resource.name.toLowerCase().includes(searchTerm) && 
+                    !resource.kind.toLowerCase().includes(searchTerm) && 
+                    !resource.namespace.toLowerCase().includes(searchTerm)) {
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            // 重新渲染表格
+            renderTable();
+            
+            // 更新状态
+            updateStatus();
+        }
+        
+        // 更新状态信息
+        function updateStatus() {
+            document.getElementById('total-count').textContent = allResources.length;
+            document.getElementById('filtered-count').textContent = filteredResources.length;
+            
+            const startIndex = (currentPage - 1) * pageSize + 1;
+            const endIndex = Math.min(currentPage * pageSize, filteredResources.length);
+            document.getElementById('display-count').textContent = filteredResources.length > 0 ? 
+                `${startIndex}-${endIndex}` : '0';
+        }
+        
+        // 显示加载状态
+        function showLoading() {
+            document.getElementById('resource-table-body').innerHTML = 
+                '<tr><td colspan="7" class="loading">加载中...</td></tr>';
+        }
+        
+        // 隐藏加载状态
+        function hideLoading() {
+            // 由renderTable处理
+        }
+        
+        // 初始化事件监听器
+        function initEventListeners() {
+            // 应用过滤按钮
+            document.getElementById('apply-filter-btn').addEventListener('click', applyFilter);
+            
+            // 刷新按钮
+            document.getElementById('refresh-btn').addEventListener('click', fetchResources);
+            
+            // 分页按钮
+            document.getElementById('prev-page').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    renderTable();
+                }
+            });
+            
+            document.getElementById('next-page').addEventListener('click', () => {
+                const totalPages = Math.ceil(filteredResources.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    renderTable();
+                }
+            });
+            
+            // 搜索框回车事件
+            document.getElementById('search-input').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    applyFilter();
+                }
+            });
+            
+            // 表头排序
+            const headers = document.querySelectorAll('th[data-field]');
+            headers.forEach(header => {
+                header.addEventListener('click', () => {
+                    const field = header.getAttribute('data-field');
+                    
+                    // 如果点击的是当前排序字段，切换排序顺序
+                    if (sortField === field) {
+                        sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        sortField = field;
+                        sortOrder = 'asc';
+                    }
+                    
+                    // 更新排序图标
+                    headers.forEach(h => {
+                        const icon = h.querySelector('.sort-icon');
+                        if (h.getAttribute('data-field') === field) {
+                            icon.textContent = sortOrder === 'asc' ? '↑' : '↓';
+                        } else {
+                            icon.textContent = '↕';
+                        }
+                    });
+                    
+                    // 重新渲染表格
+                    renderTable();
+                });
+            });
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initPage);
+    </script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "templates": [
+    {
+      "name": "web-service",
+      "description": "适用于 Web 服务，中等负载",
+      "minReplicas": 2,
+      "maxReplicas": 10,
+      "targetCPU": 70,
+      "targetMemory": 80
+    },
+    {
+      "name": "api-gateway",
+      "description": "适用于 API 网关，高并发",
+      "minReplicas": 3,
+      "maxReplicas": 20,
+      "targetCPU": 60,
+      "targetMemory": 70
+    },
+    {
+      "name": "batch-job",
+      "description": "适用于批处理任务",
+      "minReplicas": 1,
+      "maxReplicas": 5,
+      "targetCPU": 80
+    },
+    {
+      "name": "database-proxy",
+      "description": "适用于数据库代理",
+      "minReplicas": 2,
+      "maxReplicas": 8,
+      "targetCPU": 75,
+      "targetMemory": 85
+    },
+    {
+      "name": "microservice",
+      "description": "适用于微服务，灵活扩缩容",
+      "minReplicas": 2,
+      "maxReplicas": 15,
+      "targetCPU": 65,
+      "targetMemory": 75
+    }
+  ]
+}

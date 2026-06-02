@@ -1,0 +1,83 @@
+# Mutong 周边基础设施配置
+#
+# 包含：Elasticsearch, OpenTelemetry, 自愈执行器
+# 使用方式：复制为 config.infra.yaml 并根据实际环境修改
+
+# Elasticsearch 日志查询配置
+elasticsearch:
+  addresses:
+    - "http://localhost:9200"
+  indexPattern: "k8s-logs-*"
+  serviceToIndex:
+    default: "k8s-logs-*"
+    kafka: "kafka-logs-*"
+    redis: "redis-logs-*"
+  username: ""
+  password: ""
+  timeout: 10
+
+# OpenTelemetry tracing configuration
+opentelemetry:
+  enabled: false
+  collectorURL: "http://localhost:4318"
+  serviceName: "mutong"
+  timeout: 30
+
+# 自愈执行器配置
+executor:
+  enabled: false
+  autoMode: false
+  # defaultNamespace: "default"       # 执行操作时未指定命名空间的默认值
+  # maxRestartCount: 3                # 单 Pod 最大重启次数限制（超了跳过）
+  # coolDownMinutes: 15               # 同一资源冷却时间（分钟），防止频繁执行
+  # gracePeriodSec: 30                # Pod 优雅终止等待秒数
+  # deleteGracePeriodSec: 5           # 强制删除 Pod 的等待秒数
+  # maxReplicas: 10                   # 扩缩容最大副本上限保护
+  # defaultHPA:                       # 创建 HPA 的默认参数
+  #   minReplicas: 2
+  #   maxReplicas: 10
+  #   targetCPU: 70
+  auditLog:
+    type: postgres
+    table: executor_audit_logs
+    # mysql:                          # AuditLog type 为 "mysql" 时使用
+    #   host: "localhost"
+    #   port: "3306"
+    #   user: "root"
+    #   password: ""
+    #   database: "mutong_audit"
+    #   table: "executor_audit_logs"
+  actions:
+    restart_pod:
+      risk: low
+      autoThreshold: 0.7
+    scale_deployment:
+      risk: medium
+      autoThreshold: 0.85
+    delete_pod:
+      risk: high
+      autoThreshold: 1.0
+    create_hpa:
+      risk: medium
+      autoThreshold: 0.9
+    update_hpa:
+      risk: medium
+      autoThreshold: 0.85
+    update_configmap:
+      risk: medium
+      autoThreshold: 0.9
+    update_secret:
+      risk: high
+      autoThreshold: 0.95
+    update_resource_limits:
+      risk: medium
+      autoThreshold: 0.85
+    update_deployment_image:
+      risk: high
+      autoThreshold: 0.9
+    update_annotations:
+      risk: low
+      autoThreshold: 0.7
+    update_labels:
+      risk: low
+      autoThreshold: 0.7

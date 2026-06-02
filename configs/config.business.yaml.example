@@ -1,0 +1,84 @@
+# Mutong 业务拓扑与权限配置
+#
+# 使用方式：复制为 config.business.yaml 并根据实际环境修改
+
+businessTopology:
+  enabled: true
+  # 静态 IP/域名到服务的映射（将 trace 中的 IP peer 转为 BusinessApp）
+  # 请根据实际环境修改 IP 和域名
+  knownServices:
+    "kafka":
+      name: "kafka"
+      namespace: "base"
+    "your-kafka-host":
+      name: "kafka"
+      namespace: "base"
+    "your-kafka-host:9092":
+      name: "kafka"
+      namespace: "base"
+  namespaceMapping:
+    "kube-system":
+      businessUnit: "基础设施"
+      team: "platform-team"
+      criticality: "critical"
+      environment: "production"
+
+    "monitoring":
+      businessUnit: "基础设施"
+      team: "observability-team"
+      criticality: "high"
+      environment: "production"
+
+    "ingress-nginx":
+      businessUnit: "基础设施"
+      team: "platform-team"
+      criticality: "high"
+      environment: "production"
+
+    "base":
+      businessUnit: "基础中间件"
+      team: "middleware-team"
+      criticality: "high"
+      environment: "production"
+
+    "nebula-cluster":
+      businessUnit: "数据基础设施"
+      team: "graphdb-team"
+      criticality: "high"
+      environment: "production"
+
+    "juicefs":
+      businessUnit: "存储基础设施"
+      team: "存储组"
+      criticality: "high"
+      environment: "production"
+
+    "redpanda":
+      businessUnit: "消息基础设施"
+      team: "middleware-team"
+      criticality: "high"
+      environment: "production"
+
+    "prod-*":
+      environment: "production"
+
+    "staging-*":
+      environment: "staging"
+
+    "dev-*":
+      environment: "development"
+
+# RBAC 角色权限配置
+roles:
+  enabled: true
+  defaultRole: "viewer"
+  roles:
+    - name: "admin"
+      permissions: ["read", "write", "execute", "admin"]
+      dashboard: "admin"
+    - name: "operator"
+      permissions: ["read", "execute"]
+      dashboard: "operator"
+    - name: "viewer"
+      permissions: ["read"]
+      dashboard: "viewer"

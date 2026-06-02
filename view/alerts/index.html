@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>告警管理 - 重明平台</title>
+    <link rel="stylesheet" href="/view/shared/common.css">
+    <script src="/view/jslibs/vue.global.min.js"></script>
+    <script src="/view/shared/api.js"></script>
+    <script src="/view/shared/components.js"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+        const { createApp, ref, onMounted, h, resolveComponent } = Vue;
+        createApp({ components: { NavBar: sharedComponents.NavBar },
+            setup() {
+                const alerts = ref([]), loading = ref(true), error = ref(null);
+                onMounted(async () => { try { const r = await API.alerts.list({ status: 'firing' }); alerts.value = (Array.isArray(r) ? r : r.alerts || []); } catch(e) { error.value = e.message; } finally { loading.value = false; } });
+                return { alerts, loading, error };
+            },
+            render() {
+                const NavBar = resolveComponent('NavBar');
+                const rows = this.alerts.map(a => h('tr', { key: a.fingerprint, style: 'border-bottom:1px solid #eee;' }, [
+                    h('td', { style: 'padding:8px;' }, a.labels?.alertname || '-'),
+                    h('td', { style: 'padding:8px;' }, a.labels?.severity || '-'),
+                    h('td', { style: 'padding:8px;' }, new Date(a.startsAt).toLocaleString())
+                ]));
+                if (!rows.length) rows.push(h('tr', [h('td', { colspan: 3, style: 'padding:16px;text-align:center;color:#999;' }, '暂无活跃告警')]));
+                return h('div', [
+                    h(NavBar),
+                    h('div', { class: 'container' }, [
+                        h('div', { class: 'dashboard-header' }, '告警管理'),
+                        this.loading
+                            ? h('div', { class: 'card' }, '加载中...')
+                            : this.error
+                                ? h('div', { class: 'card', style: 'color: var(--error-color)' }, `获取失败: ${this.error}`)
+                                : h('div', { class: 'card' }, [
+                                    h('p', null, `共 ${this.alerts.length} 条活跃告警`),
+                                    h('table', { width: '100%', style: 'margin-top:16px; border-collapse:collapse;' }, [
+                                        h('thead', null, [h('tr', { style: 'border-bottom:2px solid #eee;' }, [
+                                            h('th', { style: 'text-align:left;padding:8px;' }, '告警名称'),
+                                            h('th', { style: 'text-align:left;padding:8px;' }, '严重级别'),
+                                            h('th', { style: 'text-align:left;padding:8px;' }, '开始时间')
+                                        ])]),
+                                        h('tbody', null, rows)
+                                    ])
+                                ])
+                    ])
+                ]);
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

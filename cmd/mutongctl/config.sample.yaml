@@ -1,0 +1,32 @@
+# mutongctl 配置文件样例
+# 部署时复制到 ~/.mutong/config.yaml 或通过 --config 指定
+
+# 当前使用的 context
+current-context: production
+
+contexts:
+  production:
+    # Mutong 服务地址
+    server: https://mutong.example.com
+    # 认证 Token
+    token: your-api-token-here
+    # 默认 K8s 命名空间
+    namespace: default
+    # 管理员密钥（executor 等危险操作需要，对应服务端 MUTONG_ADMIN_KEY）
+    admin_key: your-admin-key-here
+
+  staging:
+    server: https://mutong-staging.example.com
+    token: your-staging-token
+    namespace: staging
+
+  local:
+    server: http://localhost:8888
+    token: ""
+    namespace: default
+
+# 环境变量覆盖（优先级高于配置文件）
+# export MUTONG_SERVER=https://mutong.example.com
+# export MUTONG_TOKEN=your-token
+# export MUTONG_NAMESPACE=default
+# export MUTONG_ADMIN_KEY=your-admin-key

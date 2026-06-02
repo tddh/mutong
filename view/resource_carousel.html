@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resource Carousel</title>
+    <style>
+        .carousel {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            overflow: hidden;
+        }
+        .carousel-inner {
+            display: flex;
+            transition: transform 0.5s ease-in-out;
+        }
+        .carousel-item {
+            min-width: 100%;
+            padding: 20px;
+            box-sizing: border-box;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            margin: 0 10px;
+        }
+        .carousel-control {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            padding: 10px;
+            cursor: pointer;
+        }
+        .carousel-control.prev {
+            left: 10px;
+        }
+        .carousel-control.next {
+            right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="carousel">
+        <div class="carousel-inner" id="carouselInner">
+            <!-- 轮播项将在这里动态插入 -->
+        </div>
+        <button class="carousel-control prev" onclick="prevSlide()">Previous</button>
+        <button class="carousel-control next" onclick="nextSlide()">Next</button>
+    </div>
+
+    <script>
+        let resources = [];
+        let currentIndex = 0;
+
+        // 从后端获取资源数据
+        async function fetchResources() {
+            try {
+                const response = await fetch('http://localhost:8888/k8s/resources/nginx-service');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                console.log('Fetched data:', data); // 调试信息
+                resources = data;
+                updateCarousel();
+            } catch (error) {
+                console.error('Error fetching resources:', error);
+                document.getElementById('carouselInner').innerHTML = '<div class="no-data">Error fetching resources</div>';
+            }
+        }
+        
+        function updateCarousel() {
+            const carouselInner = document.getElementById('carouselInner');
+            carouselInner.innerHTML = '';
+            if (resources.length === 0) {
+                carouselInner.innerHTML = '<div class="no-data">No data found for resource with given identifier</div>';
+                return;
+            }
+            for (let i = 0; i < 3; i++) {
+                const index = (currentIndex + i) % resources.length;
+                const resource = resources[index];
+                const item = document.createElement('div');
+                item.className = 'carousel-item';
+                item.innerHTML = `
+                    <h3>${resource.Name}</h3>
+                    <p>Kind: ${resource.Kind}</p>
+                    <p>API Version: ${resource.APIVersion}</p>
+                    <p>Group: ${resource.Group}</p>
+                    <p>UID: ${resource.Uid}</p>
+                    <p>Labels: ${resource.Labels}</p>
+                    <p>Namespace: ${resource.NameSpace}</p>
+                    <p>Resource Define: ${resource.ResourceDefine}</p>
+                `;
+                carouselInner.appendChild(item);
+            }
+        }
+
+        function nextSlide() {
+            currentIndex = (currentIndex + 1) % resources.length;
+            updateCarousel();
+        }
+
+        function prevSlide() {
+            currentIndex = (currentIndex - 1 + resources.length) % resources.length;
+            updateCarousel();
+        }
+
+        // 初始化轮播
+        fetchResources();
+
+        // 自动轮播
+        setInterval(nextSlide, 3000);
+    </script>
+</body>
+</html>

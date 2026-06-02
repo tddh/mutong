@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes资源关系图测试</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        }
+        .container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+        #graph-wrapper {
+            flex: 1;
+            background-color: #f5f5f5;
+        }
+        #node-detail {
+            width: 300px;
+            padding: 20px;
+            background-color: white;
+            border-left: 1px solid #e0e0e0;
+            overflow-y: auto;
+            display: none;
+        }
+        #detail-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .filter-section {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+        }
+        .filter-option {
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .filter-option input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        .btn {
+            padding: 8px 16px;
+            background-color: #fff;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            margin-right: 8px;
+        }
+        .btn:hover {
+            color: #1890ff;
+            border-color: #1890ff;
+        }
+        .btn-primary {
+            background-color: #1890ff;
+            color: white;
+            border-color: #1890ff;
+        }
+        .btn-primary:hover {
+            background-color: #40a9ff;
+            color: white;
+            border-color: #40a9ff;
+        }
+        h3 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            font-size: 16px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="graph-wrapper"></div>
+        <div id="node-detail">
+            <h3 id="detail-title"></h3>
+            <div id="detail-content"></div>
+        </div>
+    </div>
+    
+    <!-- 过滤区域 -->
+    <div class="filter-section">
+        <h3>过滤选项</h3>
+        <div class="filter-option">
+            <input type="checkbox" id="include-deleted-resources">
+            <label for="include-deleted-resources">包含已删除资源</label>
+        </div>
+        <button id="refresh-btn" class="btn btn-primary">刷新</button>
+        <button id="layout-btn" class="btn">重新布局</button>
+    </div>
+    
+    <!-- 引入G6库 -->
+    <script src="jslibs/g6.min.js"></script>
+    
+    <script>
+        // 全局变量
+        let graph = null;
+        let nodes = [];
+        let edges = [];
+        let filteredNodes = [];
+        let filteredEdges = [];
+        
+        // 获取模拟数据
+        function getMockData(includeDeleted = false) {
+            // 基础节点数据
+            const baseNodes = [
+                { id: '1', label: 'nginx-deployment', kind: 'Deployment', namespace: 'default', apiVersion: 'apps/v1' },
+                { id: '2', label: 'nginx-service', kind: 'Service', namespace: 'default', apiVersion: 'v1' },
+                { id: '3', label: 'nginx-pod-1', kind: 'Pod', namespace: 'default', apiVersion: 'v1' },
+                { id: '4', label: 'nginx-pod-2', kind: 'Pod', namespace: 'default', apiVersion: 'v1' },
+                { id: '5', label: 'config-map', kind: 'ConfigMap', namespace: 'default', apiVersion: 'v1' }
+            ];
+            
+            // 已删除的节点数据
+            const deletedNodes = [
+                { id: '6', label: 'old-deployment', kind: 'Deployment', namespace: 'default', apiVersion: 'apps/v1', is_deleted: true },
+                { id: '7', label: 'old-pod', kind: 'Pod', namespace: 'default', apiVersion: 'v1', is_deleted: true }
+            ];
+            
+            // 边数据
+            const baseEdges = [
+                { source: '1', target: '3', label: 'controls' },
+                { source: '1', target: '4', label: 'controls' },
+                { source: '2', target: '3', label: 'selects' },
+                { source: '2', target: '4', label: 'selects' },
+                { source: '1', target: '5', label: 'uses' }
+            ];
+            
+            // 已删除资源相关的边
+            const deletedEdges = [
+                { source: '6', target: '7', label: 'controls' }
+            ];
+            
+            // 根据是否包含已删除资源来组合数据
+            const allNodes = includeDeleted ? [...baseNodes, ...deletedNodes] : baseNodes;
+            const allEdges = includeDeleted ? [...baseEdges, ...deletedEdges] : baseEdges;
+            
+            return { nodes: allNodes, edges: allEdges };
+        }
+        
+        // 显示节点详情
+        function showNodeDetail(node) {
+            const detailEl = document.getElementById('node-detail');
+            const titleEl = document.getElementById('detail-title');
+            const contentEl = document.getElementById('detail-content');
+            
+            // 如果节点已删除，在标题中显示删除状态
+            const title = node.is_deleted 
+                ? `${node.kind}: ${node.label} (已删除)` 
+                : `${node.kind}: ${node.label}`;
+            
+            titleEl.textContent = title;
+            
+            let content = `
+                <p><strong>名称:</strong> ${node.label}</p>
+                <p><strong>类型:</strong> ${node.kind}</p>
+                <p><strong>API版本:</strong> ${node.apiVersion || '-'}</p>
+                <p><strong>命名空间:</strong> ${node.namespace || 'default'}</p>
+                <p><strong>UID:</strong> ${node.id}</p>
+                <p><strong>删除状态:</strong> ${node.is_deleted ? '已删除' : '正常'}</p>
+            `;
+            
+            contentEl.innerHTML = content;
+            detailEl.style.display = 'block';
+        }
+        
+        // 隐藏节点详情
+        function hideNodeDetail() {
+            document.getElementById('node-detail').style.display = 'none';
+        }
+        
+        // 定义自定义节点类型：带X号的圆形节点
+        function registerCustomNodeType() {
+            // 确保G6库已加载
+            if (typeof G6 === 'undefined') {
+                console.error('G6库未定义，无法注册自定义节点类型');
+                return false;
+            }
+            
+            // 注册自定义节点类型 - 不使用继承，直接实现完整的节点绘制
+            G6.registerNode('custom-circle-with-x', {
+                // 绘制节点
+                draw: function(cfg, group) {
+                    // 获取样式配置和节点大小
+                    const style = cfg.style || {};
+                    const size = cfg.size || 30; // 使用完整大小值，而不是半径
+                    const radius = size / 2;
+                    
+                    // 绘制圆形背景
+                    const circle = group.addShape('circle', {
+                        attrs: {
+                            x: 0,
+                            y: 0,
+                            r: radius,
+                            fill: style.fill || '#ffeeee', // 更淡的背景色
+                            stroke: style.stroke || '#ff9999', // 更淡的边框色
+                            lineWidth: style.lineWidth || 3,
+                            opacity: style.opacity || 0.8,
+                            strokeDasharray: style.strokeDasharray || '5 2'
+                        },
+                        name: 'circle-shape'
+                    });
+                    
+                    // 绘制X号
+                    const xSize = radius * 0.6; // X号大小为圆半径的60%
+                    const xColor = style.stroke || '#ff9999'; // 更淡的X号颜色
+                    
+                    // 绘制X号的第一条斜线
+                    group.addShape('line', {
+                        attrs: {
+                            x1: -xSize,
+                            y1: -xSize,
+                            x2: xSize,
+                            y2: xSize,
+                            stroke: xColor,
+                            lineWidth: 3, // 增加线宽使X号更明显
+                            lineCap: 'round'
+                        },
+                        name: 'x-line-1'
+                    });
+                    
+                    // 绘制X号的第二条斜线
+                    group.addShape('line', {
+                        attrs: {
+                            x1: xSize,
+                            y1: -xSize,
+                            x2: -xSize,
+                            y2: xSize,
+                            stroke: xColor,
+                            lineWidth: 3,
+                            lineCap: 'round'
+                        },
+                        name: 'x-line-2'
+                    });
+                    
+                    // 返回整个组而不是单个形状，确保所有元素都被正确包含
+                    return group;
+                }
+            }); // 不继承，直接实现
+            
+            return true;
+        }
+        
+        // 初始化图表
+        function initGraph() {
+            // 确保G6库已加载
+            if (typeof G6 === 'undefined') {
+                console.error('G6库未定义，无法初始化图表');
+                alert('G6库加载失败，无法初始化图表');
+                return false;
+            }
+            
+            // 注册自定义节点类型
+            registerCustomNodeType();
+            
+            // 创建G6实例
+            graph = new G6.Graph({
+                container: 'graph-wrapper',
+                width: document.getElementById('graph-wrapper').clientWidth,
+                height: document.getElementById('graph-wrapper').clientHeight,
+                modes: {
+                    default: ['drag-canvas', 'zoom-canvas', 'drag-node']
+                },
+                defaultNode: {
+                    type: 'circle',
+                    size: 30,
+                    labelCfg: {
+                        position: 'bottom',
+                        style: {
+                            fontSize: 12
+                        }
+                    },
+                    style: {
+                        fill: '#8c8c8c',
+                        stroke: '#666',
+                        lineWidth: 2
+                    }
+                },
+                defaultEdge: {
+                    type: 'line',
+                    style: {
+                        stroke: '#91d5ff',
+                        lineWidth: 1.5,
+                        endArrow: {
+                            path: 'M 0,0 L 8,4 L 8,-4 Z',
+                            fill: '#91d5ff'
+                        }
+                    },
+                    labelCfg: {
+                        style: {
+                            fontSize: 10,
+                            background: {
+                                fill: 'rgba(255, 255, 255, 0.9)',
+                                padding: [2, 5]
+                            }
+                        }
+                    }
+                },
+                layout: {
+                    type: 'force',
+                    preventOverlap: true,
+                    linkDistance: 100,
+                    nodeStrength: -300,
+                    edgeStrength: 0.1
+                }
+            });
+            
+            // 监听节点点击事件
+            graph.on('node:click', function(ev) {
+                const node = ev.item.get('model');
+                showNodeDetail(node);
+            });
+            
+            // 监听画布点击事件，隐藏详情
+            graph.on('canvas:click', function() {
+                hideNodeDetail();
+            });
+        }
+        
+        // 渲染图表
+        function renderGraph() {
+            if (!graph) {
+                initGraph();
+            } else {
+                // 清空现有图表
+                graph.clear();
+            }
+            
+            // 为已删除资源添加特殊标识
+            const nodesWithDeletedMark = filteredNodes.map(node => {
+                const newNode = { ...node };
+                
+                // 如果节点已删除，添加特殊标识
+                if (node.is_deleted) {
+                    // 使用带X号的自定义圆形节点
+                    newNode.type = 'custom-circle-with-x';
+                    
+                    // 在标签中添加删除标识
+                    newNode.label = node.label + ' (已删除)';
+                    
+                    // 设置醒目的样式
+                    newNode.style = {
+                        fill: '#ffeeee',  // 更淡的背景色
+                        stroke: '#ff9999', // 更淡的边框色
+                        lineWidth: 3,     // 加粗边框
+                        opacity: 0.8,     // 适当透明度
+                        strokeDasharray: '5 2' // 虚线边框
+                    };
+                    
+                    // 自定义标签样式
+                    newNode.labelCfg = {
+                        style: {
+                            fill: '#ff6666', // 更淡的标签颜色
+                            fontSize: 12,
+                            fontWeight: 'bold'
+                        }
+                    };
+                }
+                
+                return newNode;
+            });
+            
+            // 设置数据
+            graph.data({
+                nodes: nodesWithDeletedMark,
+                edges: filteredEdges
+            });
+            
+            // 渲染图表
+            graph.render();
+        }
+        
+        // 获取节点数据（使用模拟数据）
+        function fetchNodes(includeDeleted = false) {
+            try {
+                // 获取模拟数据
+                const mockData = getMockData(includeDeleted);
+                nodes = mockData.nodes;
+                edges = mockData.edges;
+                
+                return true;
+            } catch (error) {
+                console.error('获取节点数据时出错:', error);
+                alert('获取节点数据失败: ' + error.message);
+                return false;
+            }
+        }
+        
+        // 应用过滤器（这里简化了过滤逻辑）
+        function applyFilter() {
+            // 初始时不过滤
+            filteredNodes = [...nodes];
+            filteredEdges = [...edges];
+            
+            // 重新渲染图表
+            renderGraph();
+        }
+        
+        // 切换布局
+        function changeLayout() {
+            let layoutConfig = {
+                type: 'force',
+                preventOverlap: true,
+                linkDistance: 100,
+                nodeStrength: -300,
+                edgeStrength: 0.1
+            };
+            
+            graph.updateLayout(layoutConfig);
+        }
+        
+        // 初始化应用
+        function initApp() {
+            // 获取数据，默认不包含已删除资源
+            const includeDeletedCheckbox = document.getElementById('include-deleted-resources');
+            const includeDeleted = includeDeletedCheckbox ? includeDeletedCheckbox.checked : false;
+            
+            fetchNodes(includeDeleted);
+            applyFilter();
+        }
+        
+        // 绑定事件处理程序
+        function bindEvents() {
+            // 刷新按钮
+            document.getElementById('refresh-btn').addEventListener('click', function() {
+                // 获取当前是否包含已删除资源的状态
+                const includeDeletedCheckbox = document.getElementById('include-deleted-resources');
+                const includeDeleted = includeDeletedCheckbox ? includeDeletedCheckbox.checked : false;
+                
+                fetchNodes(includeDeleted);
+                applyFilter();
+            });
+            
+            // 重新布局按钮
+            document.getElementById('layout-btn').addEventListener('click', function() {
+                changeLayout();
+            });
+            
+            // 包含已删除资源复选框变化时刷新数据
+            document.getElementById('include-deleted-resources').addEventListener('change', function() {
+                const includeDeleted = this.checked;
+                fetchNodes(includeDeleted);
+                applyFilter();
+            });
+        }
+        
+        // 页面加载完成后初始化应用
+        window.onload = function() {
+            initApp();
+            bindEvents();
+        };
+    </script>
+</body>
+</html>

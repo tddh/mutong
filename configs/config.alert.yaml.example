@@ -1,0 +1,175 @@
+# Mutong 告警收敛系统配置（推理层）
+#
+# 使用方式：复制为 config.alert.yaml 并根据实际环境修改
+
+alert:
+  # 路由配置
+  routing:
+    defaultReceiver: "default"
+    defaultChannel: "slack"
+    defaultSeverity: "warning"
+    severityMapping:
+      critical: 1
+      error: 2
+      warning: 3
+      info: 4
+    teamRouting: {}
+    businessContextRouting: {}
+    serviceRouting: {}
+    severityChannelRules:
+      critical: "pagerduty"
+      error: "slack"
+      warning: "slack"
+      info: "slack"
+
+    # 声明式抑制规则
+    inhibition:
+      rules: []
+      exceptions:
+        severity: ["critical"]
+        criticality: ["P0"]
+
+    # Stakeholder 影响通知
+    impactRouting:
+      enabled: false
+      minOwnerSeverity: "error"
+      defaultStakeholderChannel: "slack"
+      stakeholderDefaultReceiver: "default"
+      stakeholderRepeatInterval: 1800
+      stakeholderSeverityDowngrade:
+        critical: "error"
+        error: "warning"
+        warning: "info"
+      maxStakeholderHops: 1
+      excludeTeamSelf: true
+
+    # 告警分组
+    aggregation:
+      groupBy: ["alertname", "namespace"]
+      groupWait: 10s
+      groupInterval: 30s
+
+  # 通知器配置
+  notifier:
+    slackWebhookUrl: ""
+    pagerdutyApiKey: ""
+    dingtalkWebhook: ""
+    emailConfig:
+      smtpHost: "smtp.example.com"
+      smtpPort: 587
+      smtpUser: "alerts@example.com"
+      smtpPassword: "your-password"
+      fromAddress: "alerts@example.com"
+    channelEnabled:
+      slack: true
+      pagerduty: true
+      dingtalk: false
+      email: true
+
+  # 抑制器配置
+  suppressor:
+    ruleChains: []
+    timeWindowSeconds: 300
+    maxDepth: 3
+    severityExceptions: ["critical"]
+    criticalityExceptions: ["P0"]
+    maxAlertAgeMinutes: 120
+    cleanupIntervalSec: 60
+
+  # 清理配置
+  cleanup:
+    cleanupInterval: 1
+    retentionDuration: 4320
+
+  # 存储配置
+  storage:
+    type: postgres
+
+  # 统计持久化间隔（秒）
+  statsSyncInterval: 10
+
+# ============================================================
+# 外部告警源配置（alertSources）
+# ============================================================
+# 每种外部系统定义一个告警源，通过 labelMapping 将外部标签映射到内部标准标签。
+# enrichmentStrategy 决定了如何通过 NebulaGraph 反查业务归属。
+#
+# 富化策略说明:
+#   node_affinity:        host/node → K8s Node → Pod → BusinessApp（物理节点桥接）
+#   service_graph:        serviceName → BusinessApp → CallsApp 上下游（服务拓扑桥接）
+#   direct_business_app:  appName → BusinessApp 直接匹配
+#   business_labels:      直接从标签提取 team/businessUnit/appName（Prometheus 侧已打标签）
+#   none:                 不做业务富化，仅透传
+#
+# 指纹生成:
+#   fingerprintKeys 指定用于生成唯一指纹的标签键，默认使用 alertname + instance。
+
+alertSources:
+  sources:
+    # 示例1: Ceph 存储告警（node_affinity 策略）
+    - name: "ceph-prod"
+      type: "ceph"
+      displayName: "Ceph 生产集群"
+      labelMapping:
+        alertname: "alert_name"
+        severity: "severity"
+        node: "host"
+        custom_pool: "pool"
+        custom_osd_id: "osd_id"
+      enrichmentStrategy: "node_affinity"
+      businessMapping:
+        team: "storage-team"
+        criticality: "high"
+      fingerprintKeys:
+        - "alert_name"
+        - "host"
+        - "osd_id"
+
+    # 示例2: Kafka 中间件告警（service_graph 策略）
+    - name: "kafka-broker"
+      type: "middleware"
+      displayName: "Kafka 消息队列"
+      labelMapping:
+        alertname: "alert_name"
+        severity: "severity"
+        serviceName: "kafka"
+        custom_topic: "topic"
+        custom_consumer_group: "consumer_group"
+      enrichmentStrategy: "service_graph"
+      businessMapping:
+        team: "data-platform-team"
+        criticality: "high"
+        serviceType: "middleware"
+      fingerprintKeys:
+        - "alert_name"
+        - "topic"
+        - "consumer_group"
+
+    # 示例3: 通用应用层告警（direct_business_app 策略）
+    - name: "app-generic"
+      type: "application"
+      displayName: "通用应用告警"
+      labelMapping:
+        alertname: "alert_name"
+        severity: "severity"
+        appName: "service"
+      enrichmentStrategy: "direct_business_app"
+      businessMapping:
+        criticality: "medium"
+      fingerprintKeys:
+        - "alert_name"
+        - "service"
+
+    # 示例4: Prometheus 侧已打标签（business_labels 策略 - 路径 B）
+    - name: "prometheus-labeled"
+      type: "prometheus"
+      displayName: "Prometheus 标签告警"
+      labelMapping:
+        alertname: "alertname"
+        severity: "severity"
+      enrichmentStrategy: "business_labels"
+      businessMapping:
+        serviceType: "application"
+      fingerprintKeys:
+        - "alertname"
+        - "instance"

@@ -1,0 +1,32 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - gosec
+    - govet
+    - staticcheck
+    - errcheck
+    - gosimple
+    - ineffassign
+    - unused
+    - misspell
+    - gofmt
+    - goimports
+  disable-all: true
+
+linters-settings:
+  gosec:
+    excludes:
+      - G104  # 未处理 error（errcheck 已覆盖）
+      - G402  # TLS InsecureSkipVerify（内网服务连接需要）
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+    - path: _test\.go
+      linters:
+        - gosec
+      text: "G101|G103|G106|G107|G110|G111"

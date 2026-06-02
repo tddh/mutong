@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错误测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            margin: 20px;
+            background-color: #f0f2f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+        button {
+            padding: 8px 16px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        .error-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff2f0;
+            border: 1px solid #ffccc7;
+            border-radius: 3px;
+            color: #f5222d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>错误测试页面</h1>
+        <p>这个页面用于帮助定位 'reader is not defined' 错误。</p>
+        
+        <h2>测试1: 基本JavaScript功能</h2>
+        <button onclick="testBasicJS()">运行基本JS测试</button>
+        <pre id="basic-result"></pre>
+        
+        <h2>测试2: 模拟resource_graph.html环境</h2>
+        <button onclick="testGraphEnvironment()">运行环境测试</button>
+        <pre id="env-result"></pre>
+        
+        <h2>测试3: 检查浏览器环境</h2>
+        <button onclick="checkBrowserEnv()">检查浏览器环境</button>
+        <pre id="browser-result"></pre>
+        
+        <h2>测试4: 测试fetch请求</h2>
+        <button onclick="testFetch()">测试fetch请求</button>
+        <pre id="fetch-result"></pre>
+        
+        <div class="error-info" id="error-display" style="display: none;">
+            <h3>错误信息:</h3>
+            <div id="error-details"></div>
+        </div>
+    </div>
+
+    <script>
+        // 全局错误处理
+        window.addEventListener('error', function(event) {
+            console.error('捕获到错误:', event.error);
+            const errorDisplay = document.getElementById('error-display');
+            const errorDetails = document.getElementById('error-details');
+            
+            errorDetails.innerHTML = `
+错误信息: ${event.error.message}
+错误类型: ${event.error.name}
+错误发生在: ${event.filename || '未知文件'} 第 ${event.lineno || '未知'} 行
+堆栈信息: ${event.error.stack || '无'}
+            `;
+            
+            errorDisplay.style.display = 'block';
+            
+            // 在控制台输出更详细的信息
+            console.log('--- 详细错误信息 ---');
+            console.log('错误对象:', event.error);
+            console.log('错误事件:', event);
+            console.log('--- 结束错误信息 ---');
+        });
+        
+        // 测试1: 基本JavaScript功能
+        function testBasicJS() {
+            const result = document.getElementById('basic-result');
+            try {
+                // 测试基本数据类型和函数
+                const testVar = 'Hello World';
+                const testArray = [1, 2, 3];
+                const testObject = {name: 'Test', value: 42};
+                
+                // 测试forEach方法
+                let sum = 0;
+                testArray.forEach(item => sum += item);
+                
+                result.textContent = `
+变量测试: ${testVar}
+数组测试: [${testArray}] 总和: ${sum}
+对象测试: {name: "${testObject.name}", value: ${testObject.value}}
+测试通过！基本JavaScript功能正常。
+                `;
+            } catch (error) {
+                result.textContent = `基本JavaScript测试失败: ${error.message}`;
+                console.error('基本JS测试错误:', error);
+            }
+        }
+        
+        // 测试2: 模拟resource_graph.html环境
+        function testGraphEnvironment() {
+            const result = document.getElementById('env-result');
+            try {
+                // 模拟resource_graph.html中的一些全局变量
+                window.graph = null;
+                window.nodes = [];
+                window.edges = [];
+                window.filteredNodes = [];
+                window.filteredEdges = [];
+                
+                // 测试数组操作
+                window.nodes = [{id: '1', name: 'Test1'}, {id: '2', name: 'Test2'}];
+                
+                // 测试forEach方法
+                let nodeNames = [];
+                window.nodes.forEach(node => nodeNames.push(node.name));
+                
+                result.textContent = `
+环境变量已设置
+nodes数组: [${nodeNames.join(', ')}]
+forEach测试通过！
+                `;
+            } catch (error) {
+                result.textContent = `环境测试失败: ${error.message}`;
+                console.error('环境测试错误:', error);
+            }
+        }
+        
+        // 测试3: 检查浏览器环境
+        function checkBrowserEnv() {
+            const result = document.getElementById('browser-result');
+            
+            // 检查是否有reader变量
+            const hasReader = typeof reader !== 'undefined';
+            
+            // 检查全局对象中的属性
+            const globalProps = Object.keys(window).filter(key => 
+                !key.startsWith('_') && key.length > 0
+            ).sort();
+            
+            // 检查是否有加载的外部脚本
+            const scripts = Array.from(document.scripts).map(script => script.src || '内联脚本');
+            
+            result.textContent = `
+浏览器信息: ${navigator.userAgent}
+reader变量存在: ${hasReader}
+全局属性数量: ${globalProps.length}
+已加载脚本数量: ${scripts.length}
+
+前20个全局属性: ${globalProps.slice(0, 20).join(', ')}
+
+提示: 在浏览器控制台中可以输入 'window' 查看所有全局变量
+            `;
+        }
+        
+        // 测试4: 测试fetch请求
+        function testFetch() {
+            const result = document.getElementById('fetch-result');
+            
+            result.textContent = '正在发送测试请求...';
+            
+            // 测试相对路径和绝对路径
+            Promise.all([
+                testSingleFetch('/k8s/resources/graph/nodes', '相对路径请求')
+            ]).then(results => {
+                result.textContent = results.join('\n\n');
+            }).catch(error => {
+                result.textContent = `fetch测试失败: ${error.message}`;
+            });
+        }
+        
+        async function testSingleFetch(url, label) {
+            try {
+                const response = await fetch(url);
+                const data = await response.json();
+                return `${label} (${url}):\n状态码: ${response.status}\n数据类型: ${Array.isArray(data) ? '数组' : typeof data}\n数据长度: ${Array.isArray(data) ? data.length : 'N/A'}`;
+            } catch (error) {
+                return `${label} (${url}):\n请求失败: ${error.message}`;
+            }
+        }
+        
+        console.log('错误测试页面已加载');
+    </script>
+</body>
+</html>

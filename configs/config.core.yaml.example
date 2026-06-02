@@ -1,0 +1,105 @@
+# Mutong 基础设施配置
+#
+# 包含：Kubernetes, PostgreSQL, Nebula, Kafka, Cache, 日志
+# 环境变量覆盖见 README.md
+#
+# 使用方式：复制为 config.core.yaml 并根据实际环境修改
+
+# Kubernetes 配置
+# 支持两种方式（clusters 优先）：
+#   1. 多集群声明式：为每个集群指定独立的 kubeconfig 文件
+#   2. 单文件模式（向后兼容）：kubernetes.config 指定一个含多集群的 kubeconfig
+kubernetes:
+  # 单文件模式（向后兼容，与 clusters 二选一）
+  # config: kubeconfig
+
+  # 多集群模式（推荐）
+  clusters:
+    # - name: "prod-bj"               # 集群标识，全局唯一
+    #   config: kubeconfig-prod.yaml   # kubeconfig 文件路径
+    #   context: ""                    # 可选，指定 context（默认 current-context）
+    #   enable: true                   # 可选，默认 true
+
+    # - name: "staging"
+    #   config: kubeconfig-stg.yaml
+    #   enable: true
+
+# PostgreSQL 数据库配置
+postgres:
+  host: localhost
+  port: 5432
+  user: mutong
+  pass: ""  # 通过 MUTONG_DB_PASSWORD 环境变量设置
+  database: mutong
+  pool: 100
+
+# Nebula Graph 图数据库配置
+nebula:
+  host: "localhost"
+  port: 9669
+  user: "root"
+  pass: ""  # 通过 MUTONG_NEBULA_PASS 环境变量设置
+  space: "mutong"
+
+# Nebula 已删除资源定时清理配置
+nebulaCleanup:
+  enabled: true
+  retentionDays: 7
+  cleanupInterval: 24
+  batchSize: 1000
+
+# Kafka 消息队列配置
+kafka:
+  broker: "localhost:9092"
+  topic: mutong30
+  group: mutong30
+  deadLetterTopic: ""
+  maxRetries: 5
+  retryBackoffMs: 100
+  maxRecordBytes: 52428800
+  maxBrokerWriteBytes: 104857600
+  fetchMaxBytes: 52428800
+  fetchMaxPartBytes: 52428800
+  # Trace 专用配置
+  traceTopic: mutong_trace_01
+  traceGroup: mutong_trace_v30
+  # Business Workload 专用配置
+  businessWorkloadTopic: business-workloads
+  businessWorkloadGroup: mutong-business-workload
+  workloadKinds:
+    - Deployment
+    - StatefulSet
+    - DaemonSet
+    - Job
+    - CronJob
+
+# 标签过滤配置
+excludeLabels:
+  - "app.kubernetes.io/managed-by: Helm"
+  - "app.kubernetes.io/component: controller-eligible"
+  - "apps.kubernetes.io/pod-index"
+
+# BigCache 缓存配置
+cache:
+  lifeTime: 40
+  cleanWindow: 10
+  enable: true
+  hardMaxCacheSize: 4096
+  shards: 256
+  resyncInterval: 30
+
+# 日志配置
+log:
+  level: info
+  path: logs
+  max_size: 100
+  max_age: 30
+
+# HTTP 服务器配置
+server:
+  port: 8888
+  readTimeoutSec: 60
+  writeTimeoutSec: 60
+  idleTimeoutSec: 120
+  shutdownTimeoutSec: 30
+  rateLimitPerSec: 100

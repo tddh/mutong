@@ -1,0 +1,39 @@
+# Mutong 诊断、巡检与可观测性配置
+#
+# 使用方式：复制为 config.diagnosis.yaml 并根据实际环境修改
+
+# 诊断配置
+diagnosis:
+  enabled: true
+  confidenceThreshold: 0.8
+  cacheTTL: 3600 
+  resultRetentionDays: 90
+  statsSyncInterval: 10
+  llm:
+    provider: "openai"
+    model: "gpt-4"
+    apiKey: ""  # 通过 MUTONG_LLM_API_KEY 环境变量设置
+    baseURL: "https://api.openai.com"
+    endpoint: "/chat/completions"
+    timeout: 120
+    embedding:
+      model: "text-embedding-3-small"
+      apiKey: ""   # 为空时依次取 MUTONG_EMBEDDING_API_KEY → MUTONG_LLM_API_KEY
+      baseURL: "https://api.openai.com"
+  session:
+    enabled: true
+    redis: "localhost:6379"
+    password: ""
+    db: 9
+    ttl: 1800
+
+# 巡检配置
+inspection:
+  enabled: true
+  cronSpec: "0 */6 * * *"
+
+# Prometheus 指标查询配置
+prometheus:
+  enabled: true
+  url: "http://localhost:9090"
+  timeout: 30

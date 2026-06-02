@@ -1,0 +1,51 @@
+html, body, #terminal {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0f1220;
+  color: #e6e6e6;
+}
+.terminal-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-toolbar {
+  height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  gap: 12px;
+  background: #1b1b2b;
+  color: #ddd;
+}
+.terminal-toolbar select {
+  background: #2a2a46;
+  color: #fff;
+  border: 1px solid #444;
+  padding: 4px 8px;
+}
+.terminal-toolbar button {
+  background: #4a9eff;
+  color: #fff;
+  border: none;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.terminal-toolbar button:hover {
+  background: #3a8eef;
+}
+.status {
+  margin-left: auto;
+  padding-right: 8px;
+  font-family: monospace;
+}
+.status[style*="green"] { color: #4caf50; }
+.status[style*="red"] { color: #f44336; }
+.status[style*="gray"] { color: #9e9e9e; }
+#terminal {
+  flex: 1;
+  min-height: 0;
+}

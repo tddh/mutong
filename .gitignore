@@ -1,0 +1,71 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Node.js dependencies
+node_modules/
+view/node_modules/
+view/dist/
+view/bun.lock
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+kubeconfig
+kubeconfig-*
+mutong
+/mutongctl
+main
+cmd/mutong-test
+pprof/*
+
+# Build artifacts
+*.tar.gz
+*-linux-amd64
+*-linux-arm64
+*-darwin-amd64
+*-darwin-arm64
+*-windows-amd64.exe
+
+# Session state
+SESSION_STATE.md
+
+# Local tool directories
+.sisyphus/
+docs/.obsidian/
+
+# Reference documents (not part of codebase)
+重明平台_TXT/
+/.worktrees
+artifacts/
+artifacts/*
+*.log
+tmp_*
+tmp/*
+deploy/*.tgz
+deploy/beyla/
+deploy/opentelemetry-collector/
+
+# 本地配置文件（含敏感凭据，通过 .envrc.local + direnv 注入）
+config.yaml
+.envrc.local
+.obsidian/
+
+# 拆分配置（含内网 IP，通过 configs/*.example 提供模板）
+configs/config.*.yaml
+
+# SkyWalking agent 本地配置（含内网 IP，通过 agent.yaml.example 提供模板）
+agent.yaml
+
+# Swagger 自动生成文件
+docs/docs.go
+docs/swagger.json
+docs/swagger.yaml
+{{output_dir}}/

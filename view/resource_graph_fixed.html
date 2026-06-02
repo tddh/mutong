@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kubernetes资源关系图</title>
+    <!-- 引入G6库 - 使用本地文件 -->
+    <script src="/view/jslibs/g6.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background-color: #f0f2f5;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+        .header {
+            background-color: #fff;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header h1 {
+            font-size: 20px;
+            color: #333;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .main-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 280px;
+            background-color: #fff;
+            padding: 16px;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
+            overflow-y: auto;
+        }
+        .filter-section {
+            margin-bottom: 20px;
+        }
+        .filter-section h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .filter-section select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .graph-container {
+            flex: 1;
+            position: relative;
+            background-color: #fff;
+        }
+        #graph-wrapper {
+            width: 100%;
+            height: 100%;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 16px 32px;
+            border-radius: 4px;
+            display: none;
+        }
+        .btn {
+            padding: 6px 16px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background-color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            border-color: #1890ff;
+            color: #1890ff;
+        }
+        .btn-primary {
+            background-color: #1890ff;
+            color: white;
+            border-color: #1890ff;
+        }
+        .btn-primary:hover {
+            background-color: #40a9ff;
+            border-color: #40a9ff;
+            color: white;
+        }
+        .status-bar {
+            background-color: #f0f0f0;
+            padding: 8px 16px;
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            gap: 20px;
+        }
+        #node-detail {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 320px;
+            background-color: white;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            padding: 16px;
+            z-index: 100;
+            display: none;
+        }
+        #detail-title {
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 12px;
+            color: #333;
+            border-bottom: 1px solid #f0f0f0;
+            padding-bottom: 8px;
+        }
+        #detail-content {
+            font-size: 14px;
+            color: #666;
+        }
+        #detail-content p {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Kubernetes资源关系图</h1>
+            <div class="controls">
+                <button id="refresh-btn" class="btn">刷新</button>
+                <button id="layout-btn" class="btn">重新布局</button>
+                <select id="layout-select">
+                    <option value="force">力导向布局</option>
+                    <option value="circular">环形布局</option>
+                    <option value="dagre">层次布局</option>
+                    <option value="concentric">同心圆布局</option>
+                </select>
+                <button id="zoom-in-btn" class="btn">放大</button>
+                <button id="zoom-out-btn" class="btn">缩小</button>
+                <button id="fit-btn" class="btn">适配视图</button>
+            </div>
+        </div>
+        
+        <div class="main-content">
+            <div class="sidebar">
+                <div class="filter-section">
+                    <h3>过滤条件</h3>
+                    <select id="namespace-filter" multiple>
+                        <option value="all">所有命名空间</option>
+                    </select>
+                    <select id="kind-filter" multiple>
+                        <option value="Pod">Pod</option>
+                        <option value="Service">Service</option>
+                        <option value="Deployment">Deployment</option>
+                        <option value="ReplicaSet">ReplicaSet</option>
+                        <option value="StatefulSet">StatefulSet</option>
+                        <option value="DaemonSet">DaemonSet</option>
+                        <option value="ConfigMap">ConfigMap</option>
+                        <option value="Secret">Secret</option>
+                        <option value="PersistentVolumeClaim">PersistentVolumeClaim</option>
+                        <option value="Namespace">Namespace</option>
+                        <option value="Node">Node</option>
+                        <option value="Label">Label</option>
+                    </select>
+                    <button id="apply-filter-btn" class="btn btn-primary">应用过滤</button>
+                </div>
+            </div>
+            
+            <div class="graph-container">
+                <div id="graph-wrapper"></div>
+                <div id="loading">加载中...</div>
+                <div id="node-detail">
+                    <div id="detail-title"></div>
+                    <div id="detail-content"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            <span>节点数: <span id="node-count">0</span></span>
+            <span>关系数: <span id="edge-count">0</span></span>
+            <span>当前布局: <span id="current-layout">力导向布局</span></span>
+        </div>
+    </div>
+
+    <script>
+        // 全局错误处理
+        window.addEventListener('error', function(event) {
+            const errorDiv = document.createElement('div');
+            errorDiv.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                background: #f44336;
+                color: white;
+                padding: 10px;
+                z-index: 10000;
+                font-family: monospace;
+                white-space: pre-wrap;
+            `;
+            errorDiv.innerHTML = `
+错误信息: ${event.error.message}
+错误发生在: ${event.filename} 第 ${event.lineno} 行
+错误类型: ${event.error.name}
+            `;
+            document.body.insertBefore(errorDiv, document.body.firstChild);
+        });
+        
+        // 全局变量
+        let graph = null;
+        let nodes = [];
+        let edges = [];
+        let filteredNodes = [];
+        let filteredEdges = [];
+        
+        // 显示加载状态
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+        
+        // 隐藏加载状态
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        // 显示节点详情
+        function showNodeDetail(node) {
+            const detailEl = document.getElementById('node-detail');
+            const titleEl = document.getElementById('detail-title');
+            const contentEl = document.getElementById('detail-content');
+            
+            titleEl.textContent = `${node.kind}: ${node.label}`;
+            
+            let content = '';
+            
+            // 针对Label类型节点的特殊处理
+            if (node.kind === 'Label') {
+                content = `
+                    <p><strong>标签键:</strong> ${node.key || '-'}</p>
+                    <p><strong>标签值:</strong> ${node.value || '-'}</p>
+                    <p><strong>UID:</strong> ${node.id}</p>
+                `;
+            } else {
+                // 普通资源节点的显示内容
+                content = `
+                    <p><strong>名称:</strong> ${node.label}</p>
+                    <p><strong>类型:</strong> ${node.kind}</p>
+                    <p><strong>API版本:</strong> ${node.apiVersion || '-'}</p>
+                    <p><strong>所属组:</strong> ${node.group || '-'}</p>
+                    <p><strong>命名空间:</strong> ${node.namespace || 'default'}</p>
+                    <p><strong>UID:</strong> ${node.id}</p>
+                `;
+            }
+            
+            contentEl.innerHTML = content;
+            detailEl.style.display = 'block';
+        }
+        
+        // 隐藏节点详情
+        function hideNodeDetail() {
+            document.getElementById('node-detail').style.display = 'none';
+        }
+        
+        // 更新状态栏信息
+        function updateStatusBar() {
+            document.getElementById('node-count').textContent = filteredNodes.length;
+            document.getElementById('edge-count').textContent = filteredEdges.length;
+            
+            const layoutSelect = document.getElementById('layout-select');
+            const layoutText = layoutSelect.options[layoutSelect.selectedIndex].text;
+            document.getElementById('current-layout').textContent = layoutText;
+        }
+        
+        // 初始化图表
+        function initGraph() {
+            // 确保G6库已加载
+            if (typeof G6 === 'undefined') {
+                console.error('G6库未定义，无法初始化图表');
+                alert('G6库加载失败，无法初始化图表');
+                return false;
+            }
+            
+            // 创建G6实例
+            graph = new G6.Graph({
+                container: 'graph-wrapper',
+                width: document.getElementById('graph-wrapper').clientWidth,
+                height: document.getElementById('graph-wrapper').clientHeight,
+                modes: {
+                    default: ['drag-canvas', 'zoom-canvas', 'drag-node']
+                },
+                defaultNode: {
+                    type: 'circle',
+                    size: 30,
+                    labelCfg: {
+                        position: 'bottom',
+                        style: {
+                            fontSize: 12
+                        }
+                    },
+                    style: {
+                        fill: '#8c8c8c',
+                        stroke: '#666',
+                        lineWidth: 2
+                    }
+                },
+                defaultEdge: {
+                    type: 'line',
+                    style: {
+                        stroke: '#91d5ff',
+                        lineWidth: 1.5,
+                        endArrow: {
+                            path: 'M 0,0 L 8,4 L 8,-4 Z',
+                            fill: '#91d5ff'
+                        }
+                    },
+                    labelCfg: {
+                        style: {
+                            fontSize: 10,
+                            background: {
+                                fill: 'rgba(255, 255, 255, 0.9)',
+                                padding: [2, 5]
+                            }
+                        }
+                    }
+                },
+                layout: {
+                    type: 'force',
+                    preventOverlap: true,
+                    linkDistance: 100,
+                    nodeStrength: -300,
+                    edgeStrength: 0.1
+                }
+            });
+            
+            // 监听节点点击事件
+            graph.on('node:click', function(ev) {
+                const node = ev.item.get('model');
+                showNodeDetail(node);
+            });
+            
+            // 监听画布点击事件，隐藏详情
+            graph.on('canvas:click', function() {
+                hideNodeDetail();
+            });
+        }
+        
+        // 渲染图表
+        function renderGraph() {
+            if (!graph) {
+                initGraph();
+            } else {
+                // 清空现有图表
+                graph.clear();
+            }
+            
+            // 检查节点ID唯一性
+            const nodeIds = new Set();
+            const duplicateIds = new Set();
+            filteredNodes.forEach(node => {
+                if (nodeIds.has(node.id)) {
+                    duplicateIds.add(node.id);
+                } else {
+                    nodeIds.add(node.id);
+                }
+            });
+            
+            // 为重复ID添加后缀以确保唯一性
+            const idMapping = {};
+            if (duplicateIds.size > 0) {
+                console.warn('发现重复的节点ID:', Array.from(duplicateIds).join(', '));
+                const idCounts = {};
+                filteredNodes = filteredNodes.map(node => {
+                    if (duplicateIds.has(node.id)) {
+                        idCounts[node.id] = (idCounts[node.id] || 0) + 1;
+                        const newId = `${node.id}-${idCounts[node.id]}`;
+                        idMapping[node.id] = newId; // 记录原始ID和新ID的映射关系
+                        return {...node, id: newId};
+                    }
+                    idMapping[node.id] = node.id; // 原始ID和新ID相同
+                    return node;
+                });
+            }
+            
+            // 验证和修复边数据
+            const validNodeIds = new Set(filteredNodes.map(node => node.id));
+            const originalEdgeCount = filteredEdges.length;
+            
+            // 过滤出有效的边（确保有source和target属性）
+            const validEdges = filteredEdges.filter(edge => {
+                if (!edge || typeof edge !== 'object') {
+                    console.warn('跳过无效的边数据:', edge);
+                    return false;
+                }
+                if (!edge.source || !edge.target) {
+                    console.warn('缺少source或target属性的边:', edge);
+                    return false;
+                }
+                // 如果节点ID被重命名，更新边引用
+                if (idMapping[edge.source]) edge.source = idMapping[edge.source];
+                if (idMapping[edge.target]) edge.target = idMapping[edge.target];
+                
+                // 检查source和target是否存在于节点列表中
+                const isValid = validNodeIds.has(edge.source) && validNodeIds.has(edge.target);
+                if (!isValid) {
+                    console.warn('边的source或target节点不存在:', edge);
+                }
+                return isValid;
+            });
+            
+            if (validEdges.length < originalEdgeCount) {
+                console.log(`过滤掉了 ${originalEdgeCount - validEdges.length} 条无效边，保留了 ${validEdges.length} 条有效边`);
+            }
+            
+            // 设置数据
+            graph.data({
+                nodes: filteredNodes,
+                edges: validEdges
+            });
+            
+            // 渲染图表
+            graph.render();
+            
+            // 更新状态栏
+            updateStatusBar();
+        }
+        
+        // 获取所有资源节点和关系
+        async function fetchNodes() {
+            try {
+                const response = await fetch('/k8s/resources/graph/nodes');
+                if (!response.ok) {
+                    throw new Error('获取节点数据失败');
+                }
+                // 解析返回的完整数据，包含nodes和edges
+                const data = await response.json();
+                nodes = data.nodes || [];
+                edges = data.edges || [];
+                
+                // 更新命名空间选项
+                updateNamespaceOptions();
+                
+                return true;
+            } catch (error) {
+                console.error('获取节点数据时出错:', error);
+                alert('获取节点数据失败: ' + error.message);
+                return false;
+            }
+        }
+        
+        // 获取所有资源关系（保留此函数以保持兼容性，但实际使用fetchNodes获取完整数据）
+        async function fetchEdges() {
+            return true; // 不需要实际调用，因为fetchNodes已经获取了edges数据
+        }
+        
+        // 更新命名空间选项
+        function updateNamespaceOptions() {
+            const namespaceFilter = document.getElementById('namespace-filter');
+            namespaceFilter.innerHTML = '<option value="all">所有命名空间</option>';
+            
+            const namespaces = new Set();
+            nodes.forEach(node => {
+                if (node.namespace) {
+                    namespaces.add(node.namespace);
+                }
+            });
+            
+            namespaces.forEach(ns => {
+                const option = document.createElement('option');
+                option.value = ns;
+                option.textContent = ns;
+                namespaceFilter.appendChild(option);
+            });
+        }
+        
+        // 应用过滤器
+        function applyFilter() {
+            const namespaceFilter = document.getElementById('namespace-filter');
+            const kindFilter = document.getElementById('kind-filter');
+            
+            const selectedNamespace = namespaceFilter.value;
+            const selectedKinds = Array.from(kindFilter.selectedOptions).map(option => option.value);
+            
+            // 过滤节点
+            filteredNodes = nodes.filter(node => {
+                // 对于Label类型节点，即使选择了特定命名空间，也应该保留它们
+                // 这样可以确保标签与相关资源一起显示
+                const namespaceMatch = selectedNamespace === 'all' || node.kind === 'Label' || node.namespace === selectedNamespace;
+                const kindMatch = selectedKinds.length === 0 || selectedKinds.includes(node.kind);
+                return namespaceMatch && kindMatch;
+            });
+            
+            // 过滤边（只保留两端节点都在过滤后的节点列表中的边，并验证source和target存在）
+            const nodeIds = new Set(filteredNodes.map(node => node.id));
+            filteredEdges = edges.filter(edge => {
+                // 确保edge.source和edge.target存在且是有效的节点ID
+                return edge && edge.source && edge.target && 
+                       nodeIds.has(edge.source) && nodeIds.has(edge.target);
+            });
+            
+            // 重新渲染图表
+            renderGraph();
+        }
+        
+        // 切换布局
+        function changeLayout(layoutType) {
+            let layoutConfig;
+            
+            switch(layoutType) {
+                case 'circular':
+                    layoutConfig = {
+                        type: 'circular',
+                        radius: null,
+                        startAngle: (3 / 2) * Math.PI,
+                        endAngle: (7 / 2) * Math.PI
+                    };
+                    break;
+                case 'dagre':
+                    layoutConfig = {
+                        type: 'dagre',
+                        rankdir: 'TB',
+                        align: 'UL',
+                        nodesep: 40,
+                        ranksep: 100
+                    };
+                    break;
+                case 'concentric':
+                    layoutConfig = {
+                        type: 'concentric',
+                        maxLevelDiff: 0.5,
+                        sortBy: 'degree'
+                    };
+                    break;
+                default:
+                    layoutConfig = {
+                        type: 'force',
+                        preventOverlap: true,
+                        linkDistance: 100,
+                        nodeStrength: -300,
+                        edgeStrength: 0.1
+                    };
+            }
+            
+            graph.updateLayout(layoutConfig);
+            updateStatusBar();
+        }
+        
+        // 初始化应用
+        async function initApp() {
+            showLoading();
+            
+            // 获取数据
+            const nodesSuccess = await fetchNodes();
+            const edgesSuccess = await fetchEdges();
+            
+            if (nodesSuccess && edgesSuccess) {
+                // 初始时不过滤
+                filteredNodes = [...nodes];
+                filteredEdges = [...edges];
+                
+                // 渲染图表
+                renderGraph();
+            }
+            
+            hideLoading();
+        }
+        
+        // 绑定事件处理程序
+        function bindEvents() {
+            // 刷新按钮
+            document.getElementById('refresh-btn').addEventListener('click', async function() {
+                showLoading();
+                await Promise.all([fetchNodes(), fetchEdges()]);
+                filteredNodes = [...nodes];
+                filteredEdges = [...edges];
+                renderGraph();
+                hideLoading();
+            });
+            
+            // 重新布局按钮
+            document.getElementById('layout-btn').addEventListener('click', function() {
+                const layoutSelect = document.getElementById('layout-select');
+                changeLayout(layoutSelect.value);
+            });
+            
+            // 布局选择器
+            document.getElementById('layout-select').addEventListener('change', function() {
+                changeLayout(this.value);
+            });
+            
+            // 放大按钮
+            document.getElementById('zoom-in-btn').addEventListener('click', function() {
+                graph.zoom(1.2);
+            });
+            
+            // 缩小按钮
+            document.getElementById('zoom-out-btn').addEventListener('click', function() {
+                graph.zoom(0.8);
+            });
+            
+            // 适配视图按钮
+            document.getElementById('fit-btn').addEventListener('click', function() {
+                graph.fitView();
+            });
+            
+            // 应用过滤按钮
+            document.getElementById('apply-filter-btn').addEventListener('click', applyFilter);
+            
+            // 窗口大小变化时重新调整图表大小
+            window.addEventListener('resize', function() {
+                if (graph) {
+                    graph.changeSize(
+                        document.getElementById('graph-wrapper').clientWidth,
+                        document.getElementById('graph-wrapper').clientHeight
+                    );
+                }
+            });
+        }
+        
+        // 页面加载完成后初始化
+        window.addEventListener('load', function() {
+            if (typeof G6 === 'undefined') {
+                console.error('G6库加载失败，无法初始化应用');
+                alert('G6库加载失败，应用功能受限');
+                return;
+            }
+            
+            bindEvents();
+            initApp();
+        });
+    </script>
+</body>
+</html>

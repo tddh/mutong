@@ -1,0 +1,165 @@
+-- =====================================================
+-- 重明 (Mutong) NebulaGraph Schema DDL
+-- 执行: just init-nebula 或 ./update_nebula.sh
+-- =====================================================
+
+CREATE SPACE IF NOT EXISTS `mutong` (partition_num = 3, replica_factor = 2, vid_type = FIXED_STRING(128));
+USE `mutong`;
+
+-- =====================================================
+-- K8sResource TAG
+-- =====================================================
+
+CREATE TAG IF NOT EXISTS K8sResource (
+    uid string,
+    name string,
+    api_group string,
+    labels string,
+    name_space string,
+    resource_define string,
+    kind string,
+    api_version string,
+    cluster string,
+    is_deleted bool default false,
+    deleted_at timestamp
+) comment = 'k8s资源';
+
+CREATE TAG INDEX IF NOT EXISTS `name_space` on `K8sResource`(`name_space`(128));
+CREATE TAG INDEX IF NOT EXISTS `kind_name_space` on `K8sResource`(`kind`(128), `name_space`(128));
+CREATE TAG INDEX IF NOT EXISTS `kind_name` on `K8sResource`(`kind`(128), `name`(128));
+CREATE TAG INDEX IF NOT EXISTS `kind_name_name_space` on `K8sResource`(`kind`(128), `name`(128), `name_space`(128));
+CREATE TAG INDEX IF NOT EXISTS `is_deleted_idx` on `K8sResource`(`is_deleted`);
+CREATE TAG INDEX IF NOT EXISTS `kind_is_deleted_idx` on `K8sResource`(`kind`(128), `is_deleted`);
+
+-- =====================================================
+-- Label TAG
+-- =====================================================
+
+CREATE TAG IF NOT EXISTS Label (
+    uid string,
+    key string,
+    value string
+) comment = 'Kubernetes资源标签';
+
+CREATE TAG INDEX IF NOT EXISTS `label_key` ON `Label`(`key`(128));
+CREATE TAG INDEX IF NOT EXISTS `label_value` ON `Label`(`value`(128));
+CREATE TAG INDEX IF NOT EXISTS `label_key_value` ON `Label`(`key`(128), `value`(128));
+
+-- =====================================================
+-- EDGE: 资源归属与管理
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS OwnedBy (
+    owner_kind string,
+    owner_uid string,
+    api_version string,
+    controller_type bool,
+    owner_name string
+) comment = '资源被owner管理';
+
+CREATE EDGE INDEX `owner_id` on `OwnedBy`(`owner_uid`(128));
+CREATE EDGE INDEX `owner_kind` on `OwnedBy`(`owner_kind`(128));
+CREATE EDGE INDEX `owner_name` on `OwnedBy`(`owner_name`(128));
+
+CREATE EDGE IF NOT EXISTS BelongsTo () COMMENT = '资源属于 Namespace 或其他父级';
+
+-- =====================================================
+-- EDGE: Pod 调度与挂载
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS RunsOn () COMMENT = 'Pod 运行在 Node 上';
+CREATE EDGE IF NOT EXISTS MountsConfig () COMMENT = 'Pod 挂载 ConfigMap';
+CREATE EDGE IF NOT EXISTS MountsSecret () COMMENT = 'Pod 挂载 Secret / Ingress 挂载 secret';
+CREATE EDGE IF NOT EXISTS MountsPVC () COMMENT = 'Pod 挂载 PVC';
+
+-- =====================================================
+-- EDGE: 存储
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS BoundToPV () COMMENT = 'PVC 绑定 PV';
+CREATE EDGE IF NOT EXISTS BelongsToStorageClass () COMMENT = 'PV 属于 StorageClass';
+CREATE EDGE IF NOT EXISTS ScRefCSIDriver () COMMENT = 'StorageClass 使用 CSIDriver';
+CREATE EDGE IF NOT EXISTS RegisteredON () COMMENT = 'CSINode 注册在 Node';
+
+-- =====================================================
+-- EDGE: 服务发现
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS SvcToEp () COMMENT = 'Service 暴露 Endpoint';
+CREATE EDGE IF NOT EXISTS EpToPods () COMMENT = 'Endpoint 暴露 Pod';
+CREATE EDGE IF NOT EXISTS SvcToPods () COMMENT = 'Service 暴露 Pod';
+CREATE EDGE IF NOT EXISTS EpSliceToPods () COMMENT = 'EndpointSlice 指向 Pod';
+
+-- =====================================================
+-- EDGE: Ingress
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS BelongsToIngressClass () COMMENT = '绑定到 IngressClass';
+CREATE EDGE IF NOT EXISTS RoutesToSvc () COMMENT = '路由到 Service';
+CREATE EDGE IF NOT EXISTS UsesTLS () COMMENT = '使用 TLS';
+CREATE EDGE IF NOT EXISTS Uses () COMMENT = '通用引用，如 Ingress 使用 Service';
+
+-- =====================================================
+-- EDGE: RBAC
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS ServiceAccount () COMMENT = 'Pod 挂载的 ServiceAccount';
+CREATE EDGE IF NOT EXISTS BelongsToClusterRole () COMMENT = 'ClusterRoleBinding 关联 ClusterRole';
+CREATE EDGE IF NOT EXISTS BelongsToRole () COMMENT = 'RoleBinding 关联 Role';
+CREATE EDGE IF NOT EXISTS BelongsToUser () COMMENT = 'RoleBinding 关联 User';
+CREATE EDGE IF NOT EXISTS BelongsToGroup () COMMENT = 'RoleBinding 关联 Group';
+CREATE EDGE IF NOT EXISTS BelongsToServiceAccount () COMMENT = 'RoleBinding 关联 ServiceAccount';
+
+-- =====================================================
+-- EDGE: PDB
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS PdbToPod () COMMENT = 'PDB 关联 Pod';
+
+-- =====================================================
+-- EDGE: 事件 (24h TTL)
+-- =====================================================
+
+CREATE EDGE `Events` (
+    `eventTime` TIMESTAMP,
+    `note` string,
+    `reason` string,
+    `reportingController` string,
+    `type` string
+) comment = '事件',
+  TTL_DURATION = 86400,
+  TTL_COL = "eventTime";
+
+-- =====================================================
+-- EDGE: 标签关联
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS BelongsToLabel () COMMENT = '资源拥有标签';
+
+-- =====================================================
+-- 业务拓扑 Schema
+-- =====================================================
+
+CREATE TAG IF NOT EXISTS BusinessApp (
+    uid string,
+    app_name string,
+    namespace string,
+    criticality string,
+    environment string,
+    team string,
+    business_unit string
+) comment = '业务应用实体';
+
+CREATE TAG INDEX IF NOT EXISTS `bizapp_name` ON `BusinessApp`(`app_name`(128));
+CREATE TAG INDEX IF NOT EXISTS `bizapp_ns` ON `BusinessApp`(`namespace`(128));
+
+CREATE EDGE IF NOT EXISTS BelongsToApp () comment = '资源属于业务应用';
+CREATE EDGE IF NOT EXISTS CallsApp () comment = '应用间调用关系（仅存骨架，指标由 Prometheus 承担）';
+
+CREATE EDGE IF NOT EXISTS AutoScales (
+    scale_target_kind string,
+    scale_target_name string,
+    min_replicas int,
+    max_replicas int,
+    current_replicas int
+) COMMENT = 'HPA 自动扩缩容目标';

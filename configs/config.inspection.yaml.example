@@ -1,0 +1,8 @@
+# Mutong 巡检配置
+# 巡检规则由 Go 代码层注册（6 类规则：单点故障、镜像审计、证书过期、数据孤岛、资源配额、监控盲点）
+#
+# 使用方式：复制为 config.inspection.yaml
+
+inspection:
+  enabled: true
+  cronSpec: "0 */6 * * *"

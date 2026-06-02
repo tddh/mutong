@@ -463,25 +463,33 @@ executor:
 
 ### 前置条件
 
+#### 必需组件（缺失将导致进程无法启动）
+
 | 组件 | 版本 | 用途 | 安装 |
 |------|------|------|------|
 | Go | 1.25+ | 后端编译运行 | [go.dev/dl](https://go.dev/dl/) |
 | Bun | 1.x+ | 前端包管理 | [bun.sh](https://bun.sh/) |
-| PostgreSQL | 15+（含 pgvector） | 关系数据 & 向量检索 | [postgresql.org](https://www.postgresql.org/download/) |
-| NebulaGraph | 3.x+ | 图数据库资源拓扑 | [nebula-graph.io](https://www.nebula-graph.io/download) |
-| Kafka | 2.x+ | 消息队列异步处理 | [kafka.apache.org](https://kafka.apache.org/downloads) |
-| Kubernetes 集群 | — | 资源采集 & 自愈执行 | 需 kubeconfig 访问权限 |
+| NebulaGraph | 3.8+ | 图数据库 — 存储 K8s 资源拓扑关系 | [nebula-graph.io](https://www.nebula-graph.io/download) |
+| Kafka（或 Redpanda） | Kafka 2.x+ / Redpanda v24+ | 消息队列 — K8s 资源变更事件异步传输 | [kafka.apache.org](https://kafka.apache.org/downloads) |
+| BigCache | 内嵌，自动初始化 | 内存缓存 — 高性能分片缓存 | — |
 
-**可选组件**（按需启用，不安装则对应功能不可用）：
+> ⚠️ **NebulaGraph 和 Kafka 是硬依赖**，连接失败会导致进程退出。缺少 PostgreSQL 时服务可以降级启动，但大部分持久化功能不可用（见下方降级说明）。
 
-| 组件 | 用途 |
-|------|------|
-| Prometheus | 指标查询、告警规则 |
-| Elasticsearch | 日志检索 |
-| Redis | 诊断会话缓存 |
-| Beyla (eBPF) + OTel Collector | 业务拓扑自动发现（参见 [deploy/](deploy/)） |
-| SkyWalking OAP | 链路追踪后端 |
-| Pyroscope | 持续性能分析 |
+#### 可选组件（按需启用，缺失时对应功能自动降级）
+
+| 组件 | 版本 | 用途 | 未安装时的行为 |
+|------|------|------|---------------|
+| PostgreSQL | 15+（含 pgvector） | 关系数据 & 向量检索 | ⚠️ 降级为内存存储：用户/角色/告警统计/诊断结果/复盘报告不持久化，向量语义搜索不可用 |
+| Kubernetes 集群 | — | 资源采集 & 自愈执行 | ⚠️ K8s 相关功能（拓扑可视化、终端、自愈）不可用，平台仍可处理告警和诊断 |
+| Redis | 7+ | 诊断会话缓存 & 验证码 & 登录限流 | ⚠️ 诊断会话降级为内存模式（重启丢失），验证码和登录限流不可用 |
+| Prometheus | 2.x+ | 指标查询（CPU/内存/网络/重启次数） | ⚠️ 指标查询 API 返回 503，诊断结果不含指标快照 |
+| Elasticsearch | 8.x+ | 日志检索 | ⚠️ ES 日志查询不可用，K8s API 直查日志仍可用 |
+| LLM API Key | — | AI 诊断深度分析 & 复盘报告生成 | ⚠️ 诊断自动降级为纯规则路径（规则引擎 + 拓扑分析），仍可给出置信度评分 |
+| Beyla + OTel Collector | Beyla 2.x+ | eBPF 自动发现服务调用关系 → 业务拓扑 | ⚠️ 业务拓扑和调用关系图不可用 |
+| SkyWalking OAP | 9.x+ | 链路追踪后端 | ⚠️ 分布式追踪查询不可用 |
+| Pyroscope | — | 持续性能分析 | ⚠️ 性能火焰图不可用 |
+
+> 💡 **最小化启动**：仅需 NebulaGraph + Kafka + Go/Bun 即可编译运行。在 `configs/config.core.yaml` 中配置这两个组件即可启动进程。其他组件按需逐步添加，每添加一个即启用一类功能。
 
 ### 快速开始
 
@@ -509,10 +517,23 @@ just run-debug
 
 ### Docker 部署
 
+> **前置条件**：Docker Engine 20.10+ 和 Docker Compose v2+
+
 ```bash
 docker compose up -d
 ```
-一键启动全部服务（PostgreSQL + NebulaGraph + Kafka/Redpanda + Redis + Mutong）。详见 `docker-compose.yml`。
+
+一键启动以下服务（使用 Redpanda 替代 Apache Kafka，兼容 Kafka 协议）：
+
+| 服务 | 镜像 | 用途 |
+|------|------|------|
+| PostgreSQL 16 + pgvector | `pgvector/pgvector:pg16` | 关系数据 & 向量检索 |
+| NebulaGraph | `vesoft/nebula-graphd:v3.8.0` | 图数据库拓扑存储 |
+| Redpanda (Kafka 兼容) | `vectorized/redpanda:v24.2.5` | 消息队列 |
+| Redis | `redis:7-alpine` | 会话缓存 |
+| Mutong | 本地构建 | 主应用 |
+
+详见 `docker-compose.yml`。注意：部署到生产环境前请修改各服务默认密码。
 
 ### 部署业务拓扑组件
 

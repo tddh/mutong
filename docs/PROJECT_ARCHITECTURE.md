@@ -1846,6 +1846,8 @@ SkyWalking OAP / OTel Collector
   Mutong → Prometheus (指标查询) + ES (日志查询) + K8s API (资源查询)
 ```
 
+> **组件分级**：NebulaGraph 和 Kafka 为**必需组件**（缺失导致进程退出）。PostgreSQL、Redis、Elasticsearch、Prometheus 为**可选组件**（缺失时对应功能自动降级，不影响启动）。详细说明见 [README.md#前置条件](../README.md#前置条件)。
+
 ---
 
 ## 十三、资源关系与拓扑详情
@@ -2271,7 +2273,7 @@ resourceProfiles:
 |------|------|----------|
 | 单集群 Kubeconfig | 当前仅支持单 kubeconfig 文件 | 多集群通过 Beyla+OTel Collector 间接支持 |
 | 内存存储 | 告警默认使用 sync.Map 内存存储 | 可切换 PostgreSQL (storage.type: postgres) |
-| LLM 依赖 | AI 诊断初始依赖 LLM (MiniMax/OpenAI) | 纯规则降级路径 + 置信度阈值门控 |
+| LLM 依赖 | AI 诊断深度分析需 LLM (MiniMax/OpenAI/Claude) | 纯规则降级路径：未配置 LLM 时自动使用规则引擎 + 拓扑分析，仍可给出置信度评分 |
 | 无水平扩展 | 单实例部署，无分布式协调 | 通过 Kafka 消费组支持多实例 |
 | Informer 内存 | Agent 工具查询 Informer 缓存，可能滞后 | list_k8s_resources 实时查询作为补充 |
 

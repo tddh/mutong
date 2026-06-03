@@ -7,6 +7,7 @@ import (
 
 	"github.com/allegro/bigcache/v3"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -708,5 +709,540 @@ func TestProcessNamespaceRelationship_NoNamespace(t *testing.T) {
 
 	if len(mockDB.calls) != 0 {
 		t.Errorf("Expected no DB calls for cluster-scoped resource, got %d", len(mockDB.calls))
+	}
+}
+
+// --- Tests for processNetworkPolicyRelationship ---
+
+func TestProcessNP_PodSelectorMatchLabels(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-1", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "nginx",
+					},
+				},
+			},
+		},
+	}
+
+	svc.processNetworkPolicyRelationship(obj)
+
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE NpSelectsByLabel") {
+			found = true
+			if !containsStr(call, "label-app-nginx") {
+				t.Error("Expected NpSelectsByLabel to reference label-app-nginx")
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected NpSelectsByLabel edge for podSelector.matchLabels")
+	}
+}
+
+func TestProcessNP_EmptyPodSelector(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-2", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{},
+			},
+		},
+	}
+
+	svc.processNetworkPolicyRelationship(obj)
+
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE NpSelectsByLabel") {
+			t.Errorf("Expected no NpSelectsByLabel for empty podSelector, got %q", call)
+		}
+	}
+}
+
+func TestProcessNP_IngressPodSelector(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-3", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{},
+				"ingress": []interface{}{
+					map[string]interface{}{
+						"from": []interface{}{
+							map[string]interface{}{
+								"podSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{
+										"role": "frontend",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processNetworkPolicyRelationship(obj)
+
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "NpSelectsByLabel") && containsStr(call, "label-role-frontend") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected NpSelectsByLabel for ingress.from[].podSelector")
+	}
+}
+
+func TestProcessNP_EgressToNamespaceSelector(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-4", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{},
+				"egress": []interface{}{
+					map[string]interface{}{
+						"to": []interface{}{
+							map[string]interface{}{
+								"namespaceSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{
+										"env": "prod",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// addNpNamespaceEdge 查询 BelongsToLabel 反查 Namespace；
+	// unit test mock 返回 nil/nil，模拟"无匹配 Namespace"场景。
+	// 正向路径（找到 Namespace 并建 NpSelectsNs 边）需要构造 nebula.ResultSet，
+	// 适合在集成测试中覆盖。
+	svc.processNetworkPolicyRelationship(obj)
+}
+
+func TestProcessNP_IPBlockSkipped(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-5", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{},
+				"ingress": []interface{}{
+					map[string]interface{}{
+						"from": []interface{}{
+							map[string]interface{}{
+								"ipBlock": map[string]interface{}{
+									"cidr": "10.0.0.0/8",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processNetworkPolicyRelationship(obj)
+
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE") && containsStr(call, "NpSelects") {
+			t.Errorf("Expected no NpSelects edges for ipBlock peer, got %q", call)
+		}
+	}
+}
+
+func TestProcessNP_MixedPeers(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-6", "namespace": "default",
+			},
+			"spec": map[string]interface{}{
+				"podSelector": map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"app": "web",
+					},
+				},
+				"ingress": []interface{}{
+					map[string]interface{}{
+						"from": []interface{}{
+							map[string]interface{}{
+								"podSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{
+										"role": "api",
+									},
+								},
+								"namespaceSelector": map[string]interface{}{
+									"matchLabels": map[string]interface{}{
+										"env": "staging",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processNetworkPolicyRelationship(obj)
+
+	nLabelCount := 0
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE NpSelectsByLabel") {
+			nLabelCount++
+		}
+	}
+	// spec.podSelector(app=web) + ingress.podSelector(role=api) = 2
+	if nLabelCount != 2 {
+		t.Errorf("Expected 2 NpSelectsByLabel inserts, got %d", nLabelCount)
+	}
+}
+
+func TestProcessNP_NoSpec(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "NetworkPolicy",
+			"apiVersion": "networking.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "test-np", "uid": "np-uid-7", "namespace": "default",
+			},
+		},
+	}
+
+	// Should not panic
+	svc.processNetworkPolicyRelationship(obj)
+}
+
+// --- Tests for processPriorityClassRelationship ---
+
+func TestProcessPrioClass_HasClass(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			if key == "uid:PriorityClass::high-priority" {
+				return []byte("pc-uid-1"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	pod := &corev1.Pod{}
+	pod.UID = "pod-uid-1"
+	pod.Spec.PriorityClassName = "high-priority"
+
+	svc.processPriorityClassRelationship(pod)
+
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE PodPrioClass") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected PodPrioClass edge")
+	}
+}
+
+func TestProcessPrioClass_EmptyClass(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	pod := &corev1.Pod{}
+	pod.UID = "pod-uid-2"
+
+	svc.processPriorityClassRelationship(pod)
+
+	if len(mockDB.calls) != 0 {
+		t.Errorf("Expected no DB calls for empty PriorityClassName, got %d", len(mockDB.calls))
+	}
+}
+
+// --- Tests for processRuntimeClassRelationship ---
+
+func TestProcessRuntimeClass_HasClass(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			if key == "uid:RuntimeClass::kata" {
+				return []byte("rc-uid-1"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	runtimeClass := "kata"
+	pod := &corev1.Pod{}
+	pod.UID = "pod-uid-3"
+	pod.Spec.RuntimeClassName = &runtimeClass
+
+	svc.processRuntimeClassRelationship(pod)
+
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE PodRuntimeClass") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("Expected PodRuntimeClass edge")
+	}
+}
+
+func TestProcessRuntimeClass_NilClass(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	pod := &corev1.Pod{}
+	pod.UID = "pod-uid-4"
+
+	svc.processRuntimeClassRelationship(pod)
+
+	if len(mockDB.calls) != 0 {
+		t.Errorf("Expected no DB calls for nil RuntimeClassName, got %d", len(mockDB.calls))
+	}
+}
+
+func TestProcessRuntimeClass_EmptyString(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	emptyRC := ""
+	pod := &corev1.Pod{}
+	pod.UID = "pod-uid-5"
+	pod.Spec.RuntimeClassName = &emptyRC
+
+	svc.processRuntimeClassRelationship(pod)
+
+	if len(mockDB.calls) != 0 {
+		t.Errorf("Expected no DB calls for empty RuntimeClassName string, got %d", len(mockDB.calls))
+	}
+}
+
+// --- Tests for processVolumeAttachmentRelationship ---
+
+func TestProcessVA_BothEdges(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			switch key {
+			case "uid:Node::worker-1":
+				return []byte("node-uid-1"), nil
+			case "uid:PersistentVolume::pv-001":
+				return []byte("pv-uid-1"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	pvName := "pv-001"
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "VolumeAttachment",
+			"apiVersion": "storage.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "va-1", "uid": "va-uid-1",
+			},
+			"spec": map[string]interface{}{
+				"attacher": "ebs.csi.aws.com",
+				"nodeName": "worker-1",
+				"source": map[string]interface{}{
+					"persistentVolumeName": pvName,
+				},
+			},
+		},
+	}
+
+	svc.processVolumeAttachmentRelationship(obj)
+
+	foundNode := false
+	foundPV := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE VolAttachToNode") {
+			foundNode = true
+		}
+		if containsStr(call, "INSERT EDGE VolAttachToPV") {
+			foundPV = true
+		}
+	}
+	if !foundNode {
+		t.Error("Expected VolAttachToNode edge")
+	}
+	if !foundPV {
+		t.Error("Expected VolAttachToPV edge")
+	}
+}
+
+func TestProcessVA_PVNameNil(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			if key == "uid:Node::worker-2" {
+				return []byte("node-uid-2"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "VolumeAttachment",
+			"apiVersion": "storage.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "va-2", "uid": "va-uid-2",
+			},
+			"spec": map[string]interface{}{
+				"nodeName": "worker-2",
+				"source":   map[string]interface{}{},
+			},
+		},
+	}
+
+	svc.processVolumeAttachmentRelationship(obj)
+
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE VolAttachToPV") {
+			t.Errorf("Expected no VolAttachToPV when persistentVolumeName is nil, got %q", call)
+		}
+	}
+}
+
+func TestProcessVA_NodeNameEmpty(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			if key == "uid:PersistentVolume::pv-002" {
+				return []byte("pv-uid-2"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	pvName := "pv-002"
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"kind":       "VolumeAttachment",
+			"apiVersion": "storage.k8s.io/v1",
+			"metadata": map[string]interface{}{
+				"name": "va-3", "uid": "va-uid-3",
+			},
+			"spec": map[string]interface{}{
+				"nodeName": "",
+				"source": map[string]interface{}{
+					"persistentVolumeName": pvName,
+				},
+			},
+		},
+	}
+
+	svc.processVolumeAttachmentRelationship(obj)
+
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE VolAttachToNode") {
+			t.Errorf("Expected no VolAttachToNode when nodeName is empty, got %q", call)
+		}
 	}
 }

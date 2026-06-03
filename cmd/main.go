@@ -153,13 +153,17 @@ func runApp(cmd *cobra.Command, args []string) {
 	}()
 	engine, k8sExec, diagEngine, chatManager := initializeGin(ctrls, cfg.Logger, alertProcessor, inspectionProcessor, graphDB, k8sresourceSvc, cfg, oauth2Provider, rdb, sessions, oidcClient)
 
+	addr := os.Getenv("MUTONG_ADDR")
+	if addr == "" {
+		addr = cfg.Server.Address
+	}
 	port := os.Getenv("MUTONG_PORT")
 	if port == "" {
 		port = fmt.Sprintf("%d", cfg.Server.Port)
 	}
 
 	srv := &http.Server{
-		Addr:         ":" + port,
+		Addr:         addr + ":" + port,
 		Handler:      engine,
 		ReadTimeout:  time.Duration(cfg.Server.ReadTimeoutSec) * time.Second,
 		WriteTimeout: time.Duration(cfg.Server.WriteTimeoutSec) * time.Second,
@@ -498,31 +502,14 @@ func initializeGin(ctrls *controllers.Controllers, logger *zap.Logger, alertProc
 	oauth2ctrl.RegisterOAuth2Routes(engine, oauth2Provider, os.Getenv("MUTONG_ISSUER_URL"), deviceH)
 	deviceH.RegisterDeviceRoutes(engine)
 
-	// Register auth endpoints (login, me, logout, captcha)
-	authCtrl := controllers.NewAuthController(cfg.DB, sessions)
-	authCtrl.RegisterRoutes(engine)
-
-	if cfg.Auth.Mode != "hybrid" && cfg.Auth.Mode != "zitadel" {
-		logger.Info("Zitadel OIDC not initialized", zap.String("mode", cfg.Auth.Mode))
-	} else {
-		if oidcClient == nil {
-			logger.Warn("OIDC client not available, skipping OIDC route registration")
-		} else if sessions == nil {
-			logger.Warn("MUTONG_SESSION_SECRET not set, skipping OIDC route registration")
-		} else {
-			userSvc := services.NewUserService(cfg.DB)
-			oidcCtrl := controllers.NewOIDCController(userSvc, oidcClient, sessions)
-			oidcCtrl.RegisterRoutes(engine)
-			logger.Info("OIDC endpoints registered", zap.String("mode", cfg.Auth.Mode))
-		}
-	}
-
+	var loginLimit *authsvc.LoginLimiter
 	if rdb != nil {
-		captchaSvc := authsvc.NewCaptchaService(rdb)
-		loginLimit := authsvc.NewLoginLimiter(rdb)
-		captchaCtrl := controllers.NewCaptchaController(captchaSvc, loginLimit)
-		captchaCtrl.RegisterRoutes(engine)
+		loginLimit = authsvc.NewLoginLimiter(rdb)
 	}
+
+	// Register auth endpoints (login, me, logout)
+	authCtrl := controllers.NewAuthController(cfg.DB, sessions, loginLimit)
+	authCtrl.RegisterRoutes(engine)
 
 	// Seed OAuth2 clients and initial admin
 	oauth2model.SeedClients(cfg.DB)

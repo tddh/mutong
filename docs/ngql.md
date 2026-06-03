@@ -34,6 +34,8 @@
 | | MountsConfig | Pod → ConfigMap | 配置挂载 |
 | | MountsSecret | Pod → Secret | 密钥挂载 |
 | | MountsPVC | Pod → PVC | 持久卷挂载 |
+| | PodPrioClass | Pod → PriorityClass | Pod 引用优先级类 |
+| | PodRuntimeClass | Pod → RuntimeClass | Pod 引用运行时类 |
 | **存储** | BoundToPV | PVC → PV | 卷绑定 |
 | | BelongsToStorageClass | PV → StorageClass | 存储类归属 |
 | | ScRefCSIDriver | StorageClass → CSIDriver | CSI 驱动引用 |
@@ -54,6 +56,10 @@
 | | BelongsToServiceAccount | RoleBinding → SA | SA 绑定 |
 | **PDB** | PdbToPod | PDB → Pod | 中断预算关联 |
 | **Webhook** | WebhookRefSvc | WebhookConfiguration → Service | Webhook 引用 Service（含 webhook_name/path/port 元信息） |
+| **网络** | NpSelectsByLabel | NetworkPolicy → Label | NP podSelector 选中标签 |
+| | NpSelectsNs | NetworkPolicy → Namespace | NP namespaceSelector 选中命名空间 |
+| **存储** | VolAttachToNode | VolumeAttachment → Node | 卷挂载到节点 |
+| | VolAttachToPV | VolumeAttachment → PV | 卷挂载引用 PV |
 | **事件** | Events | K8sResource → Event | K8s 事件（TTL 24h） |
 | **标签** | BelongsToLabel | K8sResource → Label | 标签关联 |
 | **业务** | BelongsToApp | K8sResource → BusinessApp | 资源归属业务 |

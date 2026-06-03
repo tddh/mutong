@@ -31,7 +31,6 @@ require (
 	github.com/twmb/franz-go/pkg/kmsg v1.13.1
 	github.com/valyala/fastjson v1.6.4
 	github.com/vesoft-inc/nebula-go/v3 v3.8.1-0.20250117054948-5312ccfebe2f
-	github.com/wenlng/go-captcha/v2 v2.0.5
 	go.opentelemetry.io/proto/otlp v1.10.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.50.0
@@ -115,7 +114,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -195,7 +193,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/arch v0.12.0 // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

@@ -500,10 +500,11 @@ type AuthConfig struct {
 
 // ServerConfig holds HTTP server tuning parameters.
 type ServerConfig struct {
-	Port               int `mapstructure:"port"`
-	ReadTimeoutSec     int `mapstructure:"readTimeoutSec"`
-	WriteTimeoutSec    int `mapstructure:"writeTimeoutSec"`
-	IdleTimeoutSec     int `mapstructure:"idleTimeoutSec"`
-	ShutdownTimeoutSec int `mapstructure:"shutdownTimeoutSec"`
-	RateLimitPerSec    int `mapstructure:"rateLimitPerSec"`
+	Address            string `mapstructure:"address"`
+	Port               int    `mapstructure:"port"`
+	ReadTimeoutSec     int    `mapstructure:"readTimeoutSec"`
+	WriteTimeoutSec    int    `mapstructure:"writeTimeoutSec"`
+	IdleTimeoutSec     int    `mapstructure:"idleTimeoutSec"`
+	ShutdownTimeoutSec int    `mapstructure:"shutdownTimeoutSec"`
+	RateLimitPerSec    int    `mapstructure:"rateLimitPerSec"`
 }

@@ -1228,6 +1228,9 @@ func (c *Config) InitInspectionService(logger interfaces.Logger, graphDB interfa
 }
 
 func (c *Config) setServerDefaults() {
+	if c.Server.Address == "" {
+		c.Server.Address = "0.0.0.0"
+	}
 	if c.Server.Port == 0 {
 		c.Server.Port = 8888
 	}

@@ -174,6 +174,84 @@ func (d *K8sResoureService) processValidatingWebhookConfigurationRelationship(un
 	d.processWebhookConfigurationRelationship(unstructuredObj)
 }
 
+func (d *K8sResoureService) processNetworkPolicyRelationship(unstructuredObj *unstructured.Unstructured) {
+	var np networkingv1.NetworkPolicy
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &np); err != nil {
+		d.logger.Error("processNetworkPolicyRelationship", zap.Error(err))
+		return
+	}
+
+	npUID := string(unstructuredObj.GetUID())
+
+	d.CleanupOutgoingEdgesByType(npUID, "NpSelectsByLabel")
+	d.CleanupOutgoingEdgesByType(npUID, "NpSelectsNs")
+
+	for k, v := range np.Spec.PodSelector.MatchLabels {
+		labelUID := generateLabelUID(k, v)
+		_ = d.insertEdge("NpSelectsByLabel", npUID, labelUID)
+	}
+
+	for _, rule := range np.Spec.Ingress {
+		for _, peer := range rule.From {
+			d.processNetworkPolicyPeer(npUID, peer)
+		}
+	}
+
+	for _, rule := range np.Spec.Egress {
+		for _, peer := range rule.To {
+			d.processNetworkPolicyPeer(npUID, peer)
+		}
+	}
+}
+
+func (d *K8sResoureService) processNetworkPolicyPeer(npUID string, peer networkingv1.NetworkPolicyPeer) {
+	if peer.PodSelector != nil {
+		for k, v := range peer.PodSelector.MatchLabels {
+			labelUID := generateLabelUID(k, v)
+			_ = d.insertEdge("NpSelectsByLabel", npUID, labelUID)
+		}
+	}
+
+	if peer.NamespaceSelector != nil {
+		for nsKey, nsValue := range peer.NamespaceSelector.MatchLabels {
+			d.addNpNamespaceEdge(npUID, nsKey, nsValue)
+		}
+	}
+}
+
+func (d *K8sResoureService) addNpNamespaceEdge(npUID, labelKey, labelValue string) {
+	labelUID := generateLabelUID(labelKey, labelValue)
+
+	query := fmt.Sprintf(
+		"GO FROM %s OVER BelongsToLabel REVERSELY YIELD dst(edge) AS resource_uid LIMIT 100;",
+		strconv.Quote(labelUID),
+	)
+
+	rows, err := d.executenGQL(query)
+	if err != nil {
+		d.logger.Error("addNpNamespaceEdge: query failed",
+			zap.String("label", fmt.Sprintf("%s=%s", labelKey, labelValue)),
+			zap.Error(err))
+		return
+	}
+
+	for _, row := range rows {
+		resourceUID := string(row.Values[0].GetSVal())
+
+		verifyQuery := fmt.Sprintf(
+			"FETCH PROP ON K8sResource %s YIELD properties(vertex).kind AS kind;",
+			strconv.Quote(resourceUID),
+		)
+		verifyRows, err := d.executenGQL(verifyQuery)
+		if err != nil || len(verifyRows) == 0 {
+			continue
+		}
+		if string(verifyRows[0].Values[0].GetSVal()) == "Namespace" {
+			_ = d.insertEdge("NpSelectsNs", npUID, resourceUID)
+		}
+	}
+}
+
 func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured.Unstructured) {
 	var obj policyv1.PodDisruptionBudget
 
@@ -547,6 +625,26 @@ func (d *K8sResoureService) processPodRelationships(unstructuredObj *unstructure
 	d.processServiceAccountRelationship(unstructuredObj, &pod)
 	d.processNodeRelationship(unstructuredObj, &pod)
 	d.processVolumeRelationships(&pod)
+	d.processPriorityClassRelationship(&pod)
+	d.processRuntimeClassRelationship(&pod)
+}
+
+func (d *K8sResoureService) processPriorityClassRelationship(pod *corev1.Pod) {
+	if pod.Spec.PriorityClassName == "" {
+		return
+	}
+	if uid, found := d.lookupUID("PriorityClass", "", pod.Spec.PriorityClassName); found {
+		_ = d.insertEdge("PodPrioClass", string(pod.UID), uid)
+	}
+}
+
+func (d *K8sResoureService) processRuntimeClassRelationship(pod *corev1.Pod) {
+	if pod.Spec.RuntimeClassName == nil || *pod.Spec.RuntimeClassName == "" {
+		return
+	}
+	if uid, found := d.lookupUID("RuntimeClass", "", *pod.Spec.RuntimeClassName); found {
+		_ = d.insertEdge("PodRuntimeClass", string(pod.UID), uid)
+	}
 }
 
 func (d *K8sResoureService) processServiceAccountRelationship(unstructuredObj *unstructured.Unstructured, pod *corev1.Pod) {
@@ -1066,6 +1164,31 @@ func (d *K8sResoureService) processClassStorageToCSIDriverRelationship(unstructu
 
 	if uid, found := d.lookupUID("CSIDriver", "", sc.Provisioner); found {
 		_ = d.insertEdge("ScRefCSIDriver", string(unstructuredObj.GetUID()), uid)
+	}
+}
+
+func (d *K8sResoureService) processVolumeAttachmentRelationship(unstructuredObj *unstructured.Unstructured) {
+	var va scv1.VolumeAttachment
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &va); err != nil {
+		d.logger.Error("processVolumeAttachmentRelationship", zap.Error(err))
+		return
+	}
+
+	vaUID := string(unstructuredObj.GetUID())
+
+	d.CleanupOutgoingEdgesByType(vaUID, "VolAttachToNode")
+	d.CleanupOutgoingEdgesByType(vaUID, "VolAttachToPV")
+
+	if va.Spec.NodeName != "" {
+		if uid, found := d.lookupUID("Node", "", va.Spec.NodeName); found {
+			_ = d.insertEdge("VolAttachToNode", vaUID, uid)
+		}
+	}
+
+	if va.Spec.Source.PersistentVolumeName != nil && *va.Spec.Source.PersistentVolumeName != "" {
+		if uid, found := d.lookupUID("PersistentVolume", "", *va.Spec.Source.PersistentVolumeName); found {
+			_ = d.insertEdge("VolAttachToPV", vaUID, uid)
+		}
 	}
 }
 

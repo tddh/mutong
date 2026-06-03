@@ -341,6 +341,7 @@ log:
   max_age: 30
 
 server:
+  address: "0.0.0.0"
   port: 8888
 ```
 
@@ -450,6 +451,7 @@ executor:
 
 | 环境变量 | 说明 | 默认值 |
 |----------|------|--------|
+| `MUTONG_ADDR` | HTTP 服务监听地址 | 0.0.0.0 |
 | `MUTONG_PORT` | HTTP 服务端口 | 8888 |
 | `MUTONG_MAX_PROCS` | GOMAXPROCS | CPU 核数 |
 | `MUTONG_ALLOWED_ORIGINS` | CORS 允许域名 | - |

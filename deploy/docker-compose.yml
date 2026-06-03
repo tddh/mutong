@@ -8,6 +8,7 @@ services:
     ports:
       - "${MUTONG_PORT:-8888}:8888"
     environment:
+      MUTONG_ADDR: "0.0.0.0"
       MUTONG_PORT: "8888"
       MUTONG_DB_USER: ${POSTGRES_USER:-mutong}
       MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}

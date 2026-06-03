@@ -16,14 +16,16 @@ type AuthController struct {
 	PasswordSvc *auth.PasswordService
 	TokenSvc    *auth.TokenService
 	Sessions    *auth.SessionManager
+	LoginLimit  *auth.LoginLimiter
 }
 
-func NewAuthController(db *gorm.DB, sessions *auth.SessionManager) *AuthController {
+func NewAuthController(db *gorm.DB, sessions *auth.SessionManager, loginLimit *auth.LoginLimiter) *AuthController {
 	return &AuthController{
 		DB:          db,
 		PasswordSvc: auth.NewPasswordService(),
 		TokenSvc:    auth.NewTokenService(),
 		Sessions:    sessions,
+		LoginLimit:  loginLimit,
 	}
 }
 
@@ -47,8 +49,25 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 
+	ip := c.ClientIP()
+
+	if ac.LoginLimit != nil {
+		if err := ac.LoginLimit.CheckIP(c.Request.Context(), ip); err != nil {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "请求过于频繁，请稍后再试"})
+			return
+		}
+		if ac.LoginLimit.IsLocked(c.Request.Context(), req.Username) {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "账号已被临时锁定，请15分钟后重试"})
+			return
+		}
+	}
+
 	var user models.User
 	if err := ac.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+		if ac.LoginLimit != nil {
+			ac.LoginLimit.RecordFailure(c.Request.Context(), req.Username)
+			ac.LoginLimit.RecordIPFailure(c.Request.Context(), ip)
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
@@ -57,11 +76,18 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 	if !ac.PasswordSvc.VerifyPassword(req.Password, user.PasswordHash) {
+		if ac.LoginLimit != nil {
+			ac.LoginLimit.RecordFailure(c.Request.Context(), req.Username)
+			ac.LoginLimit.RecordIPFailure(c.Request.Context(), ip)
+		}
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
 		return
 	}
 
-	// Issue session token
+	if ac.LoginLimit != nil {
+		ac.LoginLimit.ClearFailures(c.Request.Context(), req.Username)
+	}
+
 	secure := c.Request.TLS != nil
 	sessionToken := user.UUID
 	if ac.Sessions != nil {

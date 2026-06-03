@@ -151,6 +151,12 @@ func (d *K8sResoureService) Relationship(uid string) {
 		if k8sResource.Kind == "ValidatingWebhookConfiguration" {
 			d.processValidatingWebhookConfigurationRelationship(unstructuredObj)
 		}
+		if k8sResource.Kind == "NetworkPolicy" {
+			d.processNetworkPolicyRelationship(unstructuredObj)
+		}
+		if k8sResource.Kind == "VolumeAttachment" {
+			d.processVolumeAttachmentRelationship(unstructuredObj)
+		}
 	}
 
 	if len(k8sResources) > 0 {

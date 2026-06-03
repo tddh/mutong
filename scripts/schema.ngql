@@ -110,6 +110,20 @@ CREATE EDGE IF NOT EXISTS WebhookRefSvc (
 ) COMMENT = 'Webhook 配置引用 Service';
 
 -- =====================================================
+-- EDGE: NetworkPolicy
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS NpSelectsByLabel () COMMENT = 'NP podSelector 选中 Label';
+CREATE EDGE IF NOT EXISTS NpSelectsNs () COMMENT = 'NP namespaceSelector 选中 Namespace';
+
+-- =====================================================
+-- EDGE: VolumeAttachment
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS VolAttachToNode () COMMENT = 'VolumeAttachment 挂载到 Node';
+CREATE EDGE IF NOT EXISTS VolAttachToPV () COMMENT = 'VolumeAttachment 绑定 PV';
+
+-- =====================================================
 -- EDGE: RBAC
 -- =====================================================
 
@@ -119,6 +133,13 @@ CREATE EDGE IF NOT EXISTS BelongsToRole () COMMENT = 'RoleBinding 关联 Role';
 CREATE EDGE IF NOT EXISTS BelongsToUser () COMMENT = 'RoleBinding 关联 User';
 CREATE EDGE IF NOT EXISTS BelongsToGroup () COMMENT = 'RoleBinding 关联 Group';
 CREATE EDGE IF NOT EXISTS BelongsToServiceAccount () COMMENT = 'RoleBinding 关联 ServiceAccount';
+
+-- =====================================================
+-- EDGE: Pod 调度
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS PodPrioClass () COMMENT = 'Pod 引用 PriorityClass';
+CREATE EDGE IF NOT EXISTS PodRuntimeClass () COMMENT = 'Pod 引用 RuntimeClass';
 
 -- =====================================================
 -- EDGE: PDB

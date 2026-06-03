@@ -1631,6 +1631,7 @@ configs/
 
 | 环境变量 | 覆盖配置 | 默认值 |
 |----------|----------|--------|
+| `MUTONG_ADDR` | server.address | 0.0.0.0 |
 | `MUTONG_PORT` | server.port | 8888 |
 | `MUTONG_MAX_PROCS` | GOMAXPROCS | CPU核数 |
 | `MUTONG_ALLOWED_ORIGINS` | CORS域名 | * |

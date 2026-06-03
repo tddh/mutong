@@ -197,15 +197,15 @@ func TestFormatReport(t *testing.T) {
 		t.Error("Expected markdown heading in report")
 	}
 
-	if !contains(formatted, "## 时间线") {
+	if !contains(formatted, "📅 事件时间线") {
 		t.Error("Expected Timeline section in report")
 	}
 
-	if !contains(formatted, "## 根因") {
+	if !contains(formatted, "📝 根因") {
 		t.Error("Expected Root Cause section in report")
 	}
 
-	if !contains(formatted, "## 改进项") {
+	if !contains(formatted, "🎯 改进项") {
 		t.Error("Expected Action Items section in report")
 	}
 }

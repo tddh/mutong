@@ -16,17 +16,15 @@
 
 ### 界面预览
 
-> **📸 待补充截图**：运行项目后截取以下页面截图，放入 `docs/images/` 目录即可。详见 [docs/images/README.md](docs/images/README.md)。
->
-> | 仪表盘 | 拓扑图 | AI 诊断 |
-> |:---:|:---:|:---:|
-> | ![仪表盘](docs/images/dashboard.png) | ![拓扑图](docs/images/topology.png) | ![AI诊断](docs/images/diagnosis.png) |
-> | *资源概览与集群统计* | *K8s 资源拓扑可视化* | *LLM 智能诊断交互* |
->
-> | 告警管理 | 巡检报告 | 复盘分析 |
-> |:---:|:---:|:---:|
-> | ![告警](docs/images/alerts.png) | ![巡检](docs/images/inspection.png) | ![复盘](docs/images/retrospective.png) |
-> | *告警列表与抑制状态* | *巡检结果与历史对比* | *因果链 DAG 与影响评估* |
+| 仪表盘 | 拓扑图 | AI 诊断 |
+|:---:|:---:|:---:|
+| ![仪表盘](docs/images/dashboard.png) | ![拓扑图](docs/images/topology.png) | ![AI诊断](docs/images/diagnosis.png) |
+| *资源概览与集群统计* | *K8s 资源拓扑可视化* | *LLM 智能诊断交互* |
+
+| 告警管理 | 巡检报告 | 复盘分析 |
+|:---:|:---:|:---:|
+| ![告警](docs/images/alerts.png) | ![巡检](docs/images/inspection.png) | ![复盘](docs/images/retrospective.png) |
+| *告警列表与抑制状态* | *巡检结果与历史对比* | *因果链 DAG 与影响评估* |
 
 ## 功能特性
 
@@ -244,7 +242,7 @@ mutong/
 │   ├── config.auth.yaml.example   #   认证授权配置
 │   ├── config.retrospective.yaml.example # 复盘自动触发配置
 │   └── prompts/                 #   LLM Prompt 模板
-├── controllers/                 # 控制器层（31 个文件，含 oauth2/ 子包）
+├── controllers/                 # 控制器层（33 个文件，含 oauth2/ 子包）
 ├── services/                    # 服务层
 │   ├── alert/                   #   告警管道: enricher → suppressor → router → notifier
 │   ├── diagnosis/               #   AI 诊断引擎（含混合检索模块）
@@ -257,7 +255,7 @@ mutong/
 │   ├── terminal/                #   WebSocket 终端
 │   ├── trace/                   #   OTel 追踪查询
 │   ├── audit/                   #   审计日志
-│   ├── auth/                    #   认证授权（OAuth2/Casbin/密码/验证码）
+│   ├── auth/                    #   认证授权（OAuth2/Casbin/密码）
 │   ├── prompt/                  #   Prompt 模板管理
 │   ├── k8sresource_*.go         #   K8s 资源核心服务
 │   ├── getResource.go           #   资源获取接口
@@ -483,7 +481,7 @@ executor:
 |------|------|------|---------------|
 | PostgreSQL | 15+（含 pgvector） | 关系数据 & 向量检索 | ⚠️ 降级为内存存储：用户/角色/告警统计/诊断结果/复盘报告不持久化，向量语义搜索不可用 |
 | Kubernetes 集群 | — | 资源采集 & 自愈执行 | ⚠️ K8s 相关功能（拓扑可视化、终端、自愈）不可用，平台仍可处理告警和诊断 |
-| Redis | 7+ | 诊断会话缓存 & 验证码 & 登录限流 | ⚠️ 诊断会话降级为内存模式（重启丢失），验证码和登录限流不可用 |
+| Redis | 7+ | 诊断会话缓存 & 登录限流 | ⚠️ 诊断会话降级为内存模式（重启丢失），登录限流不可用 |
 | Prometheus | 2.x+ | 指标查询（CPU/内存/网络/重启次数） | ⚠️ 指标查询 API 返回 503，诊断结果不含指标快照 |
 | Elasticsearch | 8.x+ | 日志检索 | ⚠️ ES 日志查询不可用，K8s API 直查日志仍可用 |
 | LLM API Key | — | AI 诊断深度分析 & 复盘报告生成 | ⚠️ 诊断自动降级为纯规则路径（规则引擎 + 拓扑分析），仍可给出置信度评分 |
@@ -692,20 +690,12 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| POST | `/api/auth/login` | 用户登录（密码 + 验证码） |
+| POST | `/api/auth/login` | 用户登录（密码） |
 | GET | `/api/auth/me` | 获取当前登录用户信息 |
 | POST | `/api/auth/logout` | 用户登出 |
 | POST | `/api/auth/tokens` | 创建 API Token（PAT） |
 | GET | `/api/auth/tokens` | 列出当前用户的 API Token |
 | DELETE | `/api/auth/tokens/:id` | 撤销指定 API Token |
-
-### 验证码 API
-
-| 方法 | 路径 | 功能 |
-|------|------|------|
-| GET | `/api/auth/captcha` | 生成图片验证码 |
-| POST | `/api/auth/captcha/verify` | 验证验证码 |
-| POST | `/api/auth/login-status` | 查询登录失败锁定状态 |
 
 ### OAuth2 / OIDC API
 
@@ -748,7 +738,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 > 仪表盘 | 拓扑 | 告警 | AI 诊断 | 巡检 | 巡检历史 | 复盘分析 | 历史复盘 | 资源列表 | 状态 | 日志 | 监控 | 终端 | 追踪 | 集群
 >
-> 除上述 15 个功能页面外，项目还包含 2 个认证相关页面：`login.html`（平台登录，含密码+验证码）和 `consent.html`（OAuth 授权确认），它们不使用全局 NavBar 导航栏。
+> 除上述 15 个功能页面外，项目还包含 2 个认证相关页面：`login.html`（平台登录）和 `consent.html`（OAuth 授权确认），它们不使用全局 NavBar 导航栏。
 
 | 页面 | 入口文件 | 功能 |
 |------|----------|------|

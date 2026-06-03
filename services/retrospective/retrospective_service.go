@@ -352,32 +352,268 @@ func (s *Service) FormatReport(report *retrospective.PostmortemReport) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("# 故障复盘报告: %s\n\n", report.IncidentTitle))
-	sb.WriteString(fmt.Sprintf("**报告 ID**: %s\n", report.ID))
-	sb.WriteString(fmt.Sprintf("**严重级别**: %s\n", report.Severity))
-	sb.WriteString(fmt.Sprintf("**持续时间**: %s\n", report.Duration))
-	sb.WriteString(fmt.Sprintf("**开始时间**: %s\n", report.StartTime.Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("**结束时间**: %s\n\n", report.EndTime.Format(time.RFC3339)))
 
-	sb.WriteString("## 时间线\n\n")
-	for _, e := range report.Timeline {
-		sb.WriteString(fmt.Sprintf("- **%s** [%s] %s\n", e.Timestamp.Format("15:04:05"), e.EventType, e.Description))
+	// === 基本信息 ===
+	sb.WriteString("## 📊 基本信息\n\n")
+	sb.WriteString(fmt.Sprintf("- **报告 ID**: %s\n", report.ID))
+	sb.WriteString(fmt.Sprintf("- **严重级别**: %s\n", report.Severity))
+	sb.WriteString(fmt.Sprintf("- **持续时间**: %s\n", report.Duration))
+	sb.WriteString(fmt.Sprintf("- **开始时间**: %s\n", report.StartTime.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("- **结束时间**: %s\n", report.EndTime.Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("- **生成时间**: %s\n", report.GeneratedAt.Format(time.RFC3339)))
+	if report.DetectionMethod != "" {
+		sb.WriteString(fmt.Sprintf("- **检测方式**: %s\n", report.DetectionMethod))
+	}
+	if report.MTTD != "" {
+		sb.WriteString(fmt.Sprintf("- **MTTD（平均检测时间）**: %s\n", report.MTTD))
+	}
+	sb.WriteString("\n")
+
+	// === 业务上下文 ===
+	if report.BusinessContext != nil {
+		bc := report.BusinessContext
+		sb.WriteString("## 🏢 业务上下文\n\n")
+		sb.WriteString(fmt.Sprintf("- **业务应用**: %s\n", bc.AppName))
+		sb.WriteString(fmt.Sprintf("- **所属团队**: %s\n", bc.Team))
+		sb.WriteString(fmt.Sprintf("- **关键度**: %s\n", bc.Criticality))
+		if bc.BusinessUnit != "" {
+			sb.WriteString(fmt.Sprintf("- **业务线**: %s\n", bc.BusinessUnit))
+		}
+		if bc.Environment != "" {
+			sb.WriteString(fmt.Sprintf("- **环境**: %s\n", bc.Environment))
+		}
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString(fmt.Sprintf("\n## 根因\n\n%s\n", report.RootCause.Final))
-
-	sb.WriteString("\n## 因果链\n\n")
-	for _, link := range report.CausalChain.Links {
-		sb.WriteString(fmt.Sprintf("- %s → %s (置信度: %.0f%%)\n", link.Cause, link.Effect, link.Confidence*100))
+	// === 受影响服务 ===
+	if len(report.ImpactedSvc) > 0 {
+		sb.WriteString("## 🏢 受影响服务\n\n")
+		for _, svc := range report.ImpactedSvc {
+			sb.WriteString(fmt.Sprintf("- %s\n", svc))
+		}
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n## 经验教训\n\n")
-	for _, l := range report.LessonsLearned {
-		sb.WriteString(fmt.Sprintf("- %s\n", l))
+	// === 工作负载上下文 ===
+	if report.WorkloadContext != nil {
+		wc := report.WorkloadContext
+		sb.WriteString("## 📦 工作负载上下文\n\n")
+		sb.WriteString(fmt.Sprintf("- **控制器**: %s/%s\n", wc.ControllerKind, wc.ControllerName))
+		sb.WriteString(fmt.Sprintf("- **健康副本**: %d/%d\n", wc.HealthyPods, wc.TotalPods))
+		if len(wc.Pods) > 0 {
+			sb.WriteString("\n| Pod 名称 | 状态 |\n|----------|------|\n")
+			for _, p := range wc.Pods {
+				status := "🟢 健康"
+				if p.IsAlerted {
+					status = "🔴 告警"
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s |\n", p.Name, status))
+			}
+		}
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\n## 改进项\n\n")
-	for _, a := range report.ActionItems {
-		sb.WriteString(fmt.Sprintf("- [ ] %s (负责人: %s, 优先级: %s, 截止: %s)\n", a.Description, a.Owner, a.Priority, a.DueDate))
+	// === 事件时间线 ===
+	if len(report.Timeline) > 0 {
+		sb.WriteString("## 📅 事件时间线\n\n")
+		sb.WriteString("| 时间 | 类型 | 描述 | 资源 |\n|------|------|------|------|\n")
+		for _, e := range report.Timeline {
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n",
+				e.Timestamp.Format("15:04:05"), e.EventType, e.Description, e.Resource))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === AI 诊断结论 ===
+	if report.AIDiagnosis != nil {
+		ad := report.AIDiagnosis
+		sb.WriteString("## 🤖 AI 诊断结论\n\n")
+		sb.WriteString(fmt.Sprintf("**摘要**: %s\n\n", ad.Summary))
+		sb.WriteString(fmt.Sprintf("**置信度**: %.0f%%\n\n", ad.Confidence*100))
+		if len(ad.Evidence) > 0 {
+			sb.WriteString("**证据链**:\n\n")
+			for _, ev := range ad.Evidence {
+				sb.WriteString(fmt.Sprintf("- %s\n", ev))
+			}
+			sb.WriteString("\n")
+		}
+		if ad.Remediation != "" {
+			sb.WriteString(fmt.Sprintf("**建议**: %s\n\n", ad.Remediation))
+		}
+	}
+
+	// === 根因 ===
+	if report.RootCause.Final != "" {
+		sb.WriteString("## 📝 根因\n\n")
+		sb.WriteString(fmt.Sprintf("%s\n\n", report.RootCause.Final))
+	}
+
+	// === 因果链 ===
+	if len(report.CausalChain.Links) > 0 {
+		sb.WriteString("## 🔗 因果链\n\n")
+		for _, link := range report.CausalChain.Links {
+			sb.WriteString(fmt.Sprintf("- %s → %s (置信度: %.0f%%)\n", link.Cause, link.Effect, link.Confidence*100))
+			if len(link.Evidence) > 0 {
+				sb.WriteString(fmt.Sprintf("  - 证据: %s\n", strings.Join(link.Evidence, "; ")))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 业务调用链 ===
+	if report.BusinessCalls != nil && (len(report.BusinessCalls.Upstreams) > 0 || len(report.BusinessCalls.Downstreams) > 0) {
+		bc := report.BusinessCalls
+		sb.WriteString("## 🔗 业务调用链\n\n")
+		sb.WriteString(fmt.Sprintf("**中心服务**: %s\n\n", bc.AppName))
+		if len(bc.Upstreams) > 0 {
+			sb.WriteString("**上游调用方**:\n\n")
+			sb.WriteString("| 应用名 | 团队 | 关键度 |\n|--------|------|--------|\n")
+			for _, u := range bc.Upstreams {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", u.AppName, u.Team, u.Criticality))
+			}
+			sb.WriteString("\n")
+		}
+		if len(bc.Downstreams) > 0 {
+			sb.WriteString("**下游依赖方**:\n\n")
+			sb.WriteString("| 应用名 | 团队 | 关键度 |\n|--------|------|--------|\n")
+			for _, d := range bc.Downstreams {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", d.AppName, d.Team, d.Criticality))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// === 业务影响 ===
+	if report.BusinessImpact != nil {
+		bi := report.BusinessImpact
+		sb.WriteString("## 📊 业务影响\n\n")
+		sb.WriteString(fmt.Sprintf("- **风险等级**: %s\n", bi.RiskLevel))
+		if len(bi.DirectImpacts) > 0 {
+			sb.WriteString("\n**直接影响**:\n\n")
+			for _, d := range bi.DirectImpacts {
+				sb.WriteString(fmt.Sprintf("- %s (团队: %s, 关键度: %s)\n", d.AppName, d.Team, d.Criticality))
+				if d.Reasoning != "" {
+					sb.WriteString(fmt.Sprintf("  - 原因: %s\n", d.Reasoning))
+				}
+			}
+			sb.WriteString("\n")
+		}
+		if len(bi.IndirectImpacts) > 0 {
+			sb.WriteString("**间接影响**:\n\n")
+			for _, d := range bi.IndirectImpacts {
+				sb.WriteString(fmt.Sprintf("- %s (团队: %s, 关键度: %s)\n", d.AppName, d.Team, d.Criticality))
+				if d.ImpactPath != "" {
+					sb.WriteString(fmt.Sprintf("  - 影响路径: %s\n", d.ImpactPath))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// === 影响评估详情 ===
+	if report.ImpactAssessment != nil {
+		ia := report.ImpactAssessment
+		sb.WriteString("## 📊 影响评估\n\n")
+		sb.WriteString(fmt.Sprintf("- **严重级别**: %s\n", ia.Severity))
+		sb.WriteString(fmt.Sprintf("- **影响半径**: %d 跳\n", ia.BlastRadius))
+		if len(ia.DirectImpact) > 0 {
+			sb.WriteString("\n**🔴 直接影响资源**:\n\n")
+			sb.WriteString("| 类型 | 名称 | 命名空间 |\n|------|------|----------|\n")
+			for _, d := range ia.DirectImpact {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", d.Kind, d.Name, d.Namespace))
+			}
+			sb.WriteString("\n")
+		}
+		if len(ia.IndirectImpact) > 0 {
+			sb.WriteString("**🟡 间接影响资源**:\n\n")
+			sb.WriteString("| 类型 | 名称 | 命名空间 |\n|------|------|----------|\n")
+			for _, d := range ia.IndirectImpact {
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", d.Kind, d.Name, d.Namespace))
+			}
+			sb.WriteString("\n")
+		}
+		if ia.UserFacingImpact {
+			sb.WriteString("⚠️ **用户面受到影响**\n\n")
+		}
+	}
+
+	// === 诊断指标快照 ===
+	if len(report.DiagnosisMetrics) > 0 {
+		sb.WriteString("## 📈 诊断指标快照\n\n")
+		sb.WriteString("| 指标 | 资源 | 值 | 状态 |\n|------|------|-----|------|\n")
+		for _, m := range report.DiagnosisMetrics {
+			val := fmt.Sprintf("%.1f", m.Value)
+			sb.WriteString(fmt.Sprintf("| %s | %s/%s | %s | %s |\n", m.MetricName, m.ResourceKind, m.ResourceName, val, m.Status))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 关键日志 ===
+	if len(report.DiagnosisLogs) > 0 {
+		sb.WriteString("## 📋 关键日志\n\n")
+		errorCount := 0
+		for _, l := range report.DiagnosisLogs {
+			if strings.EqualFold(l.Level, "error") || strings.EqualFold(l.Level, "err") {
+				if errorCount < 10 {
+					sb.WriteString(fmt.Sprintf("- **[%s]** `%s`: %s\n", l.Level, l.Pod, l.Message))
+					errorCount++
+				}
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 解决措施 ===
+	if report.Resolution.Final != "" {
+		sb.WriteString("## ✅ 解决措施\n\n")
+		sb.WriteString(fmt.Sprintf("%s\n\n", report.Resolution.Final))
+	}
+
+	// === 经验教训 ===
+	if len(report.LessonsLearned) > 0 {
+		sb.WriteString("## 💡 经验教训\n\n")
+		for i, l := range report.LessonsLearned {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, l))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 做得好的 ===
+	if len(report.WhatWentWell) > 0 {
+		sb.WriteString("## ✅ 做得好的\n\n")
+		for _, item := range report.WhatWentWell {
+			sb.WriteString(fmt.Sprintf("- %s\n", item))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 可以改进的 ===
+	if len(report.WhatWentWrong) > 0 {
+		sb.WriteString("## ❌ 可以改进的\n\n")
+		for _, item := range report.WhatWentWrong {
+			sb.WriteString(fmt.Sprintf("- %s\n", item))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 促成因素 ===
+	if len(report.ContributingFactors) > 0 {
+		sb.WriteString("## 🔍 促成因素\n\n")
+		for _, item := range report.ContributingFactors {
+			sb.WriteString(fmt.Sprintf("- %s\n", item))
+		}
+		sb.WriteString("\n")
+	}
+
+	// === 改进项 ===
+	if len(report.ActionItems) > 0 {
+		sb.WriteString("## 🎯 改进项\n\n")
+		sb.WriteString("| 改进项 | 优先级 | 负责人 | 截止日期 | 退出标准 |\n|--------|--------|--------|----------|----------|\n")
+		for _, a := range report.ActionItems {
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n",
+				a.Description, a.Priority, a.Owner, a.DueDate, a.ExitCriteria))
+		}
+		sb.WriteString("\n")
 	}
 
 	return sb.String()

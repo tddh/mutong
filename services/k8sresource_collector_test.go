@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"gitee.com/tddh/mutong/config"
 	"github.com/allegro/bigcache/v3"
 	"github.com/twmb/franz-go/pkg/kgo"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
@@ -173,6 +174,7 @@ func newTestCollectorService(db interfaces.GraphDB, cache interfaces.Cache, mq i
 		cache:          cache,
 		messageQueue:   mq,
 		kafkaTopic:     "k8s_resources",
+		cfg:            &config.Config{Kafka: config.Kafka{WorkerPoolSize: 10, TaskChanBuffer: 1000, PublishTimeoutSec: 60}},
 		apiResources:   make(map[string]bool),
 		kafkaSem:       make(chan struct{}, 500),
 		maxRetries:     3,
@@ -210,6 +212,7 @@ func TestSeedToKafka_PublishesMessage(t *testing.T) {
 		logger:       &mockNebulaLogger{},
 		messageQueue: mockMQ,
 		kafkaTopic:   "k8s_resources",
+		cfg:          &config.Config{Kafka: config.Kafka{PublishTimeoutSec: 60}},
 	}
 
 	svc.seedToKafka("test-key", []byte(`{"kind":"Pod"}`), "core", "Added", "test-cluster")

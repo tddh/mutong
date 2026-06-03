@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"gitee.com/tddh/mutong/config"
 	"github.com/allegro/bigcache/v3"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
 
@@ -83,6 +84,7 @@ func TestSeedToKafka_PublishError(t *testing.T) {
 		logger:       &mockNebulaLogger{},
 		messageQueue: mockMQ,
 		kafkaTopic:   "k8s_resources",
+		cfg:          &config.Config{Kafka: config.Kafka{PublishTimeoutSec: 60}},
 	}
 
 	svc.seedToKafka("test-key", []byte(`{}`), "core", "Added", "test-cluster")
@@ -98,6 +100,7 @@ func TestSeedToKafka_ValidMessage(t *testing.T) {
 		logger:       &mockNebulaLogger{},
 		messageQueue: mockMQ,
 		kafkaTopic:   "k8s_resources",
+		cfg:          &config.Config{Kafka: config.Kafka{PublishTimeoutSec: 60}},
 	}
 
 	svc.seedToKafka("test-key", []byte(`{"kind":"Pod"}`), "core", "Added", "test-cluster")
@@ -276,6 +279,7 @@ func TestConsumeKafkaMessagesWithContext_DLQOnMaxRetries(t *testing.T) {
 		logger:       &mockNebulaLogger{},
 		messageQueue: mockMQ,
 		kafkaTopic:   "k8s_resources",
+		cfg:          &config.Config{Kafka: config.Kafka{WorkerPoolSize: 10, TaskChanBuffer: 1000}},
 		apiResources: make(map[string]bool),
 		kafkaSem:     make(chan struct{}, 500),
 		maxRetries:   2,
@@ -341,6 +345,7 @@ func TestConsumeKafkaMessagesWithContext_DLQFailure(t *testing.T) {
 		logger:       &mockNebulaLogger{},
 		messageQueue: mockMQ,
 		kafkaTopic:   "k8s_resources",
+		cfg:          &config.Config{Kafka: config.Kafka{WorkerPoolSize: 10, TaskChanBuffer: 1000}},
 		apiResources: make(map[string]bool),
 		kafkaSem:     make(chan struct{}, 500),
 		maxRetries:   2,

@@ -6,6 +6,7 @@ async function request(url, options = {}) {
     try {
         const response = await fetch(`${API_BASE}${url}`, config);
         if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`);
+        if (options.responseType === 'text') return await response.text();
         return await response.json();
     } catch (error) {
         console.error(`[API] ${url} failed:`, error);
@@ -120,7 +121,7 @@ export const API = {
         timeline: (fingerprint) => request(`/api/v1/retrospective/timeline/${encodeURIComponent(fingerprint)}`),
         causalChain: (fingerprint) => request(`/api/v1/retrospective/causal-chain/${encodeURIComponent(fingerprint)}`),
         postmortem: (fingerprint) => request(`/api/v1/retrospective/postmortem/${encodeURIComponent(fingerprint)}`, { method: 'POST' }),
-        postmortemText: (fingerprint) => request(`/api/v1/retrospective/postmortem/${encodeURIComponent(fingerprint)}/text`, { method: 'GET' }),
+        postmortemText: (fingerprint) => request(`/api/v1/retrospective/postmortem/${encodeURIComponent(fingerprint)}/text`, { method: 'GET', responseType: 'text' }),
         update: (fingerprint, data) => request(`/api/v1/retrospective/postmortem/${encodeURIComponent(fingerprint)}`, { method: 'PUT', body: JSON.stringify(data) }),
         history: (fingerprint) => request(`/api/v1/retrospective/history/${encodeURIComponent(fingerprint)}`),
         list: (params) => { const q = new URLSearchParams(params).toString(); return request(`/api/v1/retrospective/list${q ? '?' + q : ''}`); },

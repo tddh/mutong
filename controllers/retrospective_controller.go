@@ -113,7 +113,6 @@ func (c *RetrospectiveController) getPostmortemText(ctx *gin.Context) {
 		return
 	}
 
-	ctx.Status(http.StatusOK)
 	ctx.Header("Content-Type", "text/markdown")
 	ctx.String(http.StatusOK, c.service.FormatReport(report))
 }

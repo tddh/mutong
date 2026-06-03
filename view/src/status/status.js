@@ -58,8 +58,8 @@ createApp({
         };
 
         const suppStatus = () => {
-            const s = this.suppression || {};
-            if (!s || s.activeAlertsCount == null) return badge('未知', '#999');
+            const s = this.suppression?.ruleEngine || this.suppression || {};
+            if (!s || s.timeWindowSeconds == null) return badge('未知', '#999');
             return s.timeWindowSeconds > 0 ? badge('运行中', 'var(--success-color)') : badge('未启用', '#999');
         };
 
@@ -99,7 +99,7 @@ createApp({
         };
 
         const suppCard = () => {
-            const re = this.suppression || {};
+            const re = this.suppression?.ruleEngine || this.suppression || {};
             return h('div', { class: 'status-card' }, [
                 h('div', { class: 'status-card-header' }, [
                     h('span', { class: 'status-card-title' }, '🛡️ 告警抑制'),

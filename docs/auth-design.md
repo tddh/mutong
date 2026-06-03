@@ -1,8 +1,8 @@
 # 重明 (Mutong) 用户认证体系设计文档
 
-> **版本**: v2.1  
+> **版本**: v2.2  
 > **状态**: 已实施（Zitadel + 本地混合架构）  
-> **最后更新**: 2026-06-02  
+> **最后更新**: 2026-06-03  
 > **依赖**: Go 1.25, Gin v1.10, GORM v1.31, PostgreSQL, Redis, Vue 3, Vite 5, Zitadel (OIDC)
 
 ---
@@ -13,11 +13,10 @@
 2. [OAuth 2.0 授权服务器](#2-oauth-20-授权服务器)
 3. [数据模型](#3-数据模型)
 4. [API 设计](#4-api-设计)
-5. [CAPTCHA 防暴破](#5-captcha-防暴破)
-6. [CLI 认证 (mutongctl)](#6-cli-认证-mutongctl)
-7. [前端登录页面](#7-前端登录页面)
-8. [中间件链](#8-中间件链)
-9. [安全分层防护](#9-安全分层防护)
+5. [CLI 认证 (mutongctl)](#5-cli-认证-mutongctl)
+6. [前端登录页面](#6-前端登录页面)
+7. [中间件链](#7-中间件链)
+8. [安全分层防护](#8-安全分层防护)
 10. [实施计划](#10-实施计划)
 11. [附录：技术选型依据](#11-附录技术选型依据)
 
@@ -71,7 +70,7 @@
 │  │  ✅ OAuth2 授权码认证  │  ✅ 本地 Session (HMAC 签名)     │ │
 │  │  ✅ Token 签发        │  ✅ 用户-角色本地映射             │ │
 │  │                        │  ✅ 本地 OAuth2 Provider (fosite) │ │
-│  │                        │  ✅ 登录限流 + 验证码            │ │
+│  │                        │  ✅ 登录限流                 │ │
 │  │                        │  ✅ Argon2id 密码 (local 模式)   │ │
 │  └───────────────────────┴─────────────────────────────────┘ │
 │                                                               │
@@ -79,10 +78,9 @@
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │ coreos/go-oidc/v3  → Zitadel OIDC 客户端                │ │
 │  │ ory/fosite         → 本地 OAuth 2.0 Provider            │ │
-│  │ go-captcha v2      → 滑动验证码                           │ │
 │  │ casbin v3          → RBAC 权限                           │ │
 │  │ GORM + PostgreSQL  → 用户/Token/Session 存储             │ │
-│  │ Redis              → CAPTCHA / 限流 / Session 缓存       │ │
+│  │ Redis              → 限流 / Session 缓存                  │ │
 │  └─────────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -107,7 +105,6 @@ require (
     golang.org/x/oauth2 v0.34.0                 // OAuth2 客户端 (Device Flow)
     github.com/casbin/casbin/v3 v3.10.0         // RBAC 权限
     github.com/casbin/gorm-adapter/v3 v3.32.0   // Casbin GORM 适配器
-    github.com/wenlng/go-captcha/v2 v2.0.5      // 滑动验证码
     golang.org/x/crypto v0.50.0                 // Argon2id / bcrypt
     github.com/google/uuid v1.6.0               // UUID 生成
 )
@@ -162,13 +159,6 @@ auth:
       - email
       - offline_access
 
-  captcha:
-    enabled: true
-    ttl: 5m
-    require_after_failures: 3
-    lockout_after_failures: 5
-    lockout_duration: 15m
-
   login_ratelimit:
     enabled: true
     ip_max_per_minute: 10
@@ -197,7 +187,6 @@ mutong/
 │   ├── session.go                     #   本地 Session 管理 (HMAC 签名)
 │   ├── token.go                        #   PAT/SAT 生成/验证
 │   ├── password.go                     #   Argon2id 密码哈希
-│   ├── captcha.go                      #   go-captcha 服务
 │   ├── login_limiter.go               #   登录限流/锁定
 │   ├── casbin.go                       #   Casbin RBAC 集成
 │   ├── oauth2_provider.go             #   本地 fosite OAuth2 Provider
@@ -206,9 +195,8 @@ mutong/
 │
 ├── controllers/                        # HTTP handlers
 │   ├── auth_middleware.go             #   BearerTokenMiddleware + RequireAuth
-│   ├── auth_controller.go             #   本地登录/CAPTCHA/PAT CRUD
+│   ├── auth_controller.go             #   本地登录/PAT CRUD
 │   ├── oidc_controller.go             #   Zitadel OIDC 登录/回调
-│   ├── captcha_controller.go          #   CAPTCHA 端点
 │   ├── oauth2/                         #   OAuth 2.0 端点 (fosite)
 │   │   ├── authorize.go
 │   │   ├── token.go
@@ -496,10 +484,7 @@ type ServiceAccount struct {
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/auth/captcha` | 获取 CAPTCHA（id + base64 图片） |
-| POST | `/api/auth/captcha/verify` | 验证 CAPTCHA |
-| POST | `/api/auth/login-status` | 查询登录失败状态（是否需要 CAPTCHA/锁定） |
-| POST | `/api/auth/login` | OAuth 登录（用户名+密码+CAPTCHA → 设置 Cookie Session） |
+| POST | `/api/auth/login` | 登录（用户名+密码 → 设置 Cookie Session） |
 | GET | `/api/auth/consent` | OAuth 授权确认页面数据 |
 | POST | `/api/auth/consent` | 用户确认/拒绝授权 |
 | GET | `/api/auth/me` | 获取当前用户信息 |
@@ -517,39 +502,7 @@ type ServiceAccount struct {
 | POST | `/api/auth/service-accounts/:id/tokens` | 为 SA 创建 SAT (admin) |
 | DELETE | `/api/auth/service-accounts/:id/tokens/:tid` | 撤销 SAT (admin) |
 
-### 4.4 CAPTCHA API 详细设计
-
-```
-GET /api/auth/captcha
-Response 200:
-{
-    "captcha_id": "uuid-v4",
-    "image": "data:image/png;base64,iVBORw0...",   // 主图
-    "thumb": "data:image/png;base64,iVBORw0..."     // 缩略图
-}
-
-POST /api/auth/captcha/verify
-Body:
-{
-    "captcha_id": "uuid-v4",
-    "dots": [{"x": 120, "y": 45}, {"x": 200, "y": 80}, {"x": 310, "y": 55}]
-}
-Response 200: { "valid": true }
-Response 400: { "valid": false, "error": "验证码错误" }
-
-POST /api/auth/login-status
-说明: 在登录页加载时调用，返回当前 IP/会话的登录状态（是否需要 CAPTCHA）
-Body: { "username": "optional" }  // 可选，如果提供则查询该用户特定状态
-Response 200:
-{
-    "fail_count": 3,            // 该 IP 的失败次数
-    "require_captcha": true,    // 是否需要验证码
-    "locked": false,            // 账号是否被锁定
-    "lock_remaining": 0         // 锁定剩余秒数 (0 = 未锁定)
-}
-```
-
-### 4.5 PAT/SAT 创建 API
+### 4.4 PAT/SAT 创建 API
 
 ```
 POST /api/auth/tokens
@@ -575,135 +528,7 @@ Response 201:
 
 ---
 
-## 5. CAPTCHA 防暴破
-
-### 5.1 技术选型
-
-| 组件 | 选型 | 理由 |
-|------|------|------|
-| CAPTCHA 库 | `github.com/wenlng/go-captcha/v2` | Vue 3 原生组件，点击验证码，活跃维护，无 CVE |
-| 存储 | Redis (项目已有) | TTL 5 分钟，一次性使用 |
-| CAPTCHA 类型 | 点击验证码 (Click CAPTCHA) | 用户体验优于传统文本，适合内部工具 |
-
-### 5.2 渐进式策略
-
-```
-登录失败次数    行为
-─────────────────────────────────
- 0-2 次         仅需用户名+密码
- ≥3 次          需要完成 CAPTCHA
- ≥5 次          CAPTCHA + 账号临时锁定 15 分钟
- ≥10 次         CAPTCHA + 账号锁定 1 小时 + 管理员通知
-```
-
-### 5.3 Redis 键设计
-
-```
-captcha:{id}              → JSON answer (TTL: 300s)
-ratelimit:login:ip:{ip}   → counter (TTL: 60s, 滑动窗口 10 req/min)
-login:fail:{username}     → counter (TTL: 900s, 5 次后锁定)
-lockout:{username}        → 1 (TTL: 900s for 15min, 3600s for 1h)
-```
-
-### 5.4 后端实现
-
-```go
-// services/auth/captcha.go
-type CaptchaService struct {
-    rdb    *redis.Client
-    captcha *click.Captcha
-}
-
-func NewCaptchaService(rdb *redis.Client) *CaptchaService {
-    return &CaptchaService{
-        rdb:     rdb,
-        captcha: click.New(),
-    }
-}
-
-// Generate 生成验证码，返回 captcha_id + base64 图片
-func (s *CaptchaService) Generate(ctx context.Context) (*CaptchaData, error) {
-    data, err := s.captcha.Generate()
-    if err != nil {
-        return nil, err
-    }
-    id := uuid.New().String()
-    answer, _ := json.Marshal(data.GetData())
-    s.rdb.Set(ctx, "captcha:"+id, answer, 5*time.Minute)
-
-    masterB64, _ := data.GetMasterImage().ToBase64()
-    thumbB64, _ := data.GetThumbImage().ToBase64()
-    return &CaptchaData{
-        ID:    id,
-        Image: masterB64,
-        Thumb: thumbB64,
-    }, nil
-}
-
-// Verify 验证用户点击坐标
-func (s *CaptchaService) Verify(ctx context.Context, id string, userDots string) bool {
-    stored, err := s.rdb.Get(ctx, "captcha:"+id).Result()
-    if err != nil {
-        return false
-    }
-    s.rdb.Del(ctx, "captcha:"+id) // 一次性使用
-
-    var expected, actual []click.Dot
-    json.Unmarshal([]byte(stored), &expected)
-    json.Unmarshal([]byte(userDots), &actual)
-    return click.CheckDots(expected, actual)
-}
-```
-
-### 5.5 登录限流
-
-```go
-// services/auth/login_limiter.go
-type LoginLimiter struct {
-    rdb *redis.Client
-}
-
-func (l *LoginLimiter) CheckIP(ctx context.Context, ip string) error {
-    key := "ratelimit:login:ip:" + ip
-    count, _ := l.rdb.Incr(ctx, key).Result()
-    if count == 1 {
-        l.rdb.Expire(ctx, key, 1*time.Minute)
-    }
-    if count > 10 {
-        return fmt.Errorf("too many requests")
-    }
-    return nil
-}
-
-func (l *LoginLimiter) RecordFailure(ctx context.Context, username string) (int, bool) {
-    key := "login:fail:" + username
-    count, _ := l.rdb.Incr(ctx, key).Result()
-    l.rdb.Expire(ctx, key, 15*time.Minute)
-    locked := count >= 5
-    if locked {
-        l.rdb.Set(ctx, "lockout:"+username, "1", 15*time.Minute)
-    }
-    return int(count), locked
-}
-
-func (l *LoginLimiter) IsLocked(ctx context.Context, username string) bool {
-    exists, _ := l.rdb.Exists(ctx, "lockout:"+username).Result()
-    return exists > 0
-}
-
-func (l *LoginLimiter) ClearFailures(ctx context.Context, username string) {
-    l.rdb.Del(ctx, "login:fail:"+username, "lockout:"+username)
-}
-
-func (l *LoginLimiter) GetStatus(ctx context.Context, username string) (failCount int, requireCaptcha bool, locked bool) {
-    count, _ := l.rdb.Get(ctx, "login:fail:"+username).Int()
-    return count, count >= 3, l.IsLocked(ctx, username)
-}
-```
-
----
-
-## 6. CLI 认证 (mutongctl)
+## 5. CLI 认证 (mutongctl)
 
 ### 6.1 mutongctl auth login
 
@@ -745,9 +570,9 @@ func (c *Client) ensureValidToken() error {
 
 ---
 
-## 7. 前端登录页面
+## 6. 前端登录页面
 
-### 7.1 页面布局
+### 6.1 页面布局
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -759,12 +584,6 @@ func (c *Client) ensureValidToken() error {
 │  │  用户名:  [________________]         │    │
 │  │  密码:    [________________]         │    │
 │  │                                     │    │
-│  │  ★ 安全验证 (第3次失败后显示)          │    │
-│  │  ┌─────────────────────────┐        │    │
-│  │  │   [点击验证码图片]        │  🔄   │    │
-│  │  │   请按顺序点击图中字符     │        │    │
-│  │  └─────────────────────────┘        │    │
-│  │                                     │    │
 │  │  [        登  录        ]            │    │
 │  └─────────────────────────────────────┘    │
 │                                             │
@@ -774,16 +593,16 @@ func (c *Client) ensureValidToken() error {
 └─────────────────────────────────────────────┘
 ```
 
-### 7.2 文件
+### 6.2 文件
 
 | 文件 | 作用 |
 |------|------|
 | `view/src/login.html` | 登录页 (独立 HTML 入口) |
-| `view/src/login.js` | 登录逻辑 (Vue 3 + go-captcha-vue) |
+| `view/src/login.js` | 登录逻辑 (Vue 3) |
 | `view/src/consent.html` | OAuth 授权确认页 |
 | `view/src/consent.js` | 授权确认逻辑 |
 
-### 7.3 Vite 构建配置
+### 6.3 Vite 构建配置
 
 ```js
 // vite.config.js rollupOptions.input 新增
@@ -791,13 +610,13 @@ login: resolve(__dirname, 'src/login.html'),
 consent: resolve(__dirname, 'src/consent.html'),
 ```
 
-### 7.4 样式设计
+### 6.4 样式设计
 
 复用 `common.css` 变量 (`--primary-color: #1890ff`, `--bg-color: #f0f2f5` 等)。
 
-登录卡片：400px 宽，居中，白色背景，8px 圆角，轻阴影。CAPTCHA 区域在密码输入框下方，`v-if="requireCaptcha"` 控制显示。
+登录卡片：400px 宽，居中，白色背景，8px 圆角，轻阴影。
 
-### 7.5 Auth Store (Pinia)
+### 6.5 Auth Store (Pinia)
 
 ```js
 // view/src/stores/auth.js
@@ -856,7 +675,7 @@ export const useAuthStore = defineStore('auth', () => {
 })
 ```
 
-### 7.6 HTTP 拦截器
+### 6.6 HTTP 拦截器
 
 ```js
 // view/src/utils/http.js
@@ -904,9 +723,9 @@ export async function request(url, options = {}) {
 
 ---
 
-## 8. 中间件链
+## 7. 中间件链
 
-### 8.1 中间件注册顺序
+### 7.1 中间件注册顺序
 
 ```go
 // cmd/main.go initializeGin()
@@ -923,7 +742,7 @@ apiGroup.Use(RequireAuthMiddleware())           // 6. ★ 强制认证（白名�
 // Phase 5: apiGroup.Use(CasbinMiddleware(...))   // 7. RBAC 授权
 ```
 
-### 8.2 BearerTokenMiddleware（统一 Token 验证 — 三条路径）
+### 7.2 BearerTokenMiddleware（统一 Token 验证 — 三条路径）
 
 ```go
 // controllers/auth_middleware.go
@@ -998,7 +817,7 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 | Path 2: OIDC | 任何非 mtp_/mts_ 的 Bearer token | 调用 Zitadel UserInfo 端点 | `zitadel_user_id` → 本地 User |
 | Path 3: Session | `mutong_session` Cookie | HMAC-SHA256 签名（回退 UUID 明文） | `User.ID` / `User.UUID` |
 
-### 8.3 RequireAuthMiddleware
+### 7.3 RequireAuthMiddleware
 
 ```go
 func RequireAuthMiddleware() gin.HandlerFunc {
@@ -1014,7 +833,7 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 
 ---
 
-## 9. 安全分层防护
+## 8. 安全分层防护
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -1029,30 +848,25 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 │ 5 次失败 → 15 分钟锁定 (Redis TTL 900s)                      │
 │ 10 次失败 → 1 小时锁定                                       │
 ├─────────────────────────────────────────────────────────────┤
-│ 第 4 层 — CAPTCHA                                           │
-│ go-captcha v2 点击验证码                                     │
-│ 渐进式: ≥3 次失败后要求                                      │
-│ Redis 存储, 一次性使用, TTL 5min                             │
-├─────────────────────────────────────────────────────────────┤
-│ 第 5 层 — OAuth 2.0 协议安全                                 │
+│ 第 4 层 — OAuth 2.0 协议安全                                 │
 │ PKCE S256 强制 (防授权码拦截)                                 │
 │ Refresh Token Rotation (防重放)                              │
 │ Device Code 10min 过期 (防暴力猜测)                           │
 │ Token Introspection (实时验证)                                │
 │ Client Secret bcrypt 存储 (防数据库泄露)                      │
 ├─────────────────────────────────────────────────────────────┤
-│ 第 6 层 — Token 安全                                         │
+│ 第 5 层 — Token 安全                                         │
 │ Access Token: 15min JWT (RS256)                              │
 │ Refresh Token: HttpOnly + Secure + SameSite=Strict Cookie    │
 │ PAT/SAT: SHA-256 hash 存储 (防数据库泄露还原)                 │
 │ jti 黑名单: Redis (即时撤销)                                  │
 ├─────────────────────────────────────────────────────────────┤
-│ 第 7 层 — 密码安全                                           │
+│ 第 6 层 — 密码安全                                           │
 │ Argon2id (m=64MB, t=3, p=4)                                  │
 │ bcrypt 备选 (cost=12)                                        │
 │ 禁止弱密码 (长度 < 8, 纯数字, 常见密码黑名单)                   │
 ├─────────────────────────────────────────────────────────────┤
-│ 第 8 层 — 审计                                               │
+│ 第 7 层 — 审计                                               │
 │ 登录成功/失败日志 (zap)                                       │
 │ Token 创建/撤销日志                                           │
 │ 异常行为告警 (异地登录, 频繁失败)                               │
@@ -1061,14 +875,14 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 
 ---
 
-## 10. 实施状态
+## 9. 实施状态
 
 > **当前状态**: 混合架构已实施。Zitadel OIDC 集成、本地 PAT/SAT、Casbin RBAC、Session 管理等核心功能已完成。
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
 | Phase 1 | 本地 fosite OAuth2 Provider + JWT | ✅ 完成 |
-| Phase 2 | CAPTCHA 集成 + 登录限流 | ✅ 完成 |
+| Phase 2 | 登录限流 | ✅ 完成 |
 | Phase 3 | CLI 登录 (Device Flow) | ✅ 完成 |
 | Phase 4 | 前端登录页 + Auth Store | ✅ 完成 |
 | Phase 5 | PAT/SAT + Casbin RBAC | ✅ 完成 |
@@ -1078,9 +892,9 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 
 ---
 
-## 11. 附录：技术选型依据
+## 10. 附录：技术选型依据
 
-### 11.1 OAuth 2.0 库对比
+### 10.1 OAuth 2.0 库对比
 
 | 维度 | ory/fosite | openshift/osin | go-authgate |
 |------|------------|----------------|-------------|
@@ -1091,17 +905,7 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 | 生产验证 | Ory Hydra | OpenShift | 无 |
 | **结论** | ✅ 选用 | ❌ 功能不足 | ❌ 太新 |
 
-### 11.2 CAPTCHA 库对比
-
-| 维度 | go-captcha v2 | base64Captcha | dchest/captcha |
-|------|---------------|---------------|----------------|
-| ⭐ Stars | 2,300 | 2,400 | 2,100 |
-| Vue 3 组件 | ✅ 原生 | ❌ | ❌ |
-| CVE | 无 | ⚠️ CVE-2023-45292 | 无 (OCR 可破) |
-| 维护 | 2026.03 活跃 | 2025.01 | 2024.12 |
-| **结论** | ✅ 选用 | ❌ CVE | △ 备选极简方案 |
-
-### 11.3 参考项目
+### 10.2 参考项目
 
 | 项目 | 参考价值 |
 |------|----------|

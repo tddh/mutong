@@ -61,7 +61,7 @@
          ▼                         ▼                         ▼
 ┌─────────────────┐  ┌─────────────────────┐  ┌────────────────────────┐
 │  Controllers    │  │  Services (核心)     │  │  Interfaces (契约)      │
-│  26个文件（含oauth2/子包共31个）│  │  ┌───────────────┐   │  │  Logger/GraphDB/MQ/    │
+│  28个文件（含oauth2/子包共33个）│  │  ┌───────────────┐   │  │  Logger/GraphDB/MQ/    │
 │  - alert        │  │  │ alert 告警管道 │   │  │  Cache/K8s/LLM/...     │
 │  - diagnosis    │  │  ├───────────────┤   │  │                         │
 │  - inspection   │  │  │ diagnosis AI  │   │  │  依赖反转设计           │
@@ -104,7 +104,7 @@
 
 采用经典的 Controller → Service → Model → Interface 分层架构：
 
-- **Controllers (控制器层)**: 处理 HTTP 请求，参数校验，调用 Service 返回 JSON。26 个文件（含 oauth2/ 子包共 31 个）。
+- **Controllers (控制器层)**: 处理 HTTP 请求，参数校验，调用 Service 返回 JSON。28 个文件（含 oauth2/ 子包共 33 个）。
 - **Services (服务层)**: 核心业务逻辑，编排多个数据源和处理步骤。
 - **Models (模型层)**: 数据结构定义，GORM 模型，业务实体。
 - **Interfaces (接口层)**: 依赖反转，所有服务依赖接口而非具体实现。
@@ -709,11 +709,11 @@ type ExecutionPlan struct {
 | delete_pod | high | 1.00 | 强制删除 Pod |
 | create_hpa | medium | 0.90 | 创建 HPA |
 | update_hpa | medium | 0.85 | 更新 HPA 配置 |
-| update_configmap | high | 1.00 | 更新 ConfigMap 数据（需人工审批） |
-| update_secret | high | 1.00 | 更新 Secret 数据（需人工审批） |
-| update_resource_limits | medium | 0.90 | 调整容器 CPU/Memory 资源限制 |
-| update_deployment_image | high | 1.00 | 变更容器镜像（需人工审批） |
-| update_annotations / update_labels | medium | 0.85 | 修改资源注解和标签 |
+| update_configmap | medium | 0.90 | 更新 ConfigMap 数据（需人工审批） |
+| update_secret | high | 0.95 | 更新 Secret 数据（需人工审批） |
+| update_resource_limits | medium | 0.85 | 调整容器 CPU/Memory 资源限制 |
+| update_deployment_image | high | 0.90 | 变更容器镜像（需人工审批） |
+| update_annotations / update_labels | low | 0.70 | 修改资源注解和标签 |
 
 #### 安全防护
 
@@ -1530,14 +1530,12 @@ type LLMProvider interface {
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| POST | `/api/auth/login` | 用户登录（密码 + 验证码） |
+| POST | `/api/auth/login` | 用户登录（密码） |
 | GET | `/api/auth/me` | 获取当前登录用户信息 |
 | POST | `/api/auth/logout` | 用户登出 |
 | POST | `/api/auth/tokens` | 创建 API Token（PAT） |
 | GET | `/api/auth/tokens` | 列出当前用户的 API Token |
 | DELETE | `/api/auth/tokens/:id` | 撤销指定 API Token |
-| GET | `/api/auth/captcha` | 生成图片验证码 |
-| POST | `/api/auth/captcha/verify` | 验证验证码 |
 
 ### 7.11 OAuth2 / OIDC API
 
@@ -2071,7 +2069,7 @@ Gin Engine
   ├── CORSMiddleware           // CORS 跨域 (gin-contrib/cors)
   ├── RateLimiter              // 令牌桶限流 (100 req/s)
   ├── BearerTokenMiddleware    // Bearer token (PAT/OAuth2) + session cookie 回退
-  ├── RequireAuthMiddleware    // /api/ 拦截 + 白名单(login/captcha/webhook/external)
+  ├── RequireAuthMiddleware    // /api/ 拦截 + 白名单(login/webhook/external)
   └── Recovery                 // panic 恢复 (gin.Recovery)
 ```
 

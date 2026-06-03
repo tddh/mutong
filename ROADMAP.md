@@ -11,14 +11,14 @@
 - [x] MCP 工具服务器（20 个内置工具）
 - [x] 业务拓扑（Beyla eBPF + OTel Collector 自动发现）
 - [x] Web 终端 + 日志查询 + 指标监控 + 链路追踪
-- [x] CLI 工具 mutongctl（18 个命令模块）
+- [x] CLI 工具 mutongctl（19 个命令模块）
 - [x] RBAC 权限（admin / operator / viewer）
 
 ## v0.2.0 — 增强
 
 - [ ] 用户/角色 CRUD（POST/PUT/DELETE）
 - [ ] 前端测试覆盖
-- [ ] Docker 一键部署
+- [x] Docker 一键部署
 - [x] CI 安全扫描（gosec + govulncheck）
 - [ ] 诊断模块单元测试 Phase 2-4
 

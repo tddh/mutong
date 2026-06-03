@@ -49,7 +49,7 @@ Built on the "**Observe, Understand, Remediate, Learn**" philosophy, Mutong star
 - Historical report comparison, trend analysis, and pass/fail/warn statistics
 
 ### 5. Self-Healing Executor
-- 10 operation types: `restartPod`, `deletePod`, `scaleDeployment`, `createHPA`, `updateHPA`, `updateConfigMap`, `updateSecret`, `updateResourceLimits`, `updateDeploymentImage`, `updateAnnotations` / `updateLabels`
+- 11 operation types: `restart_pod`, `delete_pod`, `scale_deployment`, `create_hpa`, `update_hpa`, `update_configmap`, `update_secret`, `update_resource_limits`, `update_deployment_image`, `update_annotations`, `update_labels`
 - 3 risk levels: Low / Medium / High
 - Dual execution mode: manual approval (default) / auto mode (risk threshold based)
 - Complete audit logging to PostgreSQL
@@ -176,21 +176,22 @@ mutongctl inspect run && mutongctl inspect report
 |-----------|---------|---------|---------|
 | Go | 1.25+ | Backend build | [go.dev/dl](https://go.dev/dl/) |
 | Bun | 1.x+ | Frontend package manager | [bun.sh](https://bun.sh/) |
-| PostgreSQL | 15+ (with pgvector) | Relational data & vector search | [postgresql.org](https://www.postgresql.org/download/) |
-| NebulaGraph | 3.x+ | Graph database for topology | [nebula-graph.io](https://www.nebula-graph.io/download) |
-| Kafka | 2.x+ | Async message queue | [kafka.apache.org](https://kafka.apache.org/downloads) |
+| NebulaGraph | 3.8+ | Graph database for topology | [nebula-graph.io](https://www.nebula-graph.io/download) |
+| Kafka (or Redpanda) | Kafka 2.x+ / Redpanda v24+ | Async message queue | [kafka.apache.org](https://kafka.apache.org/downloads) |
 | Kubernetes cluster | — | Resource collection & self-healing | kubeconfig access required |
 
 **Optional components** (not required, corresponding features unavailable without them):
 
 | Component | Purpose |
 |-----------|---------|
+| PostgreSQL 15+ (with pgvector) | Relational data & vector search |
 | Prometheus | Metrics query & alert rules |
 | Elasticsearch | Log search |
 | Redis | Diagnosis session cache |
 | Beyla (eBPF) + OTel Collector | Business topology auto-discovery (see [deploy/](deploy/)) |
 | SkyWalking OAP | Distributed tracing backend |
 | Pyroscope | Continuous profiling |
+| LLM API Key | AI diagnosis deep analysis & postmortem generation |
 
 ### Setup
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/allegro/bigcache/v3"
 	"go.uber.org/zap"
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -86,8 +85,93 @@ func (d *K8sResoureService) processLabelsRelationship(unstructuredObj *unstructu
 	}
 }
 
+// processWebhookConfigurationRelationship 统一处理
+// MutatingWebhookConfiguration 和 ValidatingWebhookConfiguration
+// 遍历所有 webhooks，建立 WebhookRefSvc 边指向 clientConfig.service
+func (d *K8sResoureService) processWebhookConfigurationRelationship(unstructuredObj *unstructured.Unstructured) {
+	obj := unstructuredObj.Object
+	webhooksRaw, ok := obj["webhooks"]
+	if !ok {
+		return
+	}
+	webhooks, ok := webhooksRaw.([]interface{})
+	if !ok || len(webhooks) == 0 {
+		return
+	}
+
+	d.CleanupOutgoingEdgesByType(string(unstructuredObj.GetUID()), "WebhookRefSvc")
+
+	defaultNS := unstructuredObj.GetNamespace()
+
+	for _, whRaw := range webhooks {
+		wh, ok := whRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		whName, _ := wh["name"].(string)
+
+		ccRaw, ok := wh["clientConfig"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		svcRaw, ok := ccRaw["service"].(map[string]interface{})
+		if !ok {
+			continue // url 模式, 不是 service 引用
+		}
+
+		svcName, _ := svcRaw["name"].(string)
+		if svcName == "" {
+			continue
+		}
+
+		svcNS, _ := svcRaw["namespace"].(string)
+		if svcNS == "" {
+			svcNS = defaultNS
+		}
+
+		svcUID, found := d.lookupUID("Service", svcNS, svcName)
+		if !found {
+			d.logger.Debug("processWebhookConfigurationRelationship: Service not found",
+				zap.String("webhook", whName),
+				zap.String("serviceNS", svcNS),
+				zap.String("serviceName", svcName))
+			continue
+		}
+
+		path := ""
+		if p, ok := svcRaw["path"].(string); ok {
+			path = p
+		}
+		port := int32(0)
+		if p, ok := svcRaw["port"].(float64); ok {
+			port = int32(p)
+		}
+
+		query := fmt.Sprintf(
+			"INSERT EDGE WebhookRefSvc(webhook_name, path, port) VALUES %s -> %s:(%s, %s, %d);",
+			strconv.Quote(string(unstructuredObj.GetUID())),
+			strconv.Quote(svcUID),
+			strconv.Quote(whName),
+			strconv.Quote(path),
+			port,
+		)
+		d.logger.Debug("processWebhookConfigurationRelationship",
+			zap.String("nGQL", query))
+		_, err := d.graphDB.Execute(query)
+		if err != nil {
+			d.logger.Error("Failed to insert WebhookRefSvc edge", zap.Error(err))
+		}
+	}
+}
+
 func (d *K8sResoureService) processMutatingWebhookConfigurationRelationship(unstructuredObj *unstructured.Unstructured) {
-	var _ admissionv1.MutatingWebhookConfiguration
+	d.processWebhookConfigurationRelationship(unstructuredObj)
+}
+
+func (d *K8sResoureService) processValidatingWebhookConfigurationRelationship(unstructuredObj *unstructured.Unstructured) {
+	d.processWebhookConfigurationRelationship(unstructuredObj)
 }
 
 func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured.Unstructured) {

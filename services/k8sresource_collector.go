@@ -145,6 +145,12 @@ func (d *K8sResoureService) Relationship(uid string) {
 		if k8sResource.Kind == "Secret" {
 			d.processSecretTokenRelationship(unstructuredObj)
 		}
+		if k8sResource.Kind == "MutatingWebhookConfiguration" {
+			d.processMutatingWebhookConfigurationRelationship(unstructuredObj)
+		}
+		if k8sResource.Kind == "ValidatingWebhookConfiguration" {
+			d.processValidatingWebhookConfigurationRelationship(unstructuredObj)
+		}
 	}
 
 	if len(k8sResources) > 0 {

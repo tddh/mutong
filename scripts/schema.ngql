@@ -100,6 +100,16 @@ CREATE EDGE IF NOT EXISTS UsesTLS () COMMENT = '使用 TLS';
 CREATE EDGE IF NOT EXISTS Uses () COMMENT = '通用引用，如 Ingress 使用 Service';
 
 -- =====================================================
+-- EDGE: Webhook
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS WebhookRefSvc (
+    webhook_name string,
+    path string,
+    port int
+) COMMENT = 'Webhook 配置引用 Service';
+
+-- =====================================================
 -- EDGE: RBAC
 -- =====================================================
 

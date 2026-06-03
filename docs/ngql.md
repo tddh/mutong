@@ -53,6 +53,7 @@
 | | BelongsToGroup | RoleBinding → Group | 组绑定 |
 | | BelongsToServiceAccount | RoleBinding → SA | SA 绑定 |
 | **PDB** | PdbToPod | PDB → Pod | 中断预算关联 |
+| **Webhook** | WebhookRefSvc | WebhookConfiguration → Service | Webhook 引用 Service（含 webhook_name/path/port 元信息） |
 | **事件** | Events | K8sResource → Event | K8s 事件（TTL 24h） |
 | **标签** | BelongsToLabel | K8sResource → Label | 标签关联 |
 | **业务** | BelongsToApp | K8sResource → BusinessApp | 资源归属业务 |

@@ -261,6 +261,296 @@ func TestProcessLabelsRelationship_MatchingExcludedValue(t *testing.T) {
 
 // --- Tests for processMutatingWebhookConfigurationRelationship ---
 
+func TestProcessWebhookConfigurationRelationship_NoWebhooks(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "MutatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name": "test-webhook",
+				"uid":  "webhook-uid-1",
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	if len(mockDB.calls) != 0 {
+		t.Errorf("Expected no DB calls when no webhooks, got %d calls", len(mockDB.calls))
+	}
+}
+
+func TestProcessWebhookConfigurationRelationship_URLMode(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "MutatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name":      "test-webhook",
+				"uid":       "webhook-uid-2",
+				"namespace": "default",
+			},
+			"webhooks": []interface{}{
+				map[string]interface{}{
+					"name": "url-webhook",
+					"clientConfig": map[string]interface{}{
+						"url": "https://external.example.com/mutate",
+					},
+				},
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	// CleanupOutgoingEdgesByType does a GO FROM query, and no INSERT EDGE should follow
+	for _, call := range mockDB.calls {
+		if containsStr(call, "WebhookRefSvc") && !containsStr(call, "GO FROM") {
+			t.Errorf("Expected no WebhookRefSvc insert for URL-mode webhook, got %q", call)
+		}
+	}
+}
+
+func TestProcessWebhookConfigurationRelationship_ServiceFound(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			if key == "uid:Service:default:webhook-svc" {
+				return []byte("svc-uid-123"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "MutatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name":      "test-webhook",
+				"uid":       "webhook-uid-3",
+				"namespace": "default",
+			},
+			"webhooks": []interface{}{
+				map[string]interface{}{
+					"name": "pod-mutator",
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{
+							"name":      "webhook-svc",
+							"namespace": "default",
+							"path":      "/mutate",
+							"port":      float64(443),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	// Verify edge insert
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE WebhookRefSvc") {
+			found = true
+			if !containsStr(call, "svc-uid-123") {
+				t.Error("Expected edge to reference svc-uid-123")
+			}
+			if !containsStr(call, "pod-mutator") {
+				t.Error("Expected edge to include webhook_name 'pod-mutator'")
+			}
+			if !containsStr(call, "/mutate") {
+				t.Error("Expected edge to include path '/mutate'")
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected WebhookRefSvc edge insert")
+	}
+}
+
+func TestProcessWebhookConfigurationRelationship_ServiceNotFound(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	// Cache returns an error → lookupUID falls through to DB query → returns empty
+	svc := newTestK8sServiceWithMocks(mockDB, &mockNebulaCache{})
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "ValidatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name":      "test-webhook",
+				"uid":       "webhook-uid-4",
+				"namespace": "default",
+			},
+			"webhooks": []interface{}{
+				map[string]interface{}{
+					"name": "policy-check",
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{
+							"name": "nonexistent-svc",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	// No WebhookRefSvc insert should be generated
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE WebhookRefSvc") {
+			t.Errorf("Expected no WebhookRefSvc insert for missing Service, got %q", call)
+		}
+	}
+}
+
+func TestProcessWebhookConfigurationRelationship_NamespaceFallback(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			// Service namespace should fall back to webhook namespace "kube-system"
+			if key == "uid:Service:kube-system:webhook-svc" {
+				return []byte("svc-uid-fallback"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "MutatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name":      "test-webhook",
+				"uid":       "webhook-uid-5",
+				"namespace": "kube-system",
+			},
+			"webhooks": []interface{}{
+				map[string]interface{}{
+					"name": "ns-fallback",
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{
+							"name": "webhook-svc",
+							// no namespace → falls back to "kube-system"
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	found := false
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE WebhookRefSvc") {
+			found = true
+			if !containsStr(call, "svc-uid-fallback") {
+				t.Error("Expected namespace fallback to resolve svc-uid-fallback")
+			}
+		}
+	}
+	if !found {
+		t.Error("Expected WebhookRefSvc edge insert with namespace fallback")
+	}
+}
+
+func TestProcessWebhookConfigurationRelationship_MultipleWebhooks(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			switch key {
+			case "uid:Service:default:svc-a":
+				return []byte("svc-uid-a"), nil
+			case "uid:Service:default:svc-b":
+				return []byte("svc-uid-b"), nil
+			}
+			return nil, nil
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "MutatingWebhookConfiguration",
+			"metadata": map[string]interface{}{
+				"name":      "multi-webhook",
+				"uid":       "webhook-uid-6",
+				"namespace": "default",
+			},
+			"webhooks": []interface{}{
+				map[string]interface{}{
+					"name": "hook-a",
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{
+							"name": "svc-a",
+						},
+					},
+				},
+				map[string]interface{}{
+					"name": "hook-b",
+					"clientConfig": map[string]interface{}{
+						"url": "https://external.example.com", // URL mode
+					},
+				},
+				map[string]interface{}{
+					"name": "hook-c",
+					"clientConfig": map[string]interface{}{
+						"service": map[string]interface{}{
+							"name": "svc-b",
+							"path": "/validate",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc.processWebhookConfigurationRelationship(obj)
+
+	insertCount := 0
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT EDGE WebhookRefSvc") {
+			insertCount++
+		}
+	}
+	if insertCount != 2 {
+		t.Errorf("Expected 2 WebhookRefSvc inserts (hook-b is URL mode), got %d", insertCount)
+	}
+}
+
 func TestProcessMutatingWebhookConfigurationRelationship_NoPanic(t *testing.T) {
 	svc := &K8sResoureService{
 		logger: &mockNebulaLogger{},
@@ -274,8 +564,25 @@ func TestProcessMutatingWebhookConfigurationRelationship_NoPanic(t *testing.T) {
 		},
 	}
 
-	// This is a stub function, should not panic
+	// Should not panic — delegates to processWebhookConfigurationRelationship
 	svc.processMutatingWebhookConfigurationRelationship(obj)
+}
+
+func TestProcessValidatingWebhookConfigurationRelationship_NoPanic(t *testing.T) {
+	svc := &K8sResoureService{
+		logger: &mockNebulaLogger{},
+	}
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "admissionregistration.k8s.io/v1",
+			"kind":       "ValidatingWebhookConfiguration",
+			"metadata":   map[string]interface{}{"name": "test-webhook", "uid": "test-uid"},
+		},
+	}
+
+	// Should not panic — delegates to processWebhookConfigurationRelationship
+	svc.processValidatingWebhookConfigurationRelationship(obj)
 }
 
 // --- Tests for processOwnerReferences ---

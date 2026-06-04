@@ -105,7 +105,7 @@ CREATE EDGE IF NOT EXISTS Uses () COMMENT = '通用引用，如 Ingress 使用 S
 
 CREATE EDGE IF NOT EXISTS WebhookRefSvc (
     webhook_name string,
-    path string,
+    `path` string,
     port int
 ) COMMENT = 'Webhook 配置引用 Service';
 

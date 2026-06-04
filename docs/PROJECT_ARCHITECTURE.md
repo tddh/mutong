@@ -895,27 +895,47 @@ services/
 
 #### 资源关系类型
 
-完整 Schema 定义见 [`docs/ngql.md`](ngql.md)（TAG、EDGE、INDEX 的 DDL 语句及常用查询示例）。核心边类型：
+完整 Schema 定义见 [`docs/ngql.md`](ngql.md)（TAG、EDGE、INDEX 的 DDL 语句及常用查询示例）。共 37 条边，按类别如下：
 
-| 关系 | 源 → 目标 | 状态 |
-|------|----------|------|
-| OwnedBy | Pod → ReplicaSet → Deployment / StatefulSet / DaemonSet / Job / CronJob | ✅ |
-| BelongsTo | Resource → Namespace | ✅ |
-| RunsOn | Pod → Node | ✅ |
-| SvcToPods | Service → Pod (via Endpoints/EndpointSlice) | ✅ |
-| SvcToEp / EpToPods / EpSliceToPods | Service ↔ Endpoints ↔ Pod | ✅ |
-| MountsPVC | Pod → PVC | ✅ |
-| MountsConfig | Pod/Ingress → ConfigMap | ✅ |
-| MountsSecret | Pod/Ingress → Secret | ✅ |
-| BoundToPV | PVC → PV | ✅ |
-| BelongsToStorageClass | PV → StorageClass | ✅ |
-| ScRefCSIDriver | StorageClass → CSIDriver | ✅ |
-| RegisteredON | CSINode → Node | ✅ |
-| BelongsToIngressClass / RoutesToSvc / UsesTLS | Ingress 相关 | ✅ |
-| AutoScales | HPA → ScaleTarget (含 min/max/current replicas) | ✅ |
-| BelongsToApp | K8sResource → BusinessApp | ✅ |
-| CallsApp | BusinessApp → BusinessApp | ✅ |
-| Events | K8sResource → Event (含 reason/note/type，TTL 24h) | ✅ |
+| 类别 | 边类型 | 方向 | 说明 |
+|------|--------|------|------|
+| **归属** | OwnedBy | Pod → ReplicaSet → Deployment/StatefulSet/DaemonSet/Job/CronJob | OwnerReferences 管理关系 |
+| | BelongsTo | Resource → Namespace | 命名空间归属 |
+| **调度** | RunsOn | Pod → Node | Pod 调度节点 |
+| | MountsConfig | Pod → ConfigMap | 配置挂载 |
+| | MountsSecret | Pod → Secret | 密钥挂载 |
+| | MountsPVC | Pod → PVC | 持久卷挂载 |
+| | PodPrioClass | Pod → PriorityClass | Pod 引用优先级类 |
+| | PodRuntimeClass | Pod → RuntimeClass | Pod 引用运行时类 |
+| **存储** | BoundToPV | PVC → PV | 卷绑定 |
+| | BelongsToStorageClass | PV → StorageClass | 存储类归属 |
+| | ScRefCSIDriver | StorageClass → CSIDriver | CSI 驱动引用 |
+| | RegisteredON | CSINode → Node | CSI 节点注册 |
+| | VolAttachToNode | VolumeAttachment → Node | 卷挂载到节点 |
+| | VolAttachToPV | VolumeAttachment → PV | 卷挂载引用 PV |
+| **服务** | SvcToEp | Service → Endpoint | 服务端点 |
+| | EpToPods | Endpoint → Pod | 端点指向 Pod |
+| | SvcToPods | Service → Pod | 服务直连 Pod |
+| | EpSliceToPods | EndpointSlice → Pod | EndpointSlice 指向 |
+| **Ingress** | BelongsToIngressClass | Ingress → IngressClass | IngressClass 绑定 |
+| | RoutesToSvc | Ingress → Service | 路由目标 |
+| | UsesTLS | Ingress → Secret | TLS 证书 |
+| | Uses | Ingress → Service | 通用引用 |
+| **RBAC** | ServiceAccount | Pod → ServiceAccount | SA 挂载 |
+| | BelongsToClusterRole | ClusterRoleBinding → ClusterRole | 集群角色绑定 |
+| | BelongsToRole | RoleBinding → Role | 角色绑定 |
+| | BelongsToUser | RoleBinding → User | 用户绑定 |
+| | BelongsToGroup | RoleBinding → Group | 组绑定 |
+| | BelongsToServiceAccount | RoleBinding → SA | SA 绑定 |
+| **PDB** | PdbToPod | PDB → Pod | 中断预算关联 |
+| **Webhook** | WebhookRefSvc | WebhookConfiguration → Service | Webhook 引用 Service |
+| **网络** | NpSelectsByLabel | NetworkPolicy → Label | NP podSelector 选中标签 |
+| | NpSelectsNs | NetworkPolicy → Namespace | NP namespaceSelector 选中命名空间 |
+| **事件** | Events | K8sResource → Event | K8s 事件（TTL 24h） |
+| **标签** | BelongsToLabel | K8sResource → Label | 标签关联 |
+| **业务** | BelongsToApp | K8sResource → BusinessApp | 资源归属业务 |
+| | CallsApp | BusinessApp → BusinessApp | 应用间调用 |
+| | AutoScales | HPA → ScaleTarget | HPA 扩缩容（含 min/max/current replicas） |
 
 #### 标签过滤
 
@@ -1030,7 +1050,7 @@ cmd/mutongctl/
 
 #### Agent Skills 集成
 
-13 个 opencode Skill 定义，供 AI Agent 通过 Function Calling 自动调用 CLI。典型排查流程：
+通过 OpenCode Skill `mutongctl` 供 AI Agent 自动调用 CLI。典型排查流程：
 
 ```
 用户: "生产环境 nginx 为什么频繁重启？"
@@ -1886,21 +1906,21 @@ K8s API Server
 | Pod | `OwnedBy` | DaemonSet | ownerReferences | DaemonSet 管理 |
 | Pod | `OwnedBy` | Job | ownerReferences | Job 管理 |
 | Pod | `MountsPVC` | PVC | spec.volumes | 持久卷挂载 |
-| PVC | `BoundTo` | PV | spec.volumeName | PV 绑定 |
-| PV | `ProvisionedBy` | StorageClass | spec.storageClassName | 存储类 |
-| Pod | `UsesSA` | ServiceAccount | spec.serviceAccountName | RBAC |
-| Pod | `UsesConfigMap` | ConfigMap | spec.volumes + envFrom | 配置注入 |
-| Pod | `UsesSecret` | Secret | spec.volumes + envFrom | 密钥注入 |
+| PVC | `BoundToPV` | PV | spec.volumeName | PV 绑定 |
+| PV | `BelongsToStorageClass` | StorageClass | spec.storageClassName | 存储类 |
+| Pod | `ServiceAccount` | ServiceAccount | spec.serviceAccountName | SA 挂载 |
+| Pod | `MountsConfig` | ConfigMap | spec.volumes + envFrom | 配置挂载 |
+| Pod | `MountsSecret` | Secret | spec.volumes + envFrom | 密钥挂载 |
 | Service | `SvcToPods` | Pod | EndpointSlice | 服务路由 |
 | Service | `BelongsTo` | Namespace | metadata.namespace | 命名空间归属 |
-| Ingress | `RoutesTo` | Service | spec.rules.backend | 入口路由 |
+| Ingress | `RoutesToSvc` | Service | spec.rules.backend | 入口路由 |
 | Ingress | `UsesTLS` | Secret | spec.tls.secretName | TLS 证书 |
-| HPA | `TargetsRef` | Deployment | spec.scaleTargetRef | 弹性伸缩 |
-| PDB | `ProtectsApp` | Deployment | spec.selector | 中断预算 |
+| HPA | `AutoScales` | Deployment | spec.scaleTargetRef | 弹性伸缩 |
+| PDB | `PdbToPod` | Pod | spec.selector | 中断预算 |
 | Deployment | `BelongsTo` | Namespace | metadata.namespace | 命名空间归属 |
 | ConfigMap | `BelongsTo` | Namespace | metadata.namespace | 命名空间归属 |
 | BusinessApp | `CallsApp` | BusinessApp | Trace Span | 业务调用关系 |
-| BusinessApp | `BELONGS_TO_APP` | K8sResource | Label Match | 业务→资源映射 |
+| BusinessApp | `BelongsToApp` | K8sResource | Label Match | 业务→资源映射 |
 
 ### 13.3 业务拓扑服务
 
@@ -1938,21 +1958,32 @@ businessTopology:
 
 ### 13.5 NebulaGraph Schema
 
-```
-Tag: K8sResource
-  Properties: name, name_space, uid, kind, resource_version, creation_timestamp,
-              labels (JSON), annotations (JSON), status (JSON),
-              is_deleted (bool), deleted_at, cluster, node_name, owner_kind,
-              owner_name, pod_ip, host_ip, api_version
+详见 [`docs/ngql.md`](ngql.md)（DDL 及常用查询示例）。
 
-Tag: BusinessApp
-  Properties: app_name, namespace, team, business_unit, criticality,
-              environment, source, updated_at
+**TAG（3 个）：**
 
-Edge: RunsOn, OwnedBy, SvcToPods, BelongsTo, MountsPVC, CallsApp,
-      BELONGS_TO_APP, RoutesTo, BoundTo, UsesSA, UsesConfigMap, UsesSecret,
-      UsesTLS, TargetsRef, ProtectsApp, ProvisionedBy
-```
+| TAG | 属性 |
+|-----|------|
+| **K8sResource** | uid, name, kind, api_version, api_group, name_space, labels, resource_define, cluster, is_deleted, deleted_at |
+| **Label** | uid, key, value |
+| **BusinessApp** | uid, app_name, namespace, criticality, environment, team, business_unit |
+
+**EDGE（37 条）：**
+
+| 类别 | 边类型 |
+|------|--------|
+| 归属 | OwnedBy, BelongsTo |
+| 调度 | RunsOn, MountsConfig, MountsSecret, MountsPVC, PodPrioClass, PodRuntimeClass |
+| 存储 | BoundToPV, BelongsToStorageClass, ScRefCSIDriver, RegisteredON, VolAttachToNode, VolAttachToPV |
+| 服务 | SvcToEp, EpToPods, SvcToPods, EpSliceToPods |
+| Ingress | BelongsToIngressClass, RoutesToSvc, UsesTLS, Uses |
+| RBAC | ServiceAccount, BelongsToClusterRole, BelongsToRole, BelongsToUser, BelongsToGroup, BelongsToServiceAccount |
+| PDB | PdbToPod |
+| Webhook | WebhookRefSvc |
+| 网络 | NpSelectsByLabel, NpSelectsNs |
+| 事件 | Events（TTL 24h） |
+| 标签 | BelongsToLabel |
+| 业务 | BelongsToApp, CallsApp, AutoScales |
 
 ---
 

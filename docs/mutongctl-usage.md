@@ -263,21 +263,15 @@ mutongctl alert list | jq '.[].fingerprint'
 
 ### Skill 调用
 
-Agent 可通过 opencode Skill 自动调用 mutongctl：
+Agent 可通过 OpenCode Skill `mutongctl` 自动调用平台全功能：
 
 ```yaml
-# 已注册 13 个 Skill，分为三类：
+# 单一 skill 覆盖所有操作，AI Agent 通过 mutongctl 子命令完成:
 
-# 数据获取（-o json，链式调用）:
-mutong-list-pods, mutong-alert-list, mutong-alert-get,
-mutong-diagnose-run, mutong-logs-pod, mutong-logs-search, mutong-metrics-pod
-
-# 用户展示（-o md，直接渲染）:
-mutong-inspect-run, mutong-inspect-report, mutong-retro-search,
-mutong-topo-get, mutong-system-status
-
-# 诊断工具:
-mutong-debug-info
+# 数据获取: mutongctl list|get|alert list|diagnose run|logs|metrics -o json
+# 诊断分析: mutongctl diagnose run|retro timeline|retro causal-chain -o json
+# 拓扑查询: mutongctl topo get|search|biz apps|biz graph -o json
+# 系统状态: mutongctl debug-info|system status|cluster health -o json
 ```
 
 ### 典型排查流程

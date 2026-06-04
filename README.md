@@ -190,7 +190,7 @@
 - **认证登录**: `auth login` 浏览器 OAuth2 授权码流程（PKCE），自动保存 token
 - **智能输出**: 四种输出格式（table / json / yaml / markdown），TTY 自适应，管道友好
 - **Shell 补全**: `completion` 支持 bash / zsh / fish 动态补全
-- **Agent 集成**: 13 个 opencode Skill，供 AI Agent 自动调用
+- **Agent 集成**: 通过 OpenCode Skill 供 AI Agent 自动调用，覆盖资源查询、告警诊断、巡检复盘等全平台操作
 
 详细用法见 [mutongctl 使用手册](docs/mutongctl-usage.md)。
 
@@ -312,7 +312,9 @@ cp agent.yaml.example agent.yaml
 
 ```yaml
 kubernetes:
-  config: kubeconfig
+  clusters:
+    - name: "cluster1"
+      config: kubeconfig
 
 postgres:
   host: localhost

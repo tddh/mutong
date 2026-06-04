@@ -50,8 +50,8 @@ init_log() {
 execute_ngql() {
     local ngql_statements=()
     local current_statement=""
-    local is_comment=false
     local is_string=false
+    local end_with_semicolon_re=';[[:space:]]*$'
 
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 正在解析 nGQL 文件..." | tee -a $LOG_FILE
 
@@ -71,7 +71,7 @@ execute_ngql() {
         for (( i=0; i<${#line}; i++ )); do
             char="${line:$i:1}"
             if [[ "$char" == "'" || "$char" == '"' ]]; then
-                is_string=!$is_string
+                [[ "$is_string" == "true" ]] && is_string=false || is_string=true
             fi
         done
 
@@ -79,7 +79,7 @@ execute_ngql() {
         current_statement="$current_statement $line"
 
         # 如果语句以分号结尾且不在字符串内，则认为是完整语句
-        if [[ "$current_statement" =~ ;[[:space:]]*$ ]] && [ "$is_string" = false ]; then
+        if [[ "$current_statement" =~ $end_with_semicolon_re ]] && [ "$is_string" = false ]; then
             ngql_statements+=("$current_statement")
             current_statement=""
         fi

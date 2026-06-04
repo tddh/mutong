@@ -19,9 +19,22 @@ createApp({
         const password = ref('');
         const error = ref('');
         const loading = ref(false);
+        const authMode = ref('loading');
+        const ssoLabel = ref('SSO');
+
+        (async () => {
+            try {
+                const res = await fetch('/api/auth/login-status');
+                const data = await res.json();
+                authMode.value = data.mode || 'local';
+                ssoLabel.value = data.provider_label || 'SSO';
+            } catch {
+                authMode.value = 'local';
+            }
+        })();
 
         function loginWithZitadel() {
-            window.location.href = buildSSOLoginURL();
+            window.location.href = '/api/auth/oidc/login';
         }
 
         async function handleLogin() {
@@ -57,6 +70,6 @@ createApp({
             }
         }
 
-        return { username, password, error, loading, loginWithZitadel, handleLogin };
+        return { username, password, error, loading, authMode, ssoLabel, loginWithZitadel, handleLogin };
     }
 }).mount('#app');

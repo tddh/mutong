@@ -95,6 +95,55 @@ auth:
   mode: local    # 或 hybrid
 ```
 
+**hybrid 模式说明**：
+
+Zitadel 是一个开源的 **身份和访问管理 (IAM) 平台**，提供标准的 OIDC/OAuth2 协议支持。重明通过 Zitadel 对接企业微信、钉钉、飞书、AD 域等企业身份提供商。
+
+**架构**：
+```
+重明平台  <--- OIDC 协议 --->  Zitadel  <--- 企业微信 API --->  企业微信
+```
+
+**部署方式**（任选其一）：
+
+1. **Docker Compose**（最简单）：
+```bash
+docker run -p 8080:8080 \
+  -e ZITADEL_DATABASE_POSTGRES_HOST=postgres-host \
+  -e ZITADEL_MASTERKEY=random-master-key \
+  ghcr.io/zitadel/zitadel:latest start-from-init --masterkey "your-masterkey"
+```
+
+2. **Kubernetes Helm**（生产推荐）：
+```bash
+helm repo add zitadel https://charts.zitadel.com
+helm install my-zitadel zitadel/zitadel \
+  --set masterkey="your-masterkey"
+```
+
+3. **复用已有的 IDP**：如果你已经有 Zitadel/Keycloak/Auth0，直接跳过部署，只需在 IDP 后台创建一个 OIDC Client 即可。
+
+**配置后，在 Zitadel 后台添加身份提供商**（如企业微信、钉钉、AD），重明无需任何代码改动。
+
+### 2.1.1 Zitadel 配置说明
+
+**必填字段**（`config.auth.yaml`）：
+
+| 字段 | 说明 | 示例 |
+|------|------|------|
+| `auth.mode` | 认证模式，设为 `hybrid` 启用 OIDC | `hybrid` |
+| `auth.zitadel.issuer` | Zitadel 服务地址 | `https://zitadel.example.com` |
+| `auth.zitadel.client_id` | Zitadel 后台创建的 Client ID | `mutong-web` |
+| `auth.zitadel.client_secret` | Zitadel Client Secret | `your-secret` |
+| `auth.zitadel.redirect_uri` | OIDC 回调地址，需匹配 Zitadel 后台配置 | `https://mutong.example.com/api/auth/oidc/callback` |
+
+**Zitadel 后台配置**：
+1. 登录 Zitadel 管理控制台
+2. 创建项目 → 创建应用 → 选择 **Web** 类型
+3. 配置重定向 URI：`https://你的域名/api/auth/oidc/callback`
+4. 勾选授权码流程 (Authorization Code + PKCE)
+5. 获取 `Client ID` 和 `Client Secret`，填入重明配置
+
 ### 2.2 Token 类型
 
 | Token | 前缀 | 使用者 | 说明 |
@@ -759,6 +808,12 @@ auth:
     ip_max_per_minute: 10
   password:
     algorithm: argon2id
+  zitadel:                    # hybrid 模式时必填
+    issuer: "https://zitadel.example.com"
+    client_id: "mutong-web"
+    client_secret: ""
+    redirect_uri: "https://mutong.example.com/api/auth/oidc/callback"
+    scopes: [openid, profile, email, offline_access]
 ```
 
 ### 5.9 `config.retrospective.yaml` — 复盘配置

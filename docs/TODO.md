@@ -1,6 +1,6 @@
 # 重明 (Mutong) 待办事项
 
-> 最后更新：2026-06-03
+> 最后更新：2026-06-04
 
 ---
 
@@ -45,17 +45,18 @@
   - 无前端告警源配置页面
   - 新增告警源需修改 YAML 配置文件并重启
 
-### 6. 第三方认证（Zitadel OIDC） — 多处断裂
-- **后端**：`ZitadelOIDCClient`（认证+PKCE 交换）+ `BearerTokenMiddleware`（路径 2 OIDC token 验证）已完整实现
-- **缺口**：
-  1. **OIDC 控制器未注册**：`OIDCController` 代码完整但 `main.go` 中从未实例化/注册，`/api/auth/oidc/login` 和 `/api/auth/oidc/callback` 全 404
-  2. **RequireAuthMiddleware 未放行**：`/api/auth/oidc/login` 和 `/api/auth/oidc/callback` 不在白名单中（`/api/` 路径下），即使注册也会被 401 拦截
-  3. **前端 Zitadel SSO 按钮始终可见**：`login.html` 的 "🔐 Zitadel SSO 登录" 按钮没有条件渲染，`local` 模式下点击直接 404
-  4. **无认证模式探测接口**：前端无法判断 `auth.mode` 是 `local` 还是 `hybrid`，应提供 `/api/auth/login-status` 或类似端点
-  5. **用户接口不完整**：`UserInterface` 仅有 `GetUserByID` + Zitadel 相关方法，缺少 `CreateUser`、`UpdateUser`、`DeleteUser`
-  6. **本地 OAuth2 无登录入口**：fosite OAuth2 Provider 已注册（`/oauth2/authorize`、`/oauth2/token`、`/introspect`、`/revoke`），但无 Web UI 登录页面引导用户获取 access token
-- *需修复：`cmd/main.go` 添加 OIDCController 注册 + `auth_middleware.go` 添加白名单 + `login.html` 条件渲染 + 新增 login-status 端点*
-- *涉及：`controllers/oidc_controller.go`、`controllers/auth_middleware.go`、`cmd/main.go`、`view/src/login.html`*
+### 6. 第三方认证（Zitadel OIDC） — 已修复
+- **修复内容**：
+  1. OIDCController 已在 main.go 注册 ✅
+  2. 白名单已补充 `/api/auth/oidc/login` 和 `/api/auth/oidc/callback` ✅
+  3. 前端 SSO 按钮改为条件渲染（authMode === 'hybrid'） ✅
+  4. `/api/auth/login-status` 端点已实现 ✅
+  5. `LoginStatus` 以 YAML 配置 `cfg.Auth.Mode` 为权威来源 ✅
+  6. 无论 OIDC 初始化成功与否，都会注册路由（失败时返回 503 而非 404） ✅
+- **仍需改进**：
+  - 用户/角色 CRUD（见 P2 待办项）
+  - Zitadel/OIDC 文档需更完善（已在 user-manual.md 补充）
+  - Zitadel 实际配置项（issuer, client_id 等）需在生产部署时填完
 
 ### 7. 链路追踪 — TraceController 未注册（完全不可用）
 - **后端**：`TraceController` 存在，`OTelQueryService` (TraceQuerier) 已实现

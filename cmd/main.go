@@ -151,7 +151,7 @@ func runApp(cmd *cobra.Command, args []string) {
 			inspectionProcessor.Stop()
 		}
 	}()
-	engine, k8sExec, diagEngine, chatManager := initializeGin(ctrls, cfg.Logger, alertProcessor, inspectionProcessor, graphDB, k8sresourceSvc, cfg, oauth2Provider, rdb, sessions, oidcClient)
+	engine, k8sExec, diagEngine, chatManager := initializeGin(ctrls, userSvc, cfg.Logger, alertProcessor, inspectionProcessor, graphDB, k8sresourceSvc, cfg, oauth2Provider, rdb, sessions, oidcClient)
 
 	addr := os.Getenv("MUTONG_ADDR")
 	if addr == "" {
@@ -403,7 +403,7 @@ func allowedOrigins() []string {
 	return strings.Split(origins, ",")
 }
 
-func initializeGin(ctrls *controllers.Controllers, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager) {
+func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager) {
 	var execCtrl *controllers.ExecutorController
 	var k8sExec *execService.K8sExecutor
 	var diagEngine *diagnosis_svc.Engine
@@ -509,7 +509,17 @@ func initializeGin(ctrls *controllers.Controllers, logger *zap.Logger, alertProc
 
 	// Register auth endpoints (login, me, logout)
 	authCtrl := controllers.NewAuthController(cfg.DB, sessions, loginLimit)
+	authCtrl.OIDCAvailable = oidcClient != nil
+	authCtrl.AuthMode = cfg.Auth.Mode
 	authCtrl.RegisterRoutes(engine)
+
+	if oidcClient != nil {
+		oidcCtrl := controllers.NewOIDCController(userSvc, oidcClient, sessions)
+		oidcCtrl.RegisterRoutes(engine)
+	} else if cfg.Auth.Mode == "hybrid" || cfg.Auth.Mode == "zitadel" {
+		oidcCtrl := controllers.NewOIDCController(userSvc, nil, sessions)
+		oidcCtrl.RegisterRoutes(engine)
+	}
 
 	// Seed OAuth2 clients and initial admin
 	oauth2model.SeedClients(cfg.DB)

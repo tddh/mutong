@@ -37,20 +37,6 @@ auth:
       - email
       - offline_access
 
-  # 验证码配置
-  captcha:
-    enabled: true
-    ttl: 5m
-    require_after_failures: 3
-    lockout_after_failures: 5
-    lockout_duration: 15m
-
-  # 登录速率限制
-  login_ratelimit:
-    enabled: true
-    ip_max_per_minute: 10
-    redis_prefix: "ratelimit:login:"
-
   # 密码策略
   password:
     algorithm: argon2id

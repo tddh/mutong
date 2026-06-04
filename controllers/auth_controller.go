@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"gitee.com/tddh/mutong/models"
@@ -12,11 +13,13 @@ import (
 )
 
 type AuthController struct {
-	DB          *gorm.DB
-	PasswordSvc *auth.PasswordService
-	TokenSvc    *auth.TokenService
-	Sessions    *auth.SessionManager
-	LoginLimit  *auth.LoginLimiter
+	DB            *gorm.DB
+	PasswordSvc   *auth.PasswordService
+	TokenSvc      *auth.TokenService
+	Sessions      *auth.SessionManager
+	LoginLimit    *auth.LoginLimiter
+	OIDCAvailable bool
+	AuthMode      string
 }
 
 func NewAuthController(db *gorm.DB, sessions *auth.SessionManager, loginLimit *auth.LoginLimiter) *AuthController {
@@ -37,6 +40,7 @@ func (ac *AuthController) RegisterRoutes(r *gin.Engine) {
 	auth.POST("/tokens", ac.CreateToken)
 	auth.GET("/tokens", ac.ListTokens)
 	auth.DELETE("/tokens/:id", ac.RevokeToken)
+	auth.GET("/login-status", ac.LoginStatus)
 }
 
 func (ac *AuthController) Login(c *gin.Context) {
@@ -257,4 +261,26 @@ func (ac *AuthController) CreateInitialAdmin(username, password string) error {
 		Role:         "admin",
 		Status:       "active",
 	}).Error
+}
+
+func (ac *AuthController) LoginStatus(c *gin.Context) {
+	mode := os.Getenv("MUTONG_AUTH_MODE")
+	if mode == "" && ac.AuthMode != "" {
+		mode = ac.AuthMode
+	}
+	if mode == "" {
+		mode = "local"
+	}
+
+	resp := gin.H{"mode": mode}
+	if ac.OIDCAvailable {
+		resp["provider_label"] = func() string {
+			if l := os.Getenv("MUTONG_OIDC_LABEL"); l != "" {
+				return l
+			}
+			return "SSO"
+		}()
+	}
+
+	c.JSON(http.StatusOK, resp)
 }

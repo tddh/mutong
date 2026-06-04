@@ -38,6 +38,10 @@ func (oc *OIDCController) RegisterRoutes(r gin.IRouter) {
 
 // Login initiates the OIDC authorization flow.
 func (oc *OIDCController) Login(c *gin.Context) {
+	if oc.OIDCSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "OIDC provider not configured"})
+		return
+	}
 	authURL, state, verifier := oc.OIDCSvc.BuildAuthURL()
 	secure := c.Request.TLS != nil
 	c.SetCookie("mutong_oidc_state", state, 300, "/api/auth/oidc", "", secure, true)

@@ -191,6 +191,8 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 		"/api/auth/captcha",
 		"/api/auth/captcha/verify",
 		"/api/auth/login-status",
+		"/api/auth/oidc/login",
+		"/api/auth/oidc/callback",
 		"/api/v1/alerts/webhook",
 		"/api/v1/alerts/external/",
 	}

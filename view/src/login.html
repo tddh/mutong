@@ -41,11 +41,11 @@
 
                 <div v-if="error" class="login-error">⚠️ {{ error }}</div>
 
-                <button type="button" class="sso-btn" @click="loginWithZitadel">🔐 Zitadel SSO 登录</button>
+<button v-if="authMode === 'hybrid' || authMode === 'zitadel'" type="button" class="sso-btn" @click="loginWithZitadel">🔐 {{ ssoLabel }} 登录</button>
 
-                <div class="hybrid-divider"><span>或使用密码登录</span></div>
+<div v-if="authMode === 'hybrid'" class="hybrid-divider"><span>或使用密码登录</span></div>
 
-                <form @submit.prevent="handleLogin">
+                <form v-if="authMode !== 'zitadel'" @submit.prevent="handleLogin">
                     <div class="field">
                         <label>用户名</label>
                         <input v-model="username" type="text" placeholder="请输入用户名" autocomplete="username">

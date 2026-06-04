@@ -6,6 +6,10 @@
 
 Built on the "**Observe, Understand, Remediate, Learn**" philosophy, Mutong starts from resource visualization, progresses through hybrid AI diagnosis to identify root causes and automatically execute remediation actions, and finally transforms each incident into structured, searchable knowledge assets — forming a complete operations loop.
 
+### Name Origin
+
+> **离，丽也。日月丽乎天，百谷草木丽乎土，重明以丽乎正，乃化成天下。** — *I Ching, Li Hexagram, Tuan Zhuan* (离卦·彖传)
+
 ### Core Values
 
 - **Resource Visualization**: Stores K8s resource topology in Nebula Graph, supports complex relationship queries and interactive topology visualization with three rendering engines (G6 / force-graph / d3)

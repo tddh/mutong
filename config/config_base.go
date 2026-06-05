@@ -50,6 +50,8 @@ type Config struct {
 	AlertSources AlertSourceConfig `yaml:"alertSources" json:"alertSources"`
 	// Auth holds authentication and authorization configuration
 	Auth AuthConfig `yaml:"auth" json:"auth"`
+	// OpenTelemetry holds distributed tracing configuration
+	OpenTelemetry OpenTelemetryConf `yaml:"opentelemetry" json:"opentelemetry"`
 }
 
 type ResourceProfile struct {

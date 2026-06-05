@@ -1,4 +1,4 @@
-import { createApp, ref, nextTick, onMounted } from 'vue';
+import { createApp, ref, nextTick, onMounted, computed } from 'vue';
 import { marked } from 'marked';
 import { NavBar } from '../components/SharedComponents.js';
 import { API } from '../utils/api.js';
@@ -46,6 +46,21 @@ const App = {
 
         // 工具调用浮动面板
         const toolCalls = ref([]);
+
+        // 聚合工具调用（相同名称合并计数）
+        const aggregatedToolCalls = computed(() => {
+            const grouped = {};
+            for (const tc of toolCalls.value) {
+                if (!grouped[tc.name]) {
+                    grouped[tc.name] = { name: tc.name, count: 0, status: 'completed' };
+                }
+                grouped[tc.name].count += 1;
+                if (tc.status === 'pending') {
+                    grouped[tc.name].status = 'pending';
+                }
+            }
+            return Object.values(grouped);
+        });
 
         // 流式超时控制
         let ttftTimer = null;
@@ -365,6 +380,7 @@ const App = {
             businessAppCalls,
             businessImpactCollapsed,
             toolCalls,
+            aggregatedToolCalls,
             startChat,
             sendMessage,
             startQuickDiagnosis,
@@ -460,16 +476,6 @@ const App = {
                                 <span>{{ btn.label }}</span>
                             </button>
                         </div>
-                        <div class="guide-input">
-                            <input
-                                v-model="inputMessage"
-                                placeholder="例如: default 命名空间下的 my-pod 一直重启"
-                                @keyup.enter="startChat({ description: inputMessage })"
-                            />
-                            <button class="start-btn" @click="startChat({ description: inputMessage })">
-                                开始诊断
-                            </button>
-                        </div>
                     </div>
                 </div>
 
@@ -549,10 +555,11 @@ const App = {
                         </template>
                     </div>
 
-                    <div v-if="toolCalls.length" class="tool-float-panel">
-                        <div v-for="tc in toolCalls" :key="tc.id" :class="['tool-float-item', tc.status]">
+                    <div v-if="aggregatedToolCalls.length" class="tool-float-panel">
+                        <div v-for="tc in aggregatedToolCalls" :key="tc.name" :class="['tool-float-item', tc.status]">
                             <span class="tool-dot"></span>
                             <span class="tool-name">{{ tc.name }}</span>
+                            <span v-if="tc.count > 1" class="tool-count">×{{ tc.count }}</span>
                         </div>
                     </div>
 

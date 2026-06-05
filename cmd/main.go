@@ -39,6 +39,7 @@ import (
 	prometheus_svc "gitee.com/tddh/mutong/services/prometheus"
 	"gitee.com/tddh/mutong/services/prompt"
 	retrospective_svc "gitee.com/tddh/mutong/services/retrospective"
+	"gitee.com/tddh/mutong/services/trace"
 	_ "github.com/apache/skywalking-go"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -580,6 +581,16 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		monitoringCtrl := controllers.NewMonitoringController(logger, nil)
 		monitoringCtrl.RegisterRoutes(engine)
 		logger.Info("Prometheus not configured, metrics API returns 503")
+	}
+
+	// OpenTelemetry tracing controller
+	if cfg.OpenTelemetry.Enabled && cfg.OpenTelemetry.CollectorURL != "" {
+		otelSvc := trace.NewOTelQueryService(cfg.OpenTelemetry.CollectorURL)
+		traceCtrl := controllers.NewTraceController(otelSvc)
+		traceCtrl.RegisterRoutes(engine)
+		logger.Info("OpenTelemetry tracing API configured", zap.String("collector_url", cfg.OpenTelemetry.CollectorURL))
+	} else {
+		logger.Info("OpenTelemetry not configured, tracing API disabled")
 	}
 
 	if alertProcessor != nil {

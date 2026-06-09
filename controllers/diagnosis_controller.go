@@ -19,6 +19,7 @@ import (
 	"gitee.com/tddh/mutong/models/diagnosis"
 	diagnosis_svc "gitee.com/tddh/mutong/services/diagnosis"
 	"gitee.com/tddh/mutong/services/mcp"
+	"gitee.com/tddh/mutong/services/search"
 )
 
 type DiagnosisController struct {
@@ -51,6 +52,10 @@ func NewDiagnosisController(logger interfaces.Logger, engine *diagnosis_svc.Engi
 
 func (c *DiagnosisController) SetRetrospectiveGenerator(gen func(ctx context.Context, fingerprint string) (string, error)) {
 	c.mcpSrv.WithRetrospectiveGenerator(mcp.RetroGenerator(gen))
+}
+
+func (c *DiagnosisController) SetExternalSearch(tavily *search.TavilyClient, github *search.GitHubClient, sanitizer *diagnosis_svc.Sanitizer, auditFn mcp.AuditLogFunc) {
+	c.mcpSrv.WithExternalSearch(tavily, github, sanitizer, auditFn)
 }
 
 func (c *DiagnosisController) RegisterRoutes(app *gin.Engine) {

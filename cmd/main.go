@@ -39,6 +39,7 @@ import (
 	prometheus_svc "gitee.com/tddh/mutong/services/prometheus"
 	"gitee.com/tddh/mutong/services/prompt"
 	retrospective_svc "gitee.com/tddh/mutong/services/retrospective"
+	"gitee.com/tddh/mutong/services/search"
 	"gitee.com/tddh/mutong/services/trace"
 	_ "github.com/apache/skywalking-go"
 	"github.com/gin-contrib/cors"
@@ -721,6 +722,29 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		)
 
 		diagCtrl := controllers.NewDiagnosisController(logger, diagEngine, promSvcGlobal.AsMetricsQuerier(), chatManager, cacheTTL, k8sC, logQ, cfg.GetCache(), inspectionProcessor, k8sSvc.GetInformerFactory)
+
+		if cfg.ExternalSearch.Enabled {
+			sanitCfg := diagnosis_svc.DefaultSanitizerConfig()
+			sanitizer, serr := diagnosis_svc.NewSanitizer("main-app", sanitCfg)
+			if serr != nil {
+				logger.Warn("Failed to create sanitizer", zap.Error(serr))
+			} else {
+				var tavilyClient *search.TavilyClient
+				if cfg.ExternalSearch.Tavily.APIKey != "" {
+					tavilyClient = search.NewTavilyClient(cfg.ExternalSearch.Tavily)
+					logger.Info("External knowledge base search enabled", zap.String("engine", "tavily"))
+				}
+				var githubClient *search.GitHubClient
+				if cfg.ExternalSearch.GitHub.Token != "" {
+					githubClient = search.NewGitHubClient(cfg.ExternalSearch.GitHub)
+					logger.Info("GitHub Issues search enabled", zap.String("engine", "github"))
+				}
+				if tavilyClient != nil || githubClient != nil {
+					diagCtrl.SetExternalSearch(tavilyClient, githubClient, sanitizer, nil)
+				}
+			}
+		}
+
 		diagCtrl.RegisterRoutes(engine)
 		// Attach diagnosis engine to executor controller if available
 		if execCtrl != nil {

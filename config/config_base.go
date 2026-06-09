@@ -52,6 +52,8 @@ type Config struct {
 	Auth AuthConfig `yaml:"auth" json:"auth"`
 	// OpenTelemetry holds distributed tracing configuration
 	OpenTelemetry OpenTelemetryConf `yaml:"opentelemetry" json:"opentelemetry"`
+	// ExternalSearch holds external knowledge base search configuration
+	ExternalSearch ExternalSearchConfig `yaml:"external_search" json:"external_search"`
 }
 
 type ResourceProfile struct {

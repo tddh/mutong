@@ -724,7 +724,24 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		diagCtrl := controllers.NewDiagnosisController(logger, diagEngine, promSvcGlobal.AsMetricsQuerier(), chatManager, cacheTTL, k8sC, logQ, cfg.GetCache(), inspectionProcessor, k8sSvc.GetInformerFactory)
 
 		if cfg.ExternalSearch.Enabled {
-			sanitCfg := diagnosis_svc.DefaultSanitizerConfig()
+			sanitCfg := diagnosis_svc.SanitizerConfig{
+				Enabled:                 cfg.Sanitizer.Enabled,
+				HighPIIBlockThreshold:   cfg.Sanitizer.HighPIIBlockThreshold,
+				BannedTerms:             cfg.Sanitizer.BannedTerms,
+				MaxQueryLength:          cfg.Sanitizer.MaxQueryLength,
+				PromptInjectionPatterns: cfg.Sanitizer.PromptInjectionPatterns,
+			}
+			for _, r := range cfg.Sanitizer.Rules {
+				sanitCfg.Rules = append(sanitCfg.Rules, diagnosis_svc.SanitizerRule{
+					Name:    r.Name,
+					Pattern: r.Pattern,
+					Enabled: r.Enabled,
+				})
+			}
+			if len(sanitCfg.Rules) == 0 {
+				sanitCfg = diagnosis_svc.DefaultSanitizerConfig()
+			}
+
 			sanitizer, serr := diagnosis_svc.NewSanitizer("main-app", sanitCfg)
 			if serr != nil {
 				logger.Warn("Failed to create sanitizer", zap.Error(serr))

@@ -177,3 +177,21 @@ func TestSanitizerInvalidRegex(t *testing.T) {
 		t.Errorf("expected error for invalid regex, got nil")
 	}
 }
+
+func TestSanitizerGenericize(t *testing.T) {
+	s, _ := NewSanitizer("test-13", testConfig())
+
+	input := "Node 10.0.1.55 crashed, fallback to 192.168.1.10"
+	redacted, _ := s.Redact(input)
+	generic := s.Genericize(redacted)
+
+	if !strings.Contains(generic, "<IP_V4>") {
+		t.Errorf("genericize should produce <IP_V4>, got: %s", generic)
+	}
+	if strings.Contains(generic, "10.0.1.55") {
+		t.Errorf("genericize should not contain raw IP, got: %s", generic)
+	}
+	if strings.Contains(generic, "[REDACTED") {
+		t.Errorf("genericize should remove brackets, got: %s", generic)
+	}
+}

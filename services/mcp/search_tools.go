@@ -48,9 +48,9 @@ func (s *Server) handleSearchKnowledgeBase(ctx context.Context, args map[string]
 		return "[搜索被阻止: 查询包含过多敏感信息]", nil
 	}
 
-	fingerprint := sanitizer.ExtractSearchFingerprint(sanitized)
+	genericQuery := sanitizer.Genericize(sanitizer.ExtractSearchFingerprint(sanitized))
 
-	results, answer, err := tavily.Search(ctx, fingerprint, topic)
+	results, answer, err := tavily.Search(ctx, genericQuery, topic)
 	if err != nil {
 		return fmt.Sprintf("[搜索失败: %v]", err), nil
 	}
@@ -58,7 +58,7 @@ func (s *Server) handleSearchKnowledgeBase(ctx context.Context, args map[string]
 	filtered := sanitizer.FilterResults(toSearchResults(results))
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("搜索查询: %s\n\n", fingerprint))
+	sb.WriteString(fmt.Sprintf("搜索查询: %s\n\n", sanitized))
 	if answer != "" {
 		sb.WriteString(fmt.Sprintf("AI 摘要: %s\n\n", answer))
 	}
@@ -116,15 +116,15 @@ func (s *Server) handleSearchGitHubIssues(ctx context.Context, args map[string]s
 		return "[搜索被阻止: 查询包含过多敏感信息]", nil
 	}
 
-	fingerprint := sanitizer.ExtractSearchFingerprint(sanitized)
+	genericQuery := sanitizer.Genericize(sanitizer.ExtractSearchFingerprint(sanitized))
 
-	issues, err := github.SearchIssues(ctx, fingerprint, repo, state)
+	issues, err := github.SearchIssues(ctx, genericQuery, repo, state)
 	if err != nil {
 		return fmt.Sprintf("[GitHub 搜索失败: %v]", err), nil
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("GitHub Issues 搜索: %s\n\n", fingerprint))
+	sb.WriteString(fmt.Sprintf("GitHub Issues 搜索: %s\n\n", sanitized))
 	if repo != "" {
 		sb.WriteString(fmt.Sprintf("仓库限制: %s\n", repo))
 	}

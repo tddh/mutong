@@ -78,7 +78,7 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 		return nil, fmt.Errorf("create GitHub request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Authorization", "token "+c.token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

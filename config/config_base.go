@@ -54,6 +54,8 @@ type Config struct {
 	OpenTelemetry OpenTelemetryConf `yaml:"opentelemetry" json:"opentelemetry"`
 	// ExternalSearch holds external knowledge base search configuration
 	ExternalSearch ExternalSearchConfig `yaml:"external_search" json:"external_search"`
+	// Sanitizer holds PII redaction and security rules configuration (applies to all external calls)
+	Sanitizer SanitizerConfig `yaml:"sanitizer" json:"sanitizer"`
 }
 
 type ResourceProfile struct {

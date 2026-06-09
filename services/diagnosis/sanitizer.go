@@ -148,6 +148,11 @@ func (s *Sanitizer) Restore(text string) string {
 	return restored
 }
 
+func (s *Sanitizer) Genericize(text string) string {
+	re := regexp.MustCompile(`\[REDACTED_([A-Z0-9_]+)_\d+\]`)
+	return re.ReplaceAllString(text, "<$1>")
+}
+
 func (s *Sanitizer) ExtractSearchFingerprint(redactedText string) string {
 	if s.maxQueryLength > 0 && len(redactedText) > s.maxQueryLength {
 		return redactedText[:s.maxQueryLength] + "..."

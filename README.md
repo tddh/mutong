@@ -1,5 +1,9 @@
 # 重明 (Mutong)
 
+> 📦 **开源仓库**
+> - **GitHub**: [https://github.com/tddh/mutong](https://github.com/tddh/mutong)
+> - **Gitee**:  [https://gitee.com/tddh/mutong](https://gitee.com/tddh/mutong)
+
 ## 项目概述
 
 **重明 (Mutong)** 是一款面向 Kubernetes 集群的资源可视化与智能运维（AIOps）平台。它自动采集 K8s 集群中的各类资源，以图数据库构建完整的资源拓扑关系，提供交互式拓扑可视化、告警智能收敛与诊断、声明式巡检、自愈执行、事后复盘分析等一站式运维能力。

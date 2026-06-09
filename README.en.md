@@ -1,5 +1,9 @@
 # Mutong (重明)
 
+> 📦 **Open Source Repositories**
+> - **GitHub**: [https://github.com/tddh/mutong](https://github.com/tddh/mutong)
+> - **Gitee**:  [https://gitee.com/tddh/mutong](https://gitee.com/tddh/mutong)
+
 ## Overview
 
 **Mutong (重明)** is a Kubernetes resource visualization and intelligent operations (AIOps) platform. It automatically collects resources from K8s clusters, builds complete resource topology relationships using a graph database, and provides interactive topology visualization, intelligent alert convergence and diagnosis, declarative inspection, self-healing execution, and post-incident retrospective analysis — all in one platform.

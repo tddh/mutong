@@ -21,7 +21,13 @@ config:
         default: "otlp_spans" 
       producer:
         compression: zstd
+  extensions:
+    health_check:
+      endpoint: "${env:MY_POD_IP}:13133"
+    zpages:
+      endpoint: "0.0.0.0:55679"
   service:
+    extensions: [health_check, zpages]
     pipelines:
       traces:
         receivers: [otlp]

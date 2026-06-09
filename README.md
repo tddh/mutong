@@ -18,6 +18,18 @@
 - **自愈执行器**: 风险分级（Low / Medium / High）的自动修复操作（Pod 驱逐重启、Deployment 扩缩容、HPA 管理），支持手动审批与自动执行双模式，完整审计日志
 - **复盘知识沉淀**: 事件时间线 + 因果链 DAG + LLM 复盘报告 + 图增强混合检索（pgvector 语义 + NebulaGraph 拓扑），将每次故障转化为可检索、可复用的结构化知识资产
 
+### 💡 为什么做这个项目 / Evolution
+
+Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为了解决实际痛点：
+
+| 阶段              | 核心痛点                     | 解决方案                                      |
+| :-------------- | :----------------------- | :---------------------------------------- |
+| **🟢 2022 可视化** | 资源关系"看不见"，故障影响面不明确       | **图数据库 (NebulaGraph)**：构建 K8s 资源拓扑，定位级联影响 |
+| **🟡 2023 自动化** | 看着图还要切终端敲命令太累了（其实也不会写前端） | **API-First 策略**：把操作变成接口，交给 CLI 调用        |
+| **🔴 2025 智能化** | 复杂根因难定位，专家经验难传承          | **LLM Agent 混合诊断**：规则兜底 + AI 深度排查的知识闭环    |
+
+> 所有功能均源自真实场景的反复打磨。详见完整 [演进故事 →](docs/evolution.md)
+
 ### 界面预览
 
 | 仪表盘 | 拓扑图 | AI 诊断 |
@@ -277,12 +289,11 @@ mutong/
 ├── view/                        # 前端代码 (Vue 3 + Vite)
 │   └── src/                     #   15 个页面 + 共享组件
 ├── docs/                        # 项目文档
-│   ├── PROJECT_ARCHITECTURE.md   #   架构文档
-│   ├── mutongctl-usage.md        #   CLI 使用手册
-│   ├── auth-design.md            #   认证设计文档
-│   ├── alert-routing-usage-manual.md  # 告警路由手册
-│   ├── ngql.md                   #   NebulaGraph Schema 参考与查询示例
-│   └── TODO.md                   #   开发路线图
+│   ├── evolution.md              # 项目演进手记与设计思考
+│   ├── mutongctl-usage.md        # CLI 工具速查与使用手册
+│   ├── ngql.md                   # NebulaGraph Schema 参考与查询示例
+│   ├── TODO.md                   # 开发路线图与贡献指南
+│   └── images/                   # 界面预览截图
 ├── scripts/                     # 脚本工具
 │   ├── schema.ngql               #   NebulaGraph DDL（just init-nebula 执行）
 │   ├── init_postgres.sh          #   PostgreSQL 初始化
@@ -879,9 +890,67 @@ rules:
 **Q: 系统响应缓慢**  
 调整 `configs/config.core.yaml` 中 BigCache 的 `hardMaxCacheSize`（建议 4096 MB）和 `shards`（建议 256）。定期执行 Nebula 清理（`nebulaCleanup.enabled: true`，`retentionDays: 7`）。PostgreSQL 连接池建议保持 `pool: 100`。
 
+## 🔒 安全与合规 / Security
+
+平台在设计时充分考虑了运维场景的安全需求：
+
+- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
+- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+
+## 🔒 安全 / Security
+
+平台在设计时充分考虑了运维场景的安全需求：
+
+- **认证**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名。登录自带防爆破与限流。
+- **数据**: PAT/SAT Token 经 SHA-256 哈希存储；所有 nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作**: 全量自愈操作带风险分级与审计日志，高危操作强制拦截或需审批。
+
+## 🔒 安全与安全 / Security
+
+平台在设计时充分考虑了运维场景的安全需求：
+
+- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
+- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+
+## 🔒 安全与安全 / Security
+
+平台充分考虑了运维场景的安全需求：
+- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
+- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+
+## 🔒 安全 / Security
+
+平台充分考虑了运维场景的安全需求：
+- **认证**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与防爆破。
+- **数据**: PAT/SAT Token 经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+
+## 🔒 安全 / Security
+
+平台充分考虑了运维场景的安全需求：
+- **认证安全**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名。登录自带限流与防爆破。
+- **数据安全**: PAT/SAT Token 经 SHA-256 哈希存储；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需审批。
+
+## 🔒 安全与安全 / Security
+
+平台充分考虑了运维场景的安全需求：
+- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
+- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
+- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+
 ## 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。
+
+## 社区与贡献 / Community
+
+| [行为准则](CODE_OF_CONDUCT.md) | [贡献指南](CONTRIBUTING.md) | [开发路线图](docs/TODO.md) | [安全策略](SECURITY.md) |
+|---|---|---|---|
+| 了解我们的价值观 | 提交代码与 Bug 修复 | 了解下一步开发计划 | 如何安全地报告漏洞 |
 
 ## 致谢
 

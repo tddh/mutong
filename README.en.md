@@ -18,6 +18,18 @@ Built on the "**Observe, Understand, Remediate, Learn**" philosophy, Mutong star
 - **Self-Healing Executor**: Risk-graded (Low/Medium/High) automatic remediation (Pod eviction, Deployment scaling, HPA management) with manual approval and auto-execution modes, complete audit logging
 - **Retrospective Knowledge**: Event timeline + causal chain DAG + LLM postmortem reports + graph-enhanced hybrid retrieval (pgvector semantic + NebulaGraph topology), transforming every incident into reusable knowledge
 
+### 💡 Why this project / Evolution
+
+Mutong's evolution maps the three stages of Kubernetes operations, each step driven by real-world pain points:
+
+| Phase | Pain Point | Solution |
+| :--- | :--- | :--- |
+| **🟢 2022 Visualization** | Invisible relationships, unknown blast radius | **NebulaGraph Topology**: K8s resource mapping for cascading impact analysis |
+| **🟡 2023 Automation** | Manually typing commands while looking at the map is tiring | **API-First Strategy**: Exposed ops as APIs for CLI/AI (since my frontend skills are weak) |
+| **🔴 2025 Intelligence** | Root cause ambiguity, siloed expert knowledge | **LLM Agent Hybrid Diagnosis**: Rule fallback + AI-driven troubleshooting loop |
+
+> Every feature is forged in production scenarios. See [Full Evolution Story →](docs/evolution.en.md)
+
 ## Features
 
 ### 1. Resource Collection & Storage
@@ -292,9 +304,23 @@ Ensure `embedding.model` is configured in `configs/config.diagnosis.yaml`. Graph
 **Q: System is slow**  
 Adjust BigCache `hardMaxCacheSize` (recommended: 4096 MB) and `shards` (recommended: 256). Enable Nebula cleanup (`nebulaCleanup.enabled: true`, `retentionDays: 7`). PostgreSQL connection pool should be kept at `pool: 100`.
 
+## 🔒 Security
+
+Mutong is designed with enterprise security in mind:
+
+- **Authentication**: Argon2id password hashing, OAuth2/OIDC (PKCE), Session Cookie HMAC signing. Login includes rate limiting and anti-bruteforce.
+- **Data Integrity**: PAT/SAT tokens are stored as SHA-256 hashes; nGQL queries are automatically sanitized to prevent injection; sensitive configs support environment variable overrides.
+- **Operational Safety**: All remediation actions are risk-graded with full audit logs. High-risk operations require manual approval and are blocked by default.
+
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+## Community & Contributing
+
+| [Code of Conduct](CODE_OF_CONDUCT.md) | [Contributing Guide](CONTRIBUTING.md) | [Roadmap](docs/TODO.md) | [Security Policy](SECURITY.md) |
+|---|---|---|---|
+| Learn our values | Submit code & bug fixes | See what's next | How to safely report vulnerabilities |
 
 ## Acknowledgements
 

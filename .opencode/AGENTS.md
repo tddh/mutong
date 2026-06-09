@@ -19,23 +19,16 @@
 
 ### ✅ 必须更新文档
 
-- **架构调整**（新增/删除服务、数据流变更）：更新 `docs/PROJECT_ARCHITECTURE.md` + 相关设计文档
-- **新增配置项**：更新 `docs/` 相关 spec + 示例配置
-- **API 变更**（新增/修改路由）：更新 `docs/PROJECT_ARCHITECTURE.md` API 表
-- **新增子模块**：创建新文档 + 更新索引
+- **README.md (核心)**：任何核心功能变动、API 路径变化、技术栈调整，必须优先同步 `README.md` 和 `README.en.md`。
+- **docs/TODO.md (路线图)**：完成某项 TODO 后，必须将该条目标记为完成，或添加新的 TODO。
+- **CLI 工具**：如果 `mutongctl` 命令参数变更，同步更新 `docs/mutongctl-usage.md`。
+- **图数据库**：NebulaGraph Schema 变更，同步更新 `scripts/schema.ngql` 和 `docs/ngql.md`。
 
 ### ❌ 不需要更新文档
 
 - **修复 Bug**：行为修正
 - **重构**：不改行为的内部调整
 - **样式调整**：纯 UI 或日志格式
-
-### ✍️ 提交前自检
-
-每次 `git commit` 前，必须自检：
-> "这次改动是否改变了使用预期？"
-> * 是 -> 同步更新文档
-> * 否 -> 不需要
 
 ---
 

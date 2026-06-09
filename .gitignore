@@ -49,6 +49,9 @@ artifacts/*
 *.log
 tmp_*
 tmp/*
+
+# Local test scripts
+alert_test.sh
 deploy/*.tgz
 deploy/beyla/
 deploy/opentelemetry-collector/

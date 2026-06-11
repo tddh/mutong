@@ -752,9 +752,11 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					logger.Info("External knowledge base search enabled", zap.String("engine", "tavily"))
 				}
 				var githubClient *search.GitHubClient
-				if cfg.ExternalSearch.GitHub.Token != "" {
-					githubClient = search.NewGitHubClient(cfg.ExternalSearch.GitHub)
-					logger.Info("GitHub Issues search enabled", zap.String("engine", "github"))
+				githubClient = search.NewGitHubClient(cfg.ExternalSearch.GitHub)
+				if cfg.ExternalSearch.GitHub.Token == "" {
+					logger.Warn("GitHub search enabled without token (rate limit 60 req/hr applies)")
+				} else {
+					logger.Info("GitHub Issues search enabled (authenticated)")
 				}
 				if tavilyClient != nil || githubClient != nil {
 					diagCtrl.SetExternalSearch(tavilyClient, githubClient, sanitizer, nil)

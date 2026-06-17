@@ -1,0 +1,6 @@
+node_modules
+dist
+artifacts
+bun.lock
+*.min.js
+*.min.css

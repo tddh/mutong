@@ -1,398 +1,426 @@
-import { createApp, ref, nextTick, onMounted, computed } from 'vue';
-import { marked } from 'marked';
-import { NavBar } from '../components/SharedComponents.js';
-import { API } from '../utils/api.js';
-import '../styles/common.css';
-import './diagnosis.css';
+import { createApp, ref, nextTick, onMounted, computed } from 'vue'
+import { marked } from 'marked'
+import { NavBar } from '../components/SharedComponents.js'
+import { API } from '../utils/api.js'
+import '../styles/common.css'
+import './diagnosis.css'
 
-marked.use({ breaks: true, gfm: true });
+marked.use({ breaks: true, gfm: true })
 
 function renderMarkdown(text) {
-    if (!text) return '';
-    return marked.parse(text);
+  if (!text) return ''
+  return marked.parse(text)
 }
 
 function buildHistory(messages) {
-    return messages
-        .filter(m => ['user', 'assistant', 'tool_call', 'tool'].includes(m.role))
-        .map(m => {
-            const entry = { role: m.role, content: m.content };
-            if (m.tool_calls) entry.tool_calls = m.tool_calls;
-            if (m.tool_call_id) entry.tool_call_id = m.tool_call_id;
-            return entry;
-        });
+  return messages
+    .filter((m) => ['user', 'assistant', 'tool_call', 'tool'].includes(m.role))
+    .map((m) => {
+      const entry = { role: m.role, content: m.content }
+      if (m.tool_calls) entry.tool_calls = m.tool_calls
+      if (m.tool_call_id) entry.tool_call_id = m.tool_call_id
+      return entry
+    })
 }
 
 const App = {
-    components: { NavBar },
-    setup() {
-        const messages = ref([]);
-        const context = ref(null);
-        const inputMessage = ref('');
-        const isLoading = ref(false);
-        const chatContainer = ref(null);
-        const hasContext = ref(false);
-        const businessImpact = ref(null);
-        const businessAppCalls = ref(null);
-        const businessImpactCollapsed = ref(true);  // 默认折叠，最大化聊天区域
+  components: { NavBar },
+  setup() {
+    const messages = ref([])
+    const context = ref(null)
+    const inputMessage = ref('')
+    const isLoading = ref(false)
+    const chatContainer = ref(null)
+    const hasContext = ref(false)
+    const businessImpact = ref(null)
+    const businessAppCalls = ref(null)
+    const businessImpactCollapsed = ref(true) // 默认折叠，最大化聊天区域
 
-        // 增量渲染缓冲区
-        const tokenBuffer = [];
-        let flushTimer = null;
-        let currentStreamMsg = null; // 当前流式消息引用
+    // 增量渲染缓冲区
+    const tokenBuffer = []
+    let flushTimer = null
+    let currentStreamMsg = null // 当前流式消息引用
 
-        // 重试机制
-        const lastUserMessage = ref('');
+    // 重试机制
+    const lastUserMessage = ref('')
 
-        // 工具调用浮动面板
-        const toolCalls = ref([]);
+    // 工具调用浮动面板
+    const toolCalls = ref([])
 
-        // 聚合工具调用（相同名称合并计数）
-        const aggregatedToolCalls = computed(() => {
-            const grouped = {};
-            for (const tc of toolCalls.value) {
-                if (!grouped[tc.name]) {
-                    grouped[tc.name] = { name: tc.name, count: 0, status: 'completed' };
-                }
-                grouped[tc.name].count += 1;
-                if (tc.status === 'pending') {
-                    grouped[tc.name].status = 'pending';
-                }
-            }
-            return Object.values(grouped);
-        });
+    // 聚合工具调用（相同名称合并计数）
+    const aggregatedToolCalls = computed(() => {
+      const grouped = {}
+      for (const tc of toolCalls.value) {
+        if (!grouped[tc.name]) {
+          grouped[tc.name] = { name: tc.name, count: 0, status: 'completed' }
+        }
+        grouped[tc.name].count += 1
+        if (tc.status === 'pending') {
+          grouped[tc.name].status = 'pending'
+        }
+      }
+      return Object.values(grouped)
+    })
 
-        // 流式超时控制
-        let ttftTimer = null;
-        let idleTimer = null;
+    // 流式超时控制
+    let ttftTimer = null
+    let idleTimer = null
 
-        const quickButtons = [
-            { label: 'Pod 诊断', kind: 'Pod', icon: '📦' },
-            { label: 'Deployment 诊断', kind: 'Deployment', icon: '🚀' },
-            { label: 'Service 诊断', kind: 'Service', icon: '🔗' },
-            { label: '节点异常', kind: 'Node', icon: '🖥️' },
-        ];
+    const quickButtons = [
+      { label: 'Pod 诊断', kind: 'Pod', icon: '📦' },
+      { label: 'Deployment 诊断', kind: 'Deployment', icon: '🚀' },
+      { label: 'Service 诊断', kind: 'Service', icon: '🔗' },
+      { label: '节点异常', kind: 'Node', icon: '🖥️' },
+    ]
 
-        async function init() {
-            const params = new URLSearchParams(window.location.search);
-            const fingerprint = params.get('alert_fingerprint');
+    async function init() {
+      const params = new URLSearchParams(window.location.search)
+      const fingerprint = params.get('alert_fingerprint')
 
-            if (fingerprint) {
-                await startChat({ alert_fingerprint: fingerprint });
-            }
+      if (fingerprint) {
+        await startChat({ alert_fingerprint: fingerprint })
+      }
+    }
+
+    async function startChat(params) {
+      try {
+        const result = await API.diagnosis.chat.context(params)
+        context.value = result.context
+        hasContext.value = !!(
+          context.value?.resource_kind ||
+          context.value?.resource_name ||
+          context.value?.alert
+        )
+
+        if (result.context?.impact?.businessImpact) {
+          businessImpact.value = result.context.impact.businessImpact
+        }
+        if (result.context?.business_app_calls) {
+          businessAppCalls.value = result.context.business_app_calls
         }
 
-        async function startChat(params) {
+        messages.value = (result.initial_messages || []).map((msg, idx) => ({
+          ...msg,
+          id: msg.id || 'msg_init_' + idx,
+        }))
+
+        if (messages.value.length === 0) {
+          messages.value.push({
+            id: 'msg_welcome',
+            role: 'assistant',
+            content: '诊断上下文已加载，请输入问题开始诊断。',
+            timestamp: new Date().toISOString(),
+          })
+        }
+      } catch (error) {
+        console.error('Failed to start chat:', error)
+        messages.value.push({
+          id: 'msg_error',
+          role: 'system',
+          content: '❌ 启动对话失败: ' + error.message,
+          timestamp: new Date().toISOString(),
+        })
+      }
+    }
+
+    async function sendMessage() {
+      if (!inputMessage.value.trim() || isLoading.value) return
+
+      const userMsg = inputMessage.value.trim()
+      messages.value.push({
+        id: 'msg_user_' + Date.now(),
+        role: 'user',
+        content: userMsg,
+        timestamp: new Date().toISOString(),
+      })
+
+      inputMessage.value = ''
+      lastUserMessage.value = userMsg
+      scrollToBottom()
+      isLoading.value = true
+
+      // 清理旧定时器
+      if (ttftTimer) clearTimeout(ttftTimer)
+      if (idleTimer) clearTimeout(idleTimer)
+
+      try {
+        const history = buildHistory(messages.value)
+
+        const assistantMsg = {
+          id: 'msg_streaming_' + Date.now(),
+          role: 'assistant',
+          content: '',
+          timestamp: new Date().toISOString(),
+          hasError: false,
+        }
+        messages.value.push(assistantMsg)
+        currentStreamMsg = assistantMsg
+
+        // 增量渲染：启动 30ms 定时刷新
+        tokenBuffer.length = 0
+
+        // 分层超时（参考 opencode 配置）
+        const FETCH_TIMEOUT = 300000 // 总超时 300s（opencode 默认）
+        const TTFT_TIMEOUT = 15000 // 首 token 超时 15s
+        const IDLE_TIMEOUT = 60000 // 空闲超时 60s（opencode chunkTimeout 默认 30s，streamIdle 60s）
+
+        const controller = new AbortController()
+        const fetchTimeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+        let firstTokenReceived = false
+
+        const response = await fetch('/api/v1/diagnosis/chat/ask', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: history, context: context.value }),
+          signal: controller.signal,
+        })
+        clearTimeout(fetchTimeoutId)
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        // 启动 TTFT 超时
+        ttftTimer = setTimeout(() => {
+          if (!firstTokenReceived) {
+            controller.abort()
+          }
+        }, TTFT_TIMEOUT)
+
+        let lastChunkTime = Date.now()
+
+        const resetIdleTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer)
+          idleTimer = setTimeout(() => {
+            controller.abort()
+          }, IDLE_TIMEOUT)
+        }
+
+        while (true) {
+          const { value, done } = await reader.read()
+          if (done) break
+
+          lastChunkTime = Date.now()
+          resetIdleTimer()
+
+          buffer += decoder.decode(value, { stream: true })
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
             try {
-                const result = await API.diagnosis.chat.context(params);
-                context.value = result.context;
-                hasContext.value = !!(context.value?.resource_kind || context.value?.resource_name || context.value?.alert);
-
-                if (result.context?.impact?.businessImpact) {
-                    businessImpact.value = result.context.impact.businessImpact;
-                }
-                if (result.context?.business_app_calls) {
-                    businessAppCalls.value = result.context.business_app_calls;
-                }
-
-                messages.value = (result.initial_messages || []).map((msg, idx) => ({
-                    ...msg,
-                    id: msg.id || 'msg_init_' + idx,
-                }));
-
-                if (messages.value.length === 0) {
-                    messages.value.push({
-                        id: 'msg_welcome',
-                        role: 'assistant',
-                        content: '诊断上下文已加载，请输入问题开始诊断。',
-                        timestamp: new Date().toISOString(),
-                    });
-                }
-            } catch (error) {
-                console.error('Failed to start chat:', error);
-                messages.value.push({
-                    id: 'msg_error',
-                    role: 'system',
-                    content: '❌ 启动对话失败: ' + error.message,
-                    timestamp: new Date().toISOString(),
-                });
-            }
-        }
-
-        async function sendMessage() {
-            if (!inputMessage.value.trim() || isLoading.value) return;
-
-            const userMsg = inputMessage.value.trim();
-            messages.value.push({
-                id: 'msg_user_' + Date.now(),
-                role: 'user',
-                content: userMsg,
-                timestamp: new Date().toISOString(),
-            });
-
-            inputMessage.value = '';
-            lastUserMessage.value = userMsg;
-            scrollToBottom();
-            isLoading.value = true;
-
-            // 清理旧定时器
-            if (ttftTimer) clearTimeout(ttftTimer);
-            if (idleTimer) clearTimeout(idleTimer);
-
-            try {
-                const history = buildHistory(messages.value);
-
-                const assistantMsg = {
-                    id: 'msg_streaming_' + Date.now(),
-                    role: 'assistant',
-                    content: '',
-                    timestamp: new Date().toISOString(),
-                    hasError: false,
-                };
-                messages.value.push(assistantMsg);
-                currentStreamMsg = assistantMsg;
-
-                // 增量渲染：启动 30ms 定时刷新
-                tokenBuffer.length = 0;
-
-                // 分层超时（参考 opencode 配置）
-                const FETCH_TIMEOUT = 300000;  // 总超时 300s（opencode 默认）
-                const TTFT_TIMEOUT = 15000;    // 首 token 超时 15s
-                const IDLE_TIMEOUT = 60000;    // 空闲超时 60s（opencode chunkTimeout 默认 30s，streamIdle 60s）
-
-                const controller = new AbortController();
-                const fetchTimeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-                let firstTokenReceived = false;
-
-                const response = await fetch('/api/v1/diagnosis/chat/ask', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: history, context: context.value }),
-                    signal: controller.signal,
-                });
-                clearTimeout(fetchTimeoutId);
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '';
-
-                // 启动 TTFT 超时
-                ttftTimer = setTimeout(() => {
-                    if (!firstTokenReceived) {
-                        controller.abort();
+              const event = JSON.parse(line)
+              switch (event.type) {
+                case 'token':
+                case 'stream_chunk':
+                  if (!firstTokenReceived) {
+                    firstTokenReceived = true
+                    if (ttftTimer) {
+                      clearTimeout(ttftTimer)
+                      ttftTimer = null
                     }
-                }, TTFT_TIMEOUT);
-
-                let lastChunkTime = Date.now();
-
-                const resetIdleTimer = () => {
-                    if (idleTimer) clearTimeout(idleTimer);
-                    idleTimer = setTimeout(() => {
-                        controller.abort();
-                    }, IDLE_TIMEOUT);
-                };
-
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-
-                    lastChunkTime = Date.now();
-                    resetIdleTimer();
-
-                    buffer += decoder.decode(value, { stream: true });
-
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop() || '';
-
-                    for (const line of lines) {
-                        if (!line.trim()) continue;
-                        try {
-                            const event = JSON.parse(line);
-                            switch (event.type) {
-                                case 'token':
-                                case 'stream_chunk':
-                                    if (!firstTokenReceived) {
-                                        firstTokenReceived = true;
-                                        if (ttftTimer) { clearTimeout(ttftTimer); ttftTimer = null; }
-                                    }
-                                    if (event.content.trim()) {
-                                        tokenBuffer.push(event.content);
-                                        if (!flushTimer) {
-                                            flushTimer = setTimeout(() => flushTokens(), 30);
-                                        }
-                                    }
-                                    break;
-                                case 'tool_start':
-                                case 'tool_call':
-                                    flushTokensNow();
-                                    toolCalls.value = [...toolCalls.value, {
-                                        name: event.name,
-                                        status: 'pending',
-                                        id: 'tool_' + Date.now(),
-                                    }];
-                                    break;
-                                case 'done':
-                                case 'action':
-                                    if (event.type === 'action') {
-                                        if (event.action_type === 'exit') {
-                                            isLoading.value = false;
-                                            flushTokensNow();
-                                            // 工具标记完成，3 秒后清除
-                                            toolCalls.value = toolCalls.value.map(t => ({ ...t, status: 'completed' }));
-                                            setTimeout(() => { toolCalls.value = []; }, 3000);
-                                        }
-                                        break;
-                                    }
-                                    flushTokensNow();
-                                    isLoading.value = false;
-                                    toolCalls.value = toolCalls.value.map(t => ({ ...t, status: 'completed' }));
-                                    setTimeout(() => { toolCalls.value = []; }, 3000);
-                                    break;
-                            }
-                        } catch (e) {
-                            console.warn('[Diagnosis] JSON parse error, line:', line.substring(0, 100), e);
-                        }
+                  }
+                  if (event.content.trim()) {
+                    tokenBuffer.push(event.content)
+                    if (!flushTimer) {
+                      flushTimer = setTimeout(() => flushTokens(), 30)
                     }
-                }
-
-                flushTokensNow();
-                isLoading.value = false;
-                clearTimeout(ttftTimer);
-                clearTimeout(idleTimer);
-                toolCalls.value = toolCalls.value.map(t => ({ ...t, status: 'completed' }));
-                setTimeout(() => { toolCalls.value = []; }, 3000);
-
-                if (!assistantMsg.content) {
-                    assistantMsg.content = 'AI 未返回有效内容，请重试或尝试换个问法。';
-                }
-                scrollToBottom();
-            } catch (error) {
-                flushTokensNow();
-                clearTimeout(ttftTimer);
-                clearTimeout(idleTimer);
-                ttftTimer = null;
-                idleTimer = null;
-                isLoading.value = false;
-                const assistantMsg = getLastUserAssistantMsg();
-                if (assistantMsg) {
-                    assistantMsg.hasError = true;
-                    if (error.name === 'AbortError') {
-                        if (!assistantMsg.content) {
-                            assistantMsg.content = '⏱️ 请求超时，请重试或尝试更简单的问题';
-                        } else {
-                            assistantMsg.content += '\n\n⏱️ 响应中断，已返回部分结果。';
-                        }
-                    } else {
-                        assistantMsg.content = '❌ 请求失败: ' + error.message;
+                  }
+                  break
+                case 'tool_start':
+                case 'tool_call':
+                  flushTokensNow()
+                  toolCalls.value = [
+                    ...toolCalls.value,
+                    {
+                      name: event.name,
+                      status: 'pending',
+                      id: 'tool_' + Date.now(),
+                    },
+                  ]
+                  break
+                case 'done':
+                case 'action':
+                  if (event.type === 'action') {
+                    if (event.action_type === 'exit') {
+                      isLoading.value = false
+                      flushTokensNow()
+                      // 工具标记完成，3 秒后清除
+                      toolCalls.value = toolCalls.value.map((t) => ({ ...t, status: 'completed' }))
+                      setTimeout(() => {
+                        toolCalls.value = []
+                      }, 3000)
                     }
-                }
-                scrollToBottom();
-            } finally {
-                currentStreamMsg = null;
-                if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-                if (ttftTimer) { clearTimeout(ttftTimer); ttftTimer = null; }
-                if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+                    break
+                  }
+                  flushTokensNow()
+                  isLoading.value = false
+                  toolCalls.value = toolCalls.value.map((t) => ({ ...t, status: 'completed' }))
+                  setTimeout(() => {
+                    toolCalls.value = []
+                  }, 3000)
+                  break
+              }
+            } catch (e) {
+              console.warn('[Diagnosis] JSON parse error, line:', line.substring(0, 100), e)
             }
+          }
         }
 
-        function flushTokensNow() {
-            if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-            flushTokens();
-        }
+        flushTokensNow()
+        isLoading.value = false
+        clearTimeout(ttftTimer)
+        clearTimeout(idleTimer)
+        toolCalls.value = toolCalls.value.map((t) => ({ ...t, status: 'completed' }))
+        setTimeout(() => {
+          toolCalls.value = []
+        }, 3000)
 
-        function flushTokens() {
-            if (tokenBuffer.length === 0) return;
-            if (!currentStreamMsg) return;
-            currentStreamMsg.content += tokenBuffer.join('');
-            tokenBuffer.length = 0;
-            scrollToBottom();
+        if (!assistantMsg.content) {
+          assistantMsg.content = 'AI 未返回有效内容，请重试或尝试换个问法。'
         }
-
-        function getLastUserAssistantMsg() {
-            for (let i = messages.value.length - 1; i >= 0; i--) {
-                const m = messages.value[i];
-                if (m.role === 'assistant' && m.id && m.id.startsWith('msg_streaming_')) {
-                    return m;
-                }
+        scrollToBottom()
+      } catch (error) {
+        flushTokensNow()
+        clearTimeout(ttftTimer)
+        clearTimeout(idleTimer)
+        ttftTimer = null
+        idleTimer = null
+        isLoading.value = false
+        const assistantMsg = getLastUserAssistantMsg()
+        if (assistantMsg) {
+          assistantMsg.hasError = true
+          if (error.name === 'AbortError') {
+            if (!assistantMsg.content) {
+              assistantMsg.content = '⏱️ 请求超时，请重试或尝试更简单的问题'
+            } else {
+              assistantMsg.content += '\n\n⏱️ 响应中断，已返回部分结果。'
             }
-            return null;
+          } else {
+            assistantMsg.content = '❌ 请求失败: ' + error.message
+          }
         }
-
-        function toggleToolCall(msg) {
-            msg.collapsed = !msg.collapsed;
+        scrollToBottom()
+      } finally {
+        currentStreamMsg = null
+        if (flushTimer) {
+          clearTimeout(flushTimer)
+          flushTimer = null
         }
-
-        async function retryMessage() {
-            if (isLoading.value) return;
-            if (!lastUserMessage.value) return;
-
-            inputMessage.value = lastUserMessage.value;
-            await sendMessage();
+        if (ttftTimer) {
+          clearTimeout(ttftTimer)
+          ttftTimer = null
         }
-
-        async function startQuickDiagnosis(kind) {
-            inputMessage.value = `请诊断 ${kind} 问题`;
-            await startChat({
-                resource_kind: kind,
-                resource_name: '',
-                namespace: '',
-                description: `诊断 ${kind}`,
-            });
+        if (idleTimer) {
+          clearTimeout(idleTimer)
+          idleTimer = null
         }
+      }
+    }
 
-        function scrollToBottom() {
-            nextTick(() => {
-                if (chatContainer.value) {
-                    chatContainer.value.scrollTop = chatContainer.value.scrollHeight;
-                }
-            });
+    function flushTokensNow() {
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      flushTokens()
+    }
+
+    function flushTokens() {
+      if (tokenBuffer.length === 0) return
+      if (!currentStreamMsg) return
+      currentStreamMsg.content += tokenBuffer.join('')
+      tokenBuffer.length = 0
+      scrollToBottom()
+    }
+
+    function getLastUserAssistantMsg() {
+      for (let i = messages.value.length - 1; i >= 0; i--) {
+        const m = messages.value[i]
+        if (m.role === 'assistant' && m.id && m.id.startsWith('msg_streaming_')) {
+          return m
         }
+      }
+      return null
+    }
 
-        function handleKeyPress(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
+    function toggleToolCall(msg) {
+      msg.collapsed = !msg.collapsed
+    }
+
+    async function retryMessage() {
+      if (isLoading.value) return
+      if (!lastUserMessage.value) return
+
+      inputMessage.value = lastUserMessage.value
+      await sendMessage()
+    }
+
+    async function startQuickDiagnosis(kind) {
+      inputMessage.value = `请诊断 ${kind} 问题`
+      await startChat({
+        resource_kind: kind,
+        resource_name: '',
+        namespace: '',
+        description: `诊断 ${kind}`,
+      })
+    }
+
+    function scrollToBottom() {
+      nextTick(() => {
+        if (chatContainer.value) {
+          chatContainer.value.scrollTop = chatContainer.value.scrollHeight
         }
+      })
+    }
 
-        function toggleBusinessImpact() {
-            businessImpactCollapsed.value = !businessImpactCollapsed.value;
-        }
+    function handleKeyPress(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        sendMessage()
+      }
+    }
 
-        function riskLabel(level) {
-            const map = { critical: '🔴 严重', high: '🟠 高风险', medium: '🟡 中风险', low: '🟢 低风险' };
-            return map[level] || level;
-        }
+    function toggleBusinessImpact() {
+      businessImpactCollapsed.value = !businessImpactCollapsed.value
+    }
 
-        onMounted(() => {
-            init();
-        });
+    function riskLabel(level) {
+      const map = { critical: '🔴 严重', high: '🟠 高风险', medium: '🟡 中风险', low: '🟢 低风险' }
+      return map[level] || level
+    }
 
-        return {
-            messages,
-            context,
-            inputMessage,
-            isLoading,
-            chatContainer,
-            hasContext,
-            quickButtons,
-            businessImpact,
-            businessAppCalls,
-            businessImpactCollapsed,
-            toolCalls,
-            aggregatedToolCalls,
-            startChat,
-            sendMessage,
-            startQuickDiagnosis,
-            toggleBusinessImpact,
-            handleKeyPress,
-            riskLabel,
-            renderMarkdown,
-            retryMessage,
-            lastUserMessage,
-        };
-    },
-    template: `
+    onMounted(() => {
+      init()
+    })
+
+    return {
+      messages,
+      context,
+      inputMessage,
+      isLoading,
+      chatContainer,
+      hasContext,
+      quickButtons,
+      businessImpact,
+      businessAppCalls,
+      businessImpactCollapsed,
+      toolCalls,
+      aggregatedToolCalls,
+      startChat,
+      sendMessage,
+      startQuickDiagnosis,
+      toggleBusinessImpact,
+      handleKeyPress,
+      riskLabel,
+      renderMarkdown,
+      retryMessage,
+      lastUserMessage,
+    }
+  },
+  template: `
         <nav-bar></nav-bar>
         <div class="diagnosis-page">
             <div class="diagnosis-layout">
@@ -583,7 +611,7 @@ const App = {
             </div>
         </div>
     `,
-};
+}
 
-const app = createApp(App);
-app.mount('#app');
+const app = createApp(App)
+app.mount('#app')

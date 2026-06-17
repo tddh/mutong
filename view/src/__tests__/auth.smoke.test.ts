@@ -7,10 +7,18 @@ describe('auth store init', () => {
   })
 
   it('marks loggedIn when /api/auth/me succeeds with cookie session', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ uuid: 'u-1', username: 'alice', role: 'admin', auth_provider: 'zitadel' }),
-    }))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          uuid: 'u-1',
+          username: 'alice',
+          role: 'admin',
+          auth_provider: 'zitadel',
+        }),
+      }),
+    )
     const { useAuth } = await import('../stores/auth.js')
     const store = useAuth()
     await store.init()

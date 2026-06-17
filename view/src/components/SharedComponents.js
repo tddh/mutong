@@ -1,8 +1,8 @@
-import { h, onMounted } from 'vue';
-import { useAuth } from '../stores/auth.js';
+import { h, onMounted } from 'vue'
+import { useAuth } from '../stores/auth.js'
 
 export const NavBar = {
-    template: `
+  template: `
         <nav class="navbar">
             <div class="nav-brand" @click="home">牧童 · 重明</div>
             <div class="nav-links">
@@ -28,24 +28,28 @@ export const NavBar = {
             </div>
         </nav>
     `,
-    setup() {
-        const auth = useAuth();
-        const currentPath = window.location.pathname;
-        const home = () => { window.location.href = '/view/index.html'; };
-        const isActive = (href) => currentPath === href;
-        const logout = () => { auth.logout(); };
-
-        onMounted(async () => {
-            await auth.init();
-        });
-
-        return { home, isActive, auth, logout };
+  setup() {
+    const auth = useAuth()
+    const currentPath = window.location.pathname
+    const home = () => {
+      window.location.href = '/view/index.html'
     }
-};
+    const isActive = (href) => currentPath === href
+    const logout = () => {
+      auth.logout()
+    }
+
+    onMounted(async () => {
+      await auth.init()
+    })
+
+    return { home, isActive, auth, logout }
+  },
+}
 
 export const StatCard = {
-    props: ['title', 'value', 'unit', 'color', 'icon'],
-    template: `
+  props: ['title', 'value', 'unit', 'color', 'icon'],
+  template: `
         <div class="stat-card">
             <div class="stat-content">
                 <span class="stat-title">{{ title }}</span>
@@ -53,5 +57,5 @@ export const StatCard = {
             </div>
             <div class="stat-icon" v-if="icon">{{ icon }}</div>
         </div>
-    `
-};
+    `,
+}

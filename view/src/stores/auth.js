@@ -1,56 +1,62 @@
-import { reactive } from 'vue';
+import { reactive } from 'vue'
 
 const authState = reactive({
-    status: sessionStorage.getItem('access_token') ? 'loggedIn' : 'unknown',
-    accessToken: sessionStorage.getItem('access_token') || null,
-    user: JSON.parse(sessionStorage.getItem('user') || 'null'),
+  status: sessionStorage.getItem('access_token') ? 'loggedIn' : 'unknown',
+  accessToken: sessionStorage.getItem('access_token') || null,
+  user: JSON.parse(sessionStorage.getItem('user') || 'null'),
 
-    get isAuthenticated() {
-        return this.status === 'loggedIn';
-    },
+  get isAuthenticated() {
+    return this.status === 'loggedIn'
+  },
 
-    async init() {
-        // Try session cookie first (set by backend on /api/auth/login)
-        try {
-            const res = await fetch('/api/auth/me', { credentials: 'include' });
-            if (res.ok) {
-                this.user = await res.json();
-                sessionStorage.setItem('user', JSON.stringify(this.user));
-                this.status = 'loggedIn';
-                return;
-            }
-        } catch {}
-
-        if (this.accessToken) {
-            try {
-                const res = await fetch('/api/auth/me', {
-                    headers: { Authorization: `Bearer ${this.accessToken}` },
-                });
-                if (res.ok) {
-                    this.user = await res.json();
-                    sessionStorage.setItem('user', JSON.stringify(this.user));
-                    this.status = 'loggedIn';
-                    return;
-                }
-            } catch {}
-        }
-
-        this.status = 'loggedOut';
-        this.accessToken = null;
-        this.user = null;
-        sessionStorage.removeItem('access_token');
-        sessionStorage.removeItem('user');
-    },
-
-    async logout() {
-        await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-        this.accessToken = null;
-        this.user = null;
-        this.status = 'loggedOut';
-        sessionStorage.removeItem('access_token');
-        sessionStorage.removeItem('user');
-        window.location.href = '/view/login.html';
+  async init() {
+    // Try session cookie first (set by backend on /api/auth/login)
+    try {
+      const res = await fetch('/api/auth/me', { credentials: 'include' })
+      if (res.ok) {
+        this.user = await res.json()
+        sessionStorage.setItem('user', JSON.stringify(this.user))
+        this.status = 'loggedIn'
+        return
+      }
+    } catch {
+      // 解析 session 失败时静默处理，继续尝试 token 验证
     }
-});
 
-export function useAuth() { return authState; }
+    if (this.accessToken) {
+      try {
+        const res = await fetch('/api/auth/me', {
+          headers: { Authorization: `Bearer ${this.accessToken}` },
+        })
+        if (res.ok) {
+          this.user = await res.json()
+          sessionStorage.setItem('user', JSON.stringify(this.user))
+          this.status = 'loggedIn'
+          return
+        }
+      } catch {
+        // token 验证失败时静默处理，标记为未登录
+      }
+    }
+
+    this.status = 'loggedOut'
+    this.accessToken = null
+    this.user = null
+    sessionStorage.removeItem('access_token')
+    sessionStorage.removeItem('user')
+  },
+
+  async logout() {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
+    this.accessToken = null
+    this.user = null
+    this.status = 'loggedOut'
+    sessionStorage.removeItem('access_token')
+    sessionStorage.removeItem('user')
+    window.location.href = '/view/login.html'
+  },
+})
+
+export function useAuth() {
+  return authState
+}

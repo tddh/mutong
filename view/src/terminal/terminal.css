@@ -1,4 +1,6 @@
-html, body, #terminal {
+html,
+body,
+#terminal {
   height: 100%;
   width: 100%;
   margin: 0;
@@ -42,9 +44,15 @@ html, body, #terminal {
   padding-right: 8px;
   font-family: monospace;
 }
-.status[style*="green"] { color: #4caf50; }
-.status[style*="red"] { color: #f44336; }
-.status[style*="gray"] { color: #9e9e9e; }
+.status[style*='green'] {
+  color: #4caf50;
+}
+.status[style*='red'] {
+  color: #f44336;
+}
+.status[style*='gray'] {
+  color: #9e9e9e;
+}
 #terminal {
   flex: 1;
   min-height: 0;

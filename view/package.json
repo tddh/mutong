@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "echo \"No linter configured yet\" && exit 0"
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write \"src/**/*.{js,ts,vue,json,css,md}\"",
+    "format:check": "prettier --check \"src/**/*.{js,ts,vue,json,css,md}\""
   },
   "dependencies": {
     "@antv/g6": "^4.8.24",
@@ -20,9 +23,16 @@
     "vue": "^3.4.21"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.61.1",
+    "@typescript-eslint/parser": "^8.61.1",
     "@vitejs/plugin-vue": "^5.0.4",
     "@vue/test-utils": "^2.4.10",
+    "eslint": "^10.5.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.2",
     "jsdom": "^29.1.1",
+    "prettier": "^3.8.4",
     "vite": "^5.2.0",
     "vitest": "^4.1.7"
   }

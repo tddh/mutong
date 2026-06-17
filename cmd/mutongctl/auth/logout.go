@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitee.com/tddh/mutong/cmd/mutongctl/internal/iostreams"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 type logoutOptions struct {
@@ -99,7 +100,7 @@ func revokeToken(server, refreshToken string) error {
 	form.Set("token", refreshToken)
 	form.Set("token_type_hint", "refresh_token")
 
-	client := http.Client{Timeout: 10 * time.Second}
+	client := httpclient.New(10 * time.Second)
 	resp, err := client.PostForm(server+"/oauth/v2/revoke", form)
 	if err != nil {
 		return fmt.Errorf("revoke request failed: %w", err)

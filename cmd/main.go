@@ -626,6 +626,8 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 	}
 	terminalCtrl := controllers.NewTerminalController(logger, k8sClientForTerminal, restConfigForTerminal)
 	terminalCtrl.RegisterRoutes(engine)
+	// Start periodic cleanup of expired terminal sessions (30 minutes max age)
+	terminalCtrl.Manager.StartCleanup(5*time.Minute, 30*time.Minute)
 
 	if alertProcessor != nil {
 		diagEngine := diagnosis_svc.NewEngine(logger, db, alertProcessor)
@@ -751,8 +753,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					tavilyClient = search.NewTavilyClient(logger, cfg.ExternalSearch.Tavily)
 					logger.Info("External knowledge base search enabled", zap.String("engine", "tavily"))
 				}
-				var githubClient *search.GitHubClient
-				githubClient = search.NewGitHubClient(logger, cfg.ExternalSearch.GitHub)
+				githubClient := search.NewGitHubClient(logger, cfg.ExternalSearch.GitHub)
 				if cfg.ExternalSearch.GitHub.Token == "" {
 					logger.Warn("GitHub search enabled without token (rate limit 60 req/hr applies)")
 				} else {

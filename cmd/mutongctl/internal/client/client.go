@@ -12,9 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
-// Client Mutong API HTTP client.
 type Client struct {
 	baseURL    string
 	httpClient *http.Client
@@ -30,7 +31,7 @@ func NewClient(serverURL, token, authSource string) *Client {
 		baseURL:    strings.TrimRight(serverURL, "/"),
 		token:      token,
 		authSource: authSource,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: httpclient.New(30 * time.Second),
 	}
 }
 
@@ -50,7 +51,7 @@ func (c *Client) Do(ctx context.Context, method, path string, body any) ([]byte,
 
 // DoLongRunning sends an HTTP request with a 5-minute timeout, for slow endpoints like diagnosis.
 func (c *Client) DoLongRunning(ctx context.Context, method, path string, body any) ([]byte, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := httpclient.New(5 * time.Minute)
 	return c.doRequest(ctx, method, path, body, client)
 }
 
@@ -180,7 +181,14 @@ func refreshOAuthToken(server, refreshToken string) (string, int, error) {
 	form.Set("client_id", "mutongctl")
 	form.Set("refresh_token", refreshToken)
 
-	resp, err := http.PostForm(server+"/oauth/v2/token", form)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", server+"/oauth/v2/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", 0, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := httpclient.New(30 * time.Second)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, err
 	}
@@ -222,6 +230,7 @@ func saveOAuthToken(server, accessToken, refreshToken string, expiresIn int) err
 		t.Expiry = time.Now().Add(time.Duration(expiresIn) * time.Second)
 	}
 	t.RefreshToken = refreshToken
+	tokens[server] = t
 	tokenData, err := json.MarshalIndent(tokens, "", "  ")
 	if err != nil {
 		return fmt.Errorf("serializing tokens: %w", err)

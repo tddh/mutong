@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"gitee.com/tddh/mutong/cmd/mutongctl/internal/iostreams"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 const (
@@ -45,7 +46,7 @@ type loginOptions struct {
 func newCmdLogin(f *Factory) *cobra.Command {
 	opts := &loginOptions{
 		IO:         f.IO,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		HTTPClient: httpclient.New(30 * time.Second),
 	}
 
 	cmd := &cobra.Command{

@@ -17,8 +17,9 @@ type AlertAggregator struct {
 	mu     sync.RWMutex
 	window time.Duration
 
-	ticker *time.Ticker
-	done   chan struct{}
+	ticker   *time.Ticker
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // AlertGroup represents a collection of related alerts that should be notified together.
@@ -130,8 +131,8 @@ func (ag *AlertAggregator) StartFlushScheduler(interval time.Duration, callback 
 		return
 	}
 	ag.window = interval
-	ag.done = make(chan struct{})
 	ag.ticker = time.NewTicker(interval)
+	done := ag.done
 	ag.mu.Unlock()
 
 	go func() {
@@ -142,7 +143,7 @@ func (ag *AlertAggregator) StartFlushScheduler(interval time.Duration, callback 
 				if len(groups) > 0 && callback != nil {
 					callback(groups)
 				}
-			case <-ag.done:
+			case <-done:
 				return
 			}
 		}
@@ -151,14 +152,16 @@ func (ag *AlertAggregator) StartFlushScheduler(interval time.Duration, callback 
 
 // Stop stops the flush scheduler
 func (ag *AlertAggregator) Stop() {
-	ag.mu.Lock()
-	if ag.ticker != nil {
-		ag.ticker.Stop()
-		ag.ticker = nil
-	}
-	if ag.done != nil {
-		close(ag.done)
-		ag.done = nil
-	}
-	ag.mu.Unlock()
+	ag.stopOnce.Do(func() {
+		ag.mu.Lock()
+		defer ag.mu.Unlock()
+		if ag.ticker != nil {
+			ag.ticker.Stop()
+			ag.ticker = nil
+		}
+		if ag.done != nil {
+			close(ag.done)
+			ag.done = nil
+		}
+	})
 }

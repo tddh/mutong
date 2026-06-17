@@ -16,6 +16,7 @@ import (
 	"gitee.com/tddh/mutong/interfaces"
 	alert_interfaces "gitee.com/tddh/mutong/interfaces/alert"
 	alert_models "gitee.com/tddh/mutong/models/alert"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 // AlertNotifier 告警通知器
@@ -47,11 +48,9 @@ type EmailNotifierConfig struct {
 // NewAlertNotifier 创建告警通知器实例
 func NewAlertNotifier(logger interfaces.Logger, config NotifierConfig) alert_interfaces.AlertNotifier {
 	return &AlertNotifier{
-		logger:   logger,
-		notifier: config,
-		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		logger:     logger,
+		notifier:   config,
+		httpClient: httpclient.New(10 * time.Second),
 	}
 }
 

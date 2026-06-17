@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 type PrometheusConfig struct {
@@ -149,7 +150,7 @@ func NewQueryService(logger interfaces.Logger, cfg PrometheusConfig) *QueryServi
 
 	svc := &QueryService{
 		logger:  logger,
-		client:  &http.Client{Timeout: timeout},
+		client:  httpclient.New(timeout),
 		baseURL: baseURL,
 		timeout: timeout,
 		mapping: mapping,

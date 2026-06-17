@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,20 +42,26 @@ func (m *mockRouter) Route(ctx context.Context, a *alert_models.EnrichedAlert) (
 }
 
 type mockNotifier struct {
+	mu       sync.Mutex
 	notified []*alert_models.ProcessedAlert
 	err      error
 }
 
 func (m *mockNotifier) Notify(ctx context.Context, a *alert_models.ProcessedAlert) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.notified = append(m.notified, a)
 	return m.err
 }
 
 type mockStorage struct {
+	mu    sync.Mutex
 	saved []*alert_models.ProcessedAlert
 }
 
 func (m *mockStorage) Save(ctx context.Context, a *alert_models.ProcessedAlert) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.saved = append(m.saved, a)
 	return nil
 }

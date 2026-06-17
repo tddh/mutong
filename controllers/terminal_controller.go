@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -17,6 +18,7 @@ import (
 )
 
 var wsUpgrader = websocket.Upgrader{
+	HandshakeTimeout: 10 * time.Second,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		allowed := os.Getenv("MUTONG_ALLOWED_ORIGINS")
@@ -157,6 +159,38 @@ func (c *TerminalController) ws(ctx *gin.Context) {
 		return
 	}
 	defer ws.Close()
+
+	const (
+		writeWait      = 10 * time.Second
+		pongWait       = 60 * time.Second
+		pingPeriod     = 54 * time.Second
+		maxMessageSize = 4096
+	)
+	ws.SetReadLimit(maxMessageSize)
+	_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPongHandler(func(string) error {
+		_ = ws.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	// ping ticker to keep connection alive
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				_ = ws.SetWriteDeadline(time.Now().Add(writeWait))
+				if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
+					return
+				}
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+	defer close(pingDone)
 
 	cluster := ctx.DefaultQuery("cluster", "default-cluster")
 	namespace := ctx.DefaultQuery("namespace", "default")

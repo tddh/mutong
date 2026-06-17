@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 type HTTPLLMProvider struct {
@@ -61,11 +62,9 @@ func newHTTPLLMProvider(provider, model, apiKey, endpoint, baseURL string, timeo
 		endpoint:       endpoint,
 		baseURL:        baseURL,
 		timeout:        time.Duration(timeoutSec) * time.Second,
-		client: &http.Client{
-			Timeout: time.Duration(timeoutSec) * time.Second,
-		},
-		maxTokens:     mt,
-		contextWindow: contextWindow,
+		client:         httpclient.New(time.Duration(timeoutSec) * time.Second),
+		maxTokens:      mt,
+		contextWindow:  contextWindow,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 type OTelQueryService struct {
@@ -19,7 +20,7 @@ type OTelQueryService struct {
 func NewOTelQueryService(collectorURL string) *OTelQueryService {
 	return &OTelQueryService{
 		collectorURL: collectorURL,
-		client:       &http.Client{Timeout: 10 * time.Second},
+		client:       httpclient.New(10 * time.Second),
 	}
 }
 

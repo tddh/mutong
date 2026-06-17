@@ -28,17 +28,43 @@ type TerminalSession struct {
 	k8sClient  *kubernetes.Clientset
 	restConfig *rest.Config
 	stdinChan  chan []byte
+	closeCh    chan struct{}
+	createdAt  time.Time
 }
 
 type TerminalSessionManager struct {
 	sessions map[string]*TerminalSession
 	mu       sync.RWMutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 func NewTerminalSessionManager() *TerminalSessionManager {
 	return &TerminalSessionManager{
 		sessions: make(map[string]*TerminalSession),
+		stopCh:   make(chan struct{}),
 	}
+}
+
+func (m *TerminalSessionManager) StartCleanup(interval, maxAge time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.CleanupExpired(maxAge)
+			case <-m.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+func (m *TerminalSessionManager) Stop() {
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 }
 
 func (m *TerminalSessionManager) CreateSession(cluster, namespace, pod, container string, conn *websocket.Conn) (*TerminalSession, error) {
@@ -52,6 +78,8 @@ func (m *TerminalSessionManager) CreateSession(cluster, namespace, pod, containe
 		Conn:      conn,
 		sizeQueue: &terminalSizeQueue{ch: make(chan remoteTerminalSize, 10)},
 		stdinChan: make(chan []byte, 100),
+		closeCh:   make(chan struct{}),
+		createdAt: time.Now(),
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -83,12 +111,35 @@ func (m *TerminalSessionManager) CloseSession(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if sess, ok := m.sessions[id]; ok {
+		select {
+		case <-sess.closeCh:
+		default:
+			close(sess.closeCh)
+		}
 		if sess.Conn != nil {
 			sess.Conn.Close()
 		}
 		delete(m.sessions, id)
 	}
 	return nil
+}
+
+func (m *TerminalSessionManager) CleanupExpired(maxAge time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, sess := range m.sessions {
+		if time.Since(sess.createdAt) > maxAge {
+			select {
+			case <-sess.closeCh:
+			default:
+				close(sess.closeCh)
+			}
+			if sess.Conn != nil {
+				sess.Conn.Close()
+			}
+			delete(m.sessions, id)
+		}
+	}
 }
 
 func (m *TerminalSessionManager) GetSession(id string) *TerminalSession {
@@ -199,14 +250,23 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 				break
 			}
 			if n > 0 && sess.Conn != nil {
+				_ = sess.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				_ = sess.Conn.WriteMessage(websocket.TextMessage, buf[:n])
 			}
 		}
 	}()
 
 	go func() {
-		for msg := range sess.stdinChan {
-			_, _ = stdinWriter.Write(msg)
+		for {
+			select {
+			case msg, ok := <-sess.stdinChan:
+				if !ok {
+					return
+				}
+				_, _ = stdinWriter.Write(msg)
+			case <-sess.closeCh:
+				return
+			}
 		}
 	}()
 

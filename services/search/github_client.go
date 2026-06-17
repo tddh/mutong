@@ -13,6 +13,7 @@ import (
 
 	"gitee.com/tddh/mutong/config"
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/services/httpclient"
 )
 
 type GitHubClient struct {
@@ -54,7 +55,7 @@ func NewGitHubClient(logger interfaces.Logger, cfg config.GitHubConfig) *GitHubC
 		token:      cfg.Token,
 		endpoint:   cfg.Endpoint,
 		maxResults: cfg.MaxResults,
-		httpClient: &http.Client{Timeout: time.Duration(cfg.TimeoutSec) * time.Second},
+		httpClient: httpclient.New(time.Duration(cfg.TimeoutSec) * time.Second),
 	}
 }
 

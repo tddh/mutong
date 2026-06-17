@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- 外部知识库搜索（Tavily + GitHub Issues）：MCP 工具 search_knowledge_base / search_github_issues，支持 AI 诊断中 LLM 自动调用及 mutongctl 手动触发
+- mutongctl search 命令（github / tavily 子命令）
+- HTTP 连接池统一工厂 `services/httpclient`（共享 Transport，MaxIdleConns: 100）
+- WebSocket 终端保活机制（Ping/Pong + ReadDeadline + WriteDeadline + 会话过期清理）
+- 前端 ESLint + Prettier 代码规范配置
 - 多集群 kubeconfig 声明式配置
 - CI/CD 自动化（GitHub Actions，含 lint/test/build）
 - golangci-lint 静态分析配置
@@ -25,6 +30,8 @@
 - 冒烟测试脚本（动态 API 发现资源）
 
 ### Changed
+- 外部搜索配置：`enabled` 改为 `true`，YAML key 统一为 camelCase，支持 MUTONG_TAVILY_KEY / MUTONG_GITHUB_TOKEN 环境变量覆盖
+- 诊断 System Prompt 增加外部搜索工具引导
 - 配置统一为 `configs/` 目录模式，配置文件提供 `.example` 模板
 - LICENSE 确定为 MIT
 - 硬编码导出：新增 ServerConfig，扩展 KafkaConfig/ExecutorConf，17 处硬编码替换为可配置项
@@ -34,6 +41,13 @@
 - MCP 工具调用全链路 Info 日志（InvokableRun + ExecuteTool）
 
 ### Fixed
+- GitHub Issues 搜索返回 422：Fine-grained PAT 缺少 `is:issue` 限定符，已自动追加
+- GitHub 搜索客户端：添加 User-Agent + 错误响应 body 读取
+- 搜索客户端增加结构化日志
+- Alert 聚合器竞态条件：done channel 锁外读 → 局部变量 + Stop() 加 sync.Once
+- 测试 mock 并发 write（mockNotifier / mockStorage 加 sync.Mutex）
+- saveOAuthToken Token 刷新不持久化（预存 bug：map 副本未写回）
+- OAuth Token 刷新 HTTP 请求无超时（http.PostForm → 显式构造 + 30s 超时）
 - 无 kubeconfig 时优雅降级不再 crash
 - kubeconfig 敏感信息脱敏
 - config.infra.yaml deleteResource→delete_pod key 不匹配 bug

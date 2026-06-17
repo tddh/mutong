@@ -148,7 +148,7 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 
 ### 10. MCP 工具服务器
 
-实现 Model Context Protocol (MCP)，提供 20 个内置工具供 LLM 通过 Function Calling 自动调用。AI 诊断全量注册所有工具（不再按场景过滤），LLM 根据 prompt 指引按需选择。每次工具调用自动记录日志，支持调试追踪。
+实现 Model Context Protocol (MCP)，提供 22 个内置工具供 LLM 通过 Function Calling 自动调用。AI 诊断全量注册所有工具（不再按场景过滤），LLM 根据 prompt 指引按需选择。每次工具调用自动记录日志，支持调试追踪。
 
 | 工具名 | 功能描述 |
 |--------|----------|
@@ -170,6 +170,8 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 | `search_logs` | 日志关键词全文搜索（ES） |
 | `get_error_logs` | 获取 Error 级别日志（ES） |
 | `search_similar_cases` | 向量相似度搜索历史故障案例 |
+| `search_knowledge_base` | 搜索互联网获取实时技术信息（Tavily，返回 AI 摘要+文章链接） |
+| `search_github_issues` | 搜索 GitHub Issues 查找已知 Bug 和修复方案 |
 | `list_alerts` | 简化版活跃告警列表 |
 | `generate_retrospective` | 生成故障复盘报告（条件启用） |
 
@@ -202,6 +204,7 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 - **日志与指标**: `logs` / `metrics` 查询日志和 Prometheus 指标
 - **系统管理**: `cluster` / `system` / `stats` / `exec` 集群状态与执行器管理
 - **业务拓扑**: `biz` 查询业务应用与调用关系
+- **外部搜索**: `search github` / `search tavily` 搜索 GitHub Issues 和互联网知识库
 - **配置管理**: `config` 多环境（context）切换，支持 flag > env > 配置文件认证链
 - **认证登录**: `auth login` 浏览器 OAuth2 授权码流程（PKCE），自动保存 token
 - **智能输出**: 四种输出格式（table / json / yaml / markdown），TTY 自适应，管道友好
@@ -217,6 +220,8 @@ mutongctl alert list --severity critical          # 查看 Critical 告警
 mutongctl diagnose run --fingerprint <fp>         # 一键 AI 诊断
 mutongctl logs pod nginx -n production --tail 50  # 查看 Pod 日志
 mutongctl inspect run && mutongctl inspect report # 执行巡检并查看报告
+mutongctl search github -q "OOMKilled" -r "kubernetes/kubernetes"  # 搜索 GitHub Issues
+mutongctl search tavily -q "Pod CrashLoopBackOff 排查"              # 搜索互联网知识
 mutongctl config set server https://mutong.example.com  # 配置服务地址
 ```
 
@@ -249,7 +254,7 @@ mutongctl config set server https://mutong.example.com  # 配置服务地址
 mutong/
 ├── cmd/                         # 应用入口
 │   ├── main.go                  #   Web 服务入口
-│   └── mutongctl/               #   CLI 工具 (19 个命令模块)
+│   └── mutongctl/               #   CLI 工具 (20 个命令模块)
 ├── config/                      # 配置加载（viper + 结构体定义）
 ├── configs/                     # 拆分配置（含 .example 模板）
 │   ├── config.core.yaml.example  #   核心配置（数据库、缓存、日志）
@@ -417,6 +422,19 @@ diagnosis:
     enabled: true
     redis: "localhost:6379"
     ttl: 1800
+
+# 外部知识库搜索
+external_search:
+  enabled: true
+  auditEnabled: true
+  tavily:
+    apiKey: ""  # 通过环境变量 MUTONG_TAVILY_KEY 设置
+    timeoutSeconds: 15
+    maxResults: 3
+  github:
+    token: ""  # 通过环境变量 MUTONG_GITHUB_TOKEN 设置（可选，无 Token 限制 60 次/小时）
+    timeoutSeconds: 10
+    maxResults: 3
 ```
 
 ### 自愈执行器配置（config.infra.yaml）

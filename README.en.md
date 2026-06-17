@@ -98,7 +98,7 @@ Mutong's evolution maps the three stages of Kubernetes operations, each step dri
 - Service dependency analysis and visualization
 
 ### 10. MCP Tool Server
-Implements the Model Context Protocol (MCP) with 20 built-in tools for LLM Function Calling:
+Implements the Model Context Protocol (MCP) with 22 built-in tools for LLM Function Calling:
 
 | Tool | Description |
 |------|-------------|
@@ -120,6 +120,8 @@ Implements the Model Context Protocol (MCP) with 20 built-in tools for LLM Funct
 | `search_logs` | Full-text log search (ES) |
 | `get_error_logs` | Get Error-level logs (ES) |
 | `search_similar_cases` | Vector similarity search for historical cases |
+| `search_knowledge_base` | Search the web for real-time technical info (Tavily, returns AI summary + article links) |
+| `search_github_issues` | Search GitHub Issues for known bugs and community fixes |
 | `list_alerts` | Simplified active alert list |
 | `generate_retrospective` | Generate postmortem report (conditional) |
 
@@ -141,6 +143,8 @@ mutongctl alert list --severity critical
 mutongctl diagnose run --fingerprint <fp>
 mutongctl logs pod nginx -n production --tail 50
 mutongctl inspect run && mutongctl inspect report
+mutongctl search github -q "OOMKilled" -r "kubernetes/kubernetes"
+mutongctl search tavily -q "Pod CrashLoopBackOff troubleshooting"
 ```
 
 ## Frontend Pages

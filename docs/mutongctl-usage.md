@@ -186,6 +186,18 @@ mutongctl biz apps [--team "交易平台组"]
 mutongctl biz graph [--businessUnit "core"]
 ```
 
+### 外部搜索
+
+```bash
+# GitHub Issues 搜索
+mutongctl search github -q "OOMKilled" -r "kubernetes/kubernetes"
+mutongctl search github -q "CrashLoopBackOff" -r "prometheus/prometheus" --state closed
+
+# Tavily 知识库搜索
+mutongctl search tavily -q "Pod CrashLoopBackOff 排查方法"
+mutongctl search tavily -q "Prometheus 高基数优化" -t general
+```
+
 ### 执行器（危险操作需 --confirm，支持 11 种操作类型）
 
 ```bash
@@ -294,6 +306,10 @@ mutongctl logs pod nginx -n production --tail 50
 
 # 6. 展示历史案例
 mutongctl retro search "OOMKilled" -o md
+
+# 7. 搜索外部知识库（社区经验/已知 Bug）
+mutongctl search github -q "OOMKilled" -r "kubernetes/kubernetes"
+mutongctl search tavily -q "Kubernetes OOMKilled 排查"
 ```
 
 ### 错误处理

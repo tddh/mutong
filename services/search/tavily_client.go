@@ -9,10 +9,14 @@ import (
 	"net/http"
 	"time"
 
+	"go.uber.org/zap"
+
 	"gitee.com/tddh/mutong/config"
+	"gitee.com/tddh/mutong/interfaces"
 )
 
 type TavilyClient struct {
+	logger     interfaces.Logger
 	apiKey     string
 	endpoint   string
 	maxResults int
@@ -42,7 +46,7 @@ type tavilyResult struct {
 	Score   float64 `json:"score"`
 }
 
-func NewTavilyClient(cfg config.TavilyConfig) *TavilyClient {
+func NewTavilyClient(logger interfaces.Logger, cfg config.TavilyConfig) *TavilyClient {
 	if cfg.MaxResults == 0 {
 		cfg.MaxResults = 3
 	}
@@ -53,6 +57,7 @@ func NewTavilyClient(cfg config.TavilyConfig) *TavilyClient {
 		cfg.Endpoint = "https://api.tavily.com/search"
 	}
 	return &TavilyClient{
+		logger:     logger,
 		apiKey:     cfg.APIKey,
 		endpoint:   cfg.Endpoint,
 		maxResults: cfg.MaxResults,
@@ -62,6 +67,10 @@ func NewTavilyClient(cfg config.TavilyConfig) *TavilyClient {
 
 func (c *TavilyClient) Search(ctx context.Context, query string, topic string) ([]Result, string, error) {
 	if c.apiKey == "" {
+		c.logger.Info("Tavily search skipped: API key not configured",
+			zap.String("query", query),
+			zap.String("endpoint", c.endpoint),
+		)
 		return nil, "", fmt.Errorf("tavily API key not configured")
 	}
 
@@ -77,32 +86,67 @@ func (c *TavilyClient) Search(ctx context.Context, query string, topic string) (
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
+		c.logger.Info("Failed to marshal Tavily request",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.String("topic", topic),
+			zap.Error(err),
+		)
 		return nil, "", fmt.Errorf("marshal tavily request: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
+		c.logger.Info("Failed to create Tavily request",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.String("topic", topic),
+			zap.Error(err),
+		)
 		return nil, "", fmt.Errorf("create tavily request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.logger.Info("Tavily API request failed",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.String("topic", topic),
+			zap.Int("max_results", c.maxResults),
+			zap.Error(err),
+		)
 		return nil, "", fmt.Errorf("tavily request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.logger.Info("Failed to read Tavily response",
+			zap.String("endpoint", c.endpoint),
+			zap.Int("http_status", resp.StatusCode),
+			zap.Error(err),
+		)
 		return nil, "", fmt.Errorf("read tavily response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Info("Tavily API error response",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.Int("status", resp.StatusCode),
+			zap.Int("response_bytes", len(data)),
+		)
 		return nil, "", fmt.Errorf("tavily API error %d: %s", resp.StatusCode, string(data))
 	}
 
 	var tResp tavilyResponse
 	if err := json.Unmarshal(data, &tResp); err != nil {
+		c.logger.Info("Failed to unmarshal Tavily response",
+			zap.String("endpoint", c.endpoint),
+			zap.Int("response_bytes", len(data)),
+			zap.Error(err),
+		)
 		return nil, "", fmt.Errorf("unmarshal tavily response: %w", err)
 	}
 
@@ -115,6 +159,13 @@ func (c *TavilyClient) Search(ctx context.Context, query string, topic string) (
 			Score:   r.Score,
 		})
 	}
+
+	c.logger.Info(
+		"Tavily search completed",
+		zap.String("query", query),
+		zap.String("topic", topic),
+		zap.Int("results", len(results)),
+	)
 
 	return results, tResp.Answer, nil
 }

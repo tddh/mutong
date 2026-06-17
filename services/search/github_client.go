@@ -8,10 +8,14 @@ import (
 	"net/url"
 	"time"
 
+	"go.uber.org/zap"
+
 	"gitee.com/tddh/mutong/config"
+	"gitee.com/tddh/mutong/interfaces"
 )
 
 type GitHubClient struct {
+	logger     interfaces.Logger
 	token      string
 	endpoint   string
 	maxResults int
@@ -34,7 +38,7 @@ type githubSearchResponse struct {
 	Items      []githubIssue `json:"items"`
 }
 
-func NewGitHubClient(cfg config.GitHubConfig) *GitHubClient {
+func NewGitHubClient(logger interfaces.Logger, cfg config.GitHubConfig) *GitHubClient {
 	if cfg.MaxResults == 0 {
 		cfg.MaxResults = 3
 	}
@@ -45,6 +49,7 @@ func NewGitHubClient(cfg config.GitHubConfig) *GitHubClient {
 		cfg.Endpoint = "https://api.github.com"
 	}
 	return &GitHubClient{
+		logger:     logger,
 		token:      cfg.Token,
 		endpoint:   cfg.Endpoint,
 		maxResults: cfg.MaxResults,
@@ -54,6 +59,7 @@ func NewGitHubClient(cfg config.GitHubConfig) *GitHubClient {
 
 func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state string) ([]IssueResult, error) {
 	// Token optional: unauthenticated requests allowed (60 req/hr)
+	hasToken := c.token != ""
 
 	searchQuery := query
 	if repo != "" {
@@ -73,25 +79,57 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
+		c.logger.Info(
+			"Failed to create GitHub request",
+			zap.String("query", query),
+			zap.String("repo", repo),
+			zap.String("state", state),
+			zap.String("api_url", apiURL),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("create GitHub request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "token "+c.token)
+	if hasToken {
+		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.logger.Info(
+			"GitHub API request failed",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.String("repo", repo),
+			zap.String("state", state),
+			zap.Bool("has_token", hasToken),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("GitHub API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		c.logger.Info(
+			"GitHub API error response",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.String("repo", repo),
+			zap.Int("status", resp.StatusCode),
+			zap.String("status_text", resp.Status),
+			zap.Bool("has_token", hasToken),
+		)
 		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, resp.Status)
 	}
 
 	var gResp githubSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gResp); err != nil {
+		c.logger.Info("Failed to decode GitHub response",
+			zap.String("endpoint", c.endpoint),
+			zap.String("query", query),
+			zap.Int("http_status", resp.StatusCode),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("decode GitHub response: %w", err)
 	}
 
@@ -112,6 +150,15 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 			Labels:  labels,
 		})
 	}
+
+	c.logger.Info(
+		"GitHub Issues search completed",
+		zap.String("query", query),
+		zap.String("repo", repo),
+		zap.Int("results", len(results)),
+		zap.Int("total_count", gResp.TotalCount),
+		zap.Bool("has_token", hasToken),
+	)
 
 	return results, nil
 }

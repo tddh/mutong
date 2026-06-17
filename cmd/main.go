@@ -748,11 +748,11 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			} else {
 				var tavilyClient *search.TavilyClient
 				if cfg.ExternalSearch.Tavily.APIKey != "" {
-					tavilyClient = search.NewTavilyClient(cfg.ExternalSearch.Tavily)
+					tavilyClient = search.NewTavilyClient(logger, cfg.ExternalSearch.Tavily)
 					logger.Info("External knowledge base search enabled", zap.String("engine", "tavily"))
 				}
 				var githubClient *search.GitHubClient
-				githubClient = search.NewGitHubClient(cfg.ExternalSearch.GitHub)
+				githubClient = search.NewGitHubClient(logger, cfg.ExternalSearch.GitHub)
 				if cfg.ExternalSearch.GitHub.Token == "" {
 					logger.Warn("GitHub search enabled without token (rate limit 60 req/hr applies)")
 				} else {

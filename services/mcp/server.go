@@ -311,6 +311,23 @@ func (s *Server) ListTools() []diagnosis.ToolDefinition {
 				{Name: "include_business_impact", Required: false, Description: "是否包含业务影响分析（默认 true）"},
 			},
 		},
+		{
+			Name:        "search_knowledge_base",
+			Description: "搜索互联网获取实时技术信息。返回 AI 摘要、相关文章片段和来源链接。适用于排查陌生故障、查找最佳实践、获取社区解决方案，以及本地诊断工具无法提供足够上下文时使用。请勿用于查询集群内部状态（集群资源查询请用 list_resources_from_cache、get_pod_logs 等工具）。",
+			Parameters: []diagnosis.ParamDef{
+				{Name: "query", Required: true, Description: "搜索查询（自然语言，如 'Pod CrashLoopBackOff 排查方法'，尽量具体）"},
+				{Name: "topic", Required: false, Description: "搜索类别：general（通用/技术文档）、news（最新动态）、security（安全公告），默认 general"},
+			},
+		},
+		{
+			Name:        "search_github_issues",
+			Description: "搜索 GitHub Issues，查找开源项目中的已知 Bug、修复方案和社区讨论。返回 Issue 标题、编号、状态、标签和链接。适用于确认某个错误是否为已知的开源组件 Bug，或查找社区提供的 workaround。可指定仓库缩小范围。请勿用于查询集群内部数据（告警查询用 get_active_alerts，日志查询用 search_logs）。",
+			Parameters: []diagnosis.ParamDef{
+				{Name: "query", Required: true, Description: "搜索关键词（使用错误信息中的技术术语，如 'CrashLoopBackOff OOMKilled'）"},
+				{Name: "repo", Required: false, Description: "限定仓库（格式 owner/repo，如 kubernetes/kubernetes），留空则全 GitHub 搜索"},
+				{Name: "state", Required: false, Description: "Issue 状态：open（活跃）/closed（已关闭）/all（全部），默认 open"},
+			},
+		},
 	}
 }
 

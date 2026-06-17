@@ -391,6 +391,7 @@ func (c *DiagnosisController) streamLLMResponse(session *diagnosis_svc.ChatSessi
 - 日志工具：get_pod_logs（K8s直接拉取，优先使用）、get_pod_logs_es（ES日志，历史日志）、search_logs（关键词搜索）、get_error_logs（错误日志）
 - 用户要求查看日志时，优先使用 get_pod_logs 或 get_pod_logs_es
 - 诊断工具：run_diagnosis（运行AI诊断）
+- 外部搜索：search_knowledge_base（Tavily全网搜索，排查方法/最佳实践/技术文档）和 search_github_issues（GitHub Issues搜索，已知Bug/修复方案/社区讨论）。遇到陌生错误、不熟悉的组件、需要参考外部资料时主动使用
 
 ## 回答要求
 - 基于查询结果给出具体分析，不要泛泛而谈

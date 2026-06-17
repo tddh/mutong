@@ -24,6 +24,7 @@ import (
 	"gitee.com/tddh/mutong/cmd/mutongctl/logs"
 	"gitee.com/tddh/mutong/cmd/mutongctl/metrics"
 	"gitee.com/tddh/mutong/cmd/mutongctl/retro"
+	"gitee.com/tddh/mutong/cmd/mutongctl/search"
 	"gitee.com/tddh/mutong/cmd/mutongctl/stats"
 	"gitee.com/tddh/mutong/cmd/mutongctl/system"
 	"gitee.com/tddh/mutong/cmd/mutongctl/terminal"
@@ -195,6 +196,11 @@ func init() {
 		Client: factory.Client,
 		Config: factory.Config,
 	}, version))
+
+	rootCmd.AddCommand(search.NewCmdSearch(&search.Factory{
+		IO:     factory.IO,
+		Client: factory.Client,
+	}))
 
 	rootCmd.PersistentFlags().StringVarP(&serverFlag, "server", "s", "", "Mutong server URL (default http://localhost:8888)")
 	rootCmd.PersistentFlags().StringVarP(&tokenFlag, "token", "t", "", "Auth token")

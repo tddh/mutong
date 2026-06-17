@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -61,9 +62,10 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 	// Token optional: unauthenticated requests allowed (60 req/hr)
 	hasToken := c.token != ""
 
-	searchQuery := query
+	// is:issue is required for Fine-grained PATs (GitHub returns 422 without it)
+	searchQuery := fmt.Sprintf("%s is:issue", query)
 	if repo != "" {
-		searchQuery = fmt.Sprintf("repo:%s %s", repo, query)
+		searchQuery = fmt.Sprintf("repo:%s %s", repo, searchQuery)
 	}
 	if state != "" {
 		searchQuery = fmt.Sprintf("%s state:%s", searchQuery, state)
@@ -90,6 +92,7 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 		return nil, fmt.Errorf("create GitHub request: %w", err)
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "Mutong-AIOps/1.0")
 	if hasToken {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -110,6 +113,7 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
 		c.logger.Info(
 			"GitHub API error response",
 			zap.String("endpoint", c.endpoint),
@@ -117,14 +121,16 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 			zap.String("repo", repo),
 			zap.Int("status", resp.StatusCode),
 			zap.String("status_text", resp.Status),
+			zap.String("body", string(body)),
 			zap.Bool("has_token", hasToken),
 		)
-		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("GitHub API error %d: %s - %s", resp.StatusCode, resp.Status, string(body))
 	}
 
 	var gResp githubSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&gResp); err != nil {
-		c.logger.Info("Failed to decode GitHub response",
+		c.logger.Info(
+			"Failed to decode GitHub response",
 			zap.String("endpoint", c.endpoint),
 			zap.String("query", query),
 			zap.Int("http_status", resp.StatusCode),

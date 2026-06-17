@@ -202,6 +202,14 @@ func (c *Config) SetDefaultConfig() {
 		c.Nebula.Pass = nebulaPass
 	}
 
+	// External search API keys (override YAML config)
+	if tavilyKey := os.Getenv("MUTONG_TAVILY_KEY"); tavilyKey != "" {
+		c.ExternalSearch.Tavily.APIKey = tavilyKey
+	}
+	if githubToken := os.Getenv("MUTONG_GITHUB_TOKEN"); githubToken != "" {
+		c.ExternalSearch.GitHub.Token = githubToken
+	}
+
 	c.SetupClusterClient()
 	if c.Postgres.User == "" || c.Postgres.Pass == "" {
 		c.Logger.Warn("PostgreSQL credentials not configured (set MUTONG_DB_USER / MUTONG_DB_PASSWORD env vars), " +

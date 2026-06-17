@@ -39,19 +39,21 @@ prometheus:
   timeout: 30
 
 # 外部知识库搜索配置
+# Tavily: 设置环境变量 MUTONG_TAVILY_KEY
+# GitHub: 设置环境变量 MUTONG_GITHUB_TOKEN（可选，无 Token 限制 60 次/小时）
 external_search:
-  enabled: false
-  audit_enabled: true
+  enabled: true
+  auditEnabled: true
   tavily:
-    api_key: "${MUTONG_TAVILY_KEY}"
+    apiKey: ""  # 通过环境变量 MUTONG_TAVILY_KEY 设置
     endpoint: "https://api.tavily.com/search"
-    timeout_seconds: 15
-    max_results: 3
+    timeoutSeconds: 15
+    maxResults: 3
   github:
-    token: "${MUTONG_GITHUB_TOKEN}"
+    token: ""  # 通过环境变量 MUTONG_GITHUB_TOKEN 设置
     endpoint: "https://api.github.com"
-    timeout_seconds: 10
-    max_results: 3
+    timeoutSeconds: 10
+    maxResults: 3
 
 # 安全脱敏配置 (独立于诊断，但诊断模块使用)
 sanitizer:

@@ -1,4 +1,4 @@
-import { createApp, ref, onMounted, h, resolveComponent } from 'vue'
+import { createApp, ref, onMounted, h } from 'vue'
 import { NavBar } from '../components/SharedComponents.js'
 import { API } from '../utils/api.js'
 import '../styles/common.css'
@@ -8,18 +8,31 @@ const SEVERITY_BG = { critical: '#fff1f0', warning: '#fff7e6', info: '#e6f7ff' }
 
 function severityBadge(severity) {
   const s = (severity || '').toLowerCase()
-  return h('span', {
-    style: {
-      display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
-      fontSize: '12px', fontWeight: 600,
-      color: SEVERITY_COLORS[s] || '#666', background: SEVERITY_BG[s] || '#f5f5f5',
+  return h(
+    'span',
+    {
+      style: {
+        display: 'inline-block',
+        padding: '2px 8px',
+        borderRadius: '4px',
+        fontSize: '12px',
+        fontWeight: 600,
+        color: SEVERITY_COLORS[s] || '#666',
+        background: SEVERITY_BG[s] || '#f5f5f5',
+      },
     },
-  }, (severity || '').toUpperCase())
+    (severity || '').toUpperCase(),
+  )
 }
 
 const thStyle = {
-  textAlign: 'left', padding: '10px 12px', fontWeight: 600, fontSize: '12px',
-  color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap',
+  textAlign: 'left',
+  padding: '10px 12px',
+  fontWeight: 600,
+  fontSize: '12px',
+  color: 'var(--text-secondary)',
+  borderBottom: '2px solid var(--border-color)',
+  whiteSpace: 'nowrap',
 }
 const tdStyle = { padding: '8px 12px', verticalAlign: 'top', fontSize: '13px' }
 
@@ -67,17 +80,29 @@ createApp({
                 h('th', thStyle, '建议'),
               ]),
             ]),
-            h('tbody', null, issues.map((issue, idx) =>
-              h('tr', {
-                key: `${issue.ruleName}-${idx}`,
-                style: { borderBottom: '1px solid #f0f0f0' },
-              }, [
-                h('td', tdStyle, severityBadge(issue.severity)),
-                h('td', tdStyle, issue.ruleName),
-                h('td', tdStyle, (issue.resources || []).join(', ') || '-'),
-                h('td', { ...tdStyle, maxWidth: '400px', color: 'var(--text-secondary)' }, issue.suggestion || '-'),
-              ])
-            )),
+            h(
+              'tbody',
+              null,
+              issues.map((issue, idx) =>
+                h(
+                  'tr',
+                  {
+                    key: `${issue.ruleName}-${idx}`,
+                    style: { borderBottom: '1px solid #f0f0f0' },
+                  },
+                  [
+                    h('td', tdStyle, severityBadge(issue.severity)),
+                    h('td', tdStyle, issue.ruleName),
+                    h('td', tdStyle, (issue.resources || []).join(', ') || '-'),
+                    h(
+                      'td',
+                      { ...tdStyle, maxWidth: '400px', color: 'var(--text-secondary)' },
+                      issue.suggestion || '-',
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ]),
         ])
       : null

@@ -65,7 +65,7 @@ evidence:
     query: 'test_query'
     limit: 10
 `)
-	if err := os.WriteFile(filepath.Join(profilesDir, "pod.yml"), podYAML, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(profilesDir, "pod.yml"), podYAML, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -111,12 +111,12 @@ check:
 severity: warning
 suggestion: "fix it"
 `)
-	if err := os.WriteFile(filepath.Join(rulesDir, "test_rule.yml"), ruleYAML, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rulesDir, "test_rule.yml"), ruleYAML, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a non-.yml file that should be ignored
-	if err := os.WriteFile(filepath.Join(rulesDir, "README.md"), []byte("docs"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(rulesDir, "README.md"), []byte("docs"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

@@ -182,11 +182,13 @@ func checkMinRows(rule Rule, rows []map[string]interface{}) []Finding {
 	}
 	var findings []Finding
 	for _, row := range rows {
+		name := fmt.Sprintf("%v", row["name"])
+		ns := fmt.Sprintf("%v", row["namespace"])
 		findings = append(findings, Finding{
-			Resource:  fmt.Sprintf("%v", row["name"]),
-			Namespace: fmt.Sprintf("%v", row["namespace"]),
+			Resource:  name,
+			Namespace: ns,
 			Severity:  rule.Severity,
-			Message:   rule.Suggestion,
+			Message:   fmt.Sprintf("%s/%s: %s", ns, name, rule.Suggestion),
 		})
 	}
 	return findings
@@ -201,7 +203,7 @@ func checkFieldContains(rule Rule, rows []map[string]interface{}) []Finding {
 				Resource:  fmt.Sprintf("%v", row["name"]),
 				Namespace: fmt.Sprintf("%v", row["namespace"]),
 				Severity:  rule.Severity,
-				Message:   rule.Suggestion,
+				Message:   fmt.Sprintf("%v/%v: %s", row["namespace"], row["name"], rule.Suggestion),
 			})
 		}
 	}

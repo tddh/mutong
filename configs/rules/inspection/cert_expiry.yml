@@ -1,0 +1,13 @@
+# 证书过期检查
+# 检查 TLS 证书是否在未来 30 天内过期
+name: "cert_expiry"
+description: "检查 TLS 证书过期时间，提前 30 天告警"
+query: |
+  MATCH (c:Certificate)
+  WHERE c.expiry_date < datetime() + duration({days: 30})
+  RETURN c.name AS name, c.namespace AS namespace, c.expiry_date AS expiry_date
+check:
+  type: min_rows
+  threshold: 1
+severity: warning
+suggestion: "发现即将过期的 TLS 证书，请尽快续期以避免服务中断"

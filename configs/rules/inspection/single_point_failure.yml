@@ -1,0 +1,15 @@
+# 单点故障检测
+# 检测单节点 Pod 密度过高，节点故障影响范围过大
+name: "single_point_failure"
+description: "检测单节点 Pod 密度过高，节点故障影响范围过大"
+query: |
+  MATCH (n:K8sResource{kind:'Node',is_deleted:false})
+  MATCH (p:K8sResource{kind:'Pod',is_deleted:false})-[:RunsOn]->(n)
+  WITH n, count(p) AS podCount
+  WHERE podCount > 30
+  RETURN n.K8sResource.name AS nodeName, podCount
+check:
+  type: min_rows
+  threshold: 1
+severity: warning
+suggestion: "建议分散 Pod 到其他节点，或添加反亲和性规则（podAntiAffinity）"

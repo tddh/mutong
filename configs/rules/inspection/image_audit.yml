@@ -1,0 +1,13 @@
+# 镜像审计
+# 检测使用 latest 标签或无标签的容器镜像
+name: "image_audit"
+description: "检测使用 latest 标签或无版本标签的容器镜像"
+query: |
+  MATCH (p:Pod{is_deleted:false})-[:OwnedBy]->(d:Deployment)
+  WHERE p.image CONTAINS ':latest' OR NOT p.image CONTAINS ':'
+  RETURN d.name AS name, d.namespace AS namespace, p.image AS image
+check:
+  type: min_rows
+  threshold: 1
+severity: warning
+suggestion: "使用了 latest 标签或无版本标签的镜像，建议固定镜像版本（SHA256 digest）以确保可复现性"

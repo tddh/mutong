@@ -1,0 +1,13 @@
+# 监控盲点扫描
+# 检测未配置 Prometheus 监控的 Deployment
+name: "monitoring_blindspot"
+description: "检测未配置监控的工作负载，避免运维盲区"
+query: |
+  MATCH (d:Deployment{is_deleted:false})
+  WHERE NOT (d)-[:HasMetrics]->(:PrometheusTarget)
+  RETURN d.name AS name, d.namespace AS namespace
+check:
+  type: min_rows
+  threshold: 1
+severity: info
+suggestion: "该工作负载未配置 Prometheus 监控，建议添加 ServiceMonitor 或 PodMonitor"

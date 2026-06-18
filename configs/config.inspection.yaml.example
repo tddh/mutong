@@ -1,8 +1,16 @@
 # Mutong 巡检配置
-# 巡检规则由 Go 代码层注册（6 类规则：单点故障、镜像审计、证书过期、数据孤岛、资源配额、监控盲点）
 #
-# 使用方式：复制为 config.inspection.yaml
+# 巡检规则加载优先级（同名规则先到先得）：
+#   1. YAML 文件（configs/rules/inspection/*.yml）— 优先级最高
+#   2. Go 代码内置规则（6 类）— YAML 同名规则优先
+#   3. PostgreSQL 数据库规则 — 最低优先级
+#
+# ruleFiles 为空时自动扫描 configs/rules/inspection/ 目录
+# 也可以显式指定 glob 模式：
+#   ruleFiles:
+#     - 'configs/rules/inspection/*.yml'
 
 inspection:
   enabled: true
   cronSpec: "0 */6 * * *"
+  # ruleFiles: []

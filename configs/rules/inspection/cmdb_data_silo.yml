@@ -1,0 +1,13 @@
+# 数据孤岛检测
+# 检测图谱中断开连接的孤立节点（无任何边的资源）
+name: "cmdb_data_silo"
+description: "检测图谱中断开连接的孤立资源节点（数据孤岛）"
+query: |
+  MATCH (r:K8sResource{is_deleted:false})
+  WHERE NOT (r)-[]-()
+  RETURN r.name AS name, r.namespace AS namespace, r.kind AS kind
+check:
+  type: min_rows
+  threshold: 1
+severity: info
+suggestion: "该资源在图谱中无关联关系，可能是孤立的无效资源或采集异常"

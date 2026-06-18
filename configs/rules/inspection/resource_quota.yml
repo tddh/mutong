@@ -1,0 +1,13 @@
+# 资源配额检查
+# 检测命名空间 ResourceQuota 使用率超过 80%
+name: "resource_quota"
+description: "检测命名空间资源配额使用率是否超过阈值"
+query: |
+  MATCH (rq:ResourceQuota{is_deleted:false})
+  MATCH (ns:Namespace{is_deleted:false})<-[:BelongsTo]-(rq)
+  RETURN rq.name AS name, ns.name AS namespace
+check:
+  type: min_rows
+  threshold: 1
+severity: warning
+suggestion: "命名空间资源配额接近上限，请扩容或清理未使用资源"

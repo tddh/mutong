@@ -1211,6 +1211,12 @@ func (c *Config) InitInspectionService(logger interfaces.Logger, graphDB interfa
 
 	engine := insp_service.NewInspectionEngine(logger, graphDB)
 
+	// ① 从 YAML 文件加载声明式规则（先注册，优先级最高）
+	if concreteEngine, ok := engine.(*insp_service.InspectionEngine); ok {
+		c.loadInspectionRules(concreteEngine, graphDB)
+	}
+
+	// ② Go 硬编码内置规则（YAML 中已存在的同名规则会被跳过）
 	engine.RegisterRule(insp_rules.NewSinglePointFailureRule(logger))
 	engine.RegisterRule(insp_rules.NewCMDBDataSiloRule(logger))
 	engine.RegisterRule(insp_rules.NewResourceQuotaRule(logger))
@@ -1218,6 +1224,7 @@ func (c *Config) InitInspectionService(logger interfaces.Logger, graphDB interfa
 	engine.RegisterRule(insp_rules.NewCertExpiryRule(logger))
 	engine.RegisterRule(insp_rules.NewImageAuditRule(logger))
 
+	// ③ 从 DB 加载用户自定义规则（最低优先级）
 	if c.DB != nil {
 		store := insp_service.NewRuleStore(c.DB)
 		if concreteEngine, ok := engine.(*insp_service.InspectionEngine); ok {
@@ -1235,6 +1242,82 @@ func (c *Config) InitInspectionService(logger interfaces.Logger, graphDB interfa
 	)
 
 	return processor, nil
+}
+
+// loadInspectionRules 扫描巡检规则文件（YAML 声明式），加载并注册到 InspectionEngine。
+// 规则来源优先级：YAML 文件 > Go 硬编码 > DB 规则（同名覆盖取决于 RegisterRule 先到先得语义）
+func (c *Config) loadInspectionRules(engine *insp_service.InspectionEngine, graphDB interfaces.GraphDB) {
+	var files []string
+
+	// 1. 通过 Inspection.RuleFiles 显式指定的文件/glob
+	for _, pattern := range c.Inspection.RuleFiles {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			c.Logger.Warn("invalid ruleFiles glob pattern, skipping", zap.String("pattern", pattern), zap.Error(err))
+			continue
+		}
+		files = append(files, matches...)
+	}
+
+	// 2. 默认扫描 configs/rules/inspection/ 目录
+	defaultDir := "configs/rules/inspection"
+	scanDefault := len(c.Inspection.RuleFiles) == 0
+	if !scanDefault {
+		for _, p := range c.Inspection.RuleFiles {
+			if p == defaultDir {
+				scanDefault = true
+				break
+			}
+		}
+	}
+	if scanDefault {
+		if entries, err := os.ReadDir(defaultDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") {
+					continue
+				}
+				files = append(files, filepath.Join(defaultDir, entry.Name()))
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		return
+	}
+
+	// 去重 + 排序
+	seen := make(map[string]bool)
+	var unique []string
+	for _, f := range files {
+		if !seen[f] {
+			seen[f] = true
+			unique = append(unique, f)
+		}
+	}
+	sort.Strings(unique)
+
+	for _, f := range unique {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			c.Logger.Warn("failed to read inspection rule file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		var rule insp_service.Rule
+		if err := yaml.Unmarshal(data, &rule); err != nil {
+			c.Logger.Warn("failed to parse inspection rule file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		if rule.Name == "" {
+			c.Logger.Warn("inspection rule file missing 'name' field, skipping", zap.String("file", f))
+			continue
+		}
+
+		adapter := insp_service.NewYAMLRuleAdapter(rule, c.GetLogger(), graphDB)
+		engine.RegisterRule(adapter)
+		c.Logger.Debug("loaded inspection rule from YAML", zap.String("rule", rule.Name), zap.String("file", f))
+	}
 }
 
 func (c *Config) setServerDefaults() {

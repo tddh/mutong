@@ -268,8 +268,9 @@ type ClusterEntry struct {
 
 // Inspection 巡检配置
 type Inspection struct {
-	Enabled  bool   `yaml:"enabled"`
-	CronSpec string `yaml:"cronSpec"`
+	Enabled   bool     `yaml:"enabled"`
+	CronSpec  string   `yaml:"cronSpec"`
+	RuleFiles []string `yaml:"ruleFiles"` // 巡检规则文件路径，为空则使用 configs/rules/inspection/
 }
 
 type Diagnosis struct {

@@ -30,6 +30,11 @@ func NewInspectionEngine(logger interfaces.Logger, graphDB interfaces.GraphDB) i
 func (e *InspectionEngine) RegisterRule(rule interfaces.InspectionRule) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if _, exists := e.rules[rule.Name()]; exists {
+		e.logger.Debug("Rule already registered, skipping",
+			zap.String("name", rule.Name()))
+		return
+	}
 	e.rules[rule.Name()] = rule
 	e.logger.Debug("Registered inspection rule", zap.String("name", rule.Name()))
 }

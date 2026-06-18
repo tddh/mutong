@@ -260,12 +260,19 @@ mutong/
 │   ├── config.core.yaml.example  #   核心配置（数据库、缓存、日志）
 │   ├── config.alert.yaml.example #   告警系统配置
 │   ├── config.diagnosis.yaml.example # AI 诊断配置
-│   ├── config.inspection.yaml.example # 巡检规则配置
+│   ├── config.inspection.yaml.example # 巡检开关 + Cron
 │   ├── config.infra.yaml.example #   基础设施（ES/OTel/Executor）
 │   ├── config.business.yaml.example # 业务拓扑配置
-│   ├── config.profiles.yaml.example # 资源指标 Profiles（自定义 PromQL）
+│   ├── config.profiles.yaml.example # 资源画像（拆分为 profiles/ 目录）
 │   ├── config.auth.yaml.example   #   认证授权配置
 │   ├── config.retrospective.yaml.example # 复盘自动触发配置
+│   ├── profiles/                  #   资源画像独立文件（按资源类型）
+│   │   ├── pod.yml node.yml deployment.yml service.yml
+│   │   ├── statefulset.yml daemonset.yml pvc.yml ingress.yml
+│   ├── rules/inspection/          #   巡检规则独立文件（按规则）
+│   │   ├── cert_expiry.yml single_point_failure.yml
+│   │   ├── cmdb_data_silo.yml monitoring_blindspot.yml
+│   │   ├── resource_quota.yml image_audit.yml
 │   └── prompts/                 #   LLM Prompt 模板
 ├── controllers/                 # 控制器层（33 个文件，含 oauth2/ 子包）
 ├── services/                    # 服务层
@@ -786,7 +793,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | 资源列表 | `view/src/resource-table.html` | 表格分页（500条/页），按 Kind 着色，支持关键词搜索（300ms 防抖）+ Terminal 跳转 |
 | 告警管理 | `view/src/alerts/index.html` | 聚合告警展开/折叠，按业务应用/团队/关键度筛选，右侧抽屉双选项卡（基本信息 + AI 诊断） |
 | AI 诊断 | `view/src/diagnosis/index.html` | 对话式 Markdown 流式渲染（30ms 增量缓冲），工具调用浮动面板（pulse 动画 + 自动消失），4 个快速诊断按钮，支持一次性无状态诊断模式，分层超时（总 300s / 首 token 15s / 空闲 60s），流中断可重试 |
-| 巡检报告 | `view/src/inspection/index.html` | 手动触发巡检，最新报告展示，6 类内置规则（证书/单点/镜像/数据孤岛/资源配额/监控盲点） |
+| 巡检报告 | `view/src/inspection/index.html` | 手动触发巡检，表格展示各规则检查结果（级别/规则/资源/建议），5 类内置规则 |
 | 巡检历史 | `view/src/inspection-history/index.html` | 历史报告筛选、详情查看、报告对比、趋势分析（7/14/30/60/90 天） |
 | 复盘分析 | `view/src/retrospective/index.html` | 输入指纹生成复盘：事件时间线 + 因果 DAG + 业务拓扑 + 影响评估 + 指标快照 + 关键日志 + 改进项看板 |
 | 复盘历史 | `view/src/retrospective-history/index.html` | 历史报告筛选、详情查看、人工编辑修正（UPSERT）、Markdown 导出 |
@@ -847,17 +854,19 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 ### 添加新的巡检规则
 
-无需修改 Go 代码——在 `configs/config.inspection.yaml` 中添加规则定义即可：
+无需修改 Go 代码——在 `configs/rules/inspection/` 下新建 `<rule_name>.yml` 文件即可：
 
 ```yaml
-rules:
-  - name: "check-pod-restarts"
-    type: "min_rows"
-    query: 'MATCH (p:Pod) WHERE p.name CONTAINS "{{name}}" RETURN count(p) AS cnt'
-    check:
-      threshold: 3
-    severity: "warning"
-    suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
+name: "check-pod-restarts"
+description: "检查 Pod 重启次数"
+query: |
+  MATCH (p:K8sResource{kind:'Pod', is_deleted:false})
+  RETURN p.K8sResource.name AS name, p.K8sResource.name_space AS namespace
+check:
+  type: min_rows
+  threshold: 3
+severity: "warning"
+suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
 ```
 
 若内置 check type 无法满足，编写 command 插件脚本（stdin 接收 JSON 参数，stdout 输出 JSON 结果），放置到 `/etc/mutong/plugins/` 目录。

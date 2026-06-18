@@ -28,8 +28,16 @@
 - NavBar 补全 4 个缺失页面链接（监控/终端/追踪/集群）
 - 诊断模块单元测试（Phase 1，test_helpers.go 共享 Mock 基础设施）
 - 冒烟测试脚本（动态 API 发现资源）
+- 资源 Profiles 拆分为 configs/profiles/*.yml 独立文件（pod/node/deployment/service/statefulset/daemonset/pvc/ingress），按资源类型独立配置 PromQL 指标
+- 巡检规则 YAML 文件加载：configs/rules/inspection/*.yml，5 类内置规则独立文件，加载优先级 YAML > Go 内置 > DB
 
 ### Changed
+- cmdb_data_silo 巡检规则排除 CRD/FlowSchema/PriorityLevelConfiguration/Lease 资源类型
+- 巡检报告前端改为表格展示（级别/规则/资源/建议 4 列）
+
+### Fixed
+- 修复 ClusterRoleBinding→ClusterRole 关联查询 bug（obj.Name → obj.RoleRef.Name），大量 ClusterRole 不再误报为孤岛
+- 巡检报告 YAML 规则 Resource 字段补充 namespace 信息
 - 外部搜索配置：`enabled` 改为 `true`，YAML key 统一为 camelCase，支持 MUTONG_TAVILY_KEY / MUTONG_GITHUB_TOKEN 环境变量覆盖
 - 诊断 System Prompt 增加外部搜索工具引导
 - 配置统一为 `configs/` 目录模式，配置文件提供 `.example` 模板

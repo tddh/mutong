@@ -18,7 +18,7 @@ Built on the "**Observe, Understand, Remediate, Learn**" philosophy, Mutong star
 
 - **Resource Visualization**: Stores K8s resource topology in Nebula Graph, supports complex relationship queries and interactive topology visualization with three rendering engines (G6 / force-graph / d3)
 - **Alert Convergence & Intelligent Diagnosis**: Topology-aware alert suppression and causal chain suppression to eliminate alert storms; hybrid AI diagnosis engine (rule-based fast path + LLM deep analysis) with automatic fallback and multi-dimensional confidence scoring
-- **Declarative Inspection**: YAML-based inspection rules with 6 built-in check types, Cron scheduling, historical report comparison and trend analysis
+- **Declarative Inspection**: YAML-based inspection rules with 5 built-in check types (loaded from configs/rules/inspection/*.yml), Cron scheduling, historical report comparison and trend analysis
 - **Self-Healing Executor**: Risk-graded (Low/Medium/High) automatic remediation (Pod eviction, Deployment scaling, HPA management) with manual approval and auto-execution modes, complete audit logging
 - **Retrospective Knowledge**: Event timeline + causal chain DAG + LLM postmortem reports + graph-enhanced hybrid retrieval (pgvector semantic + NebulaGraph topology), transforming every incident into reusable knowledge
 
@@ -64,7 +64,7 @@ Mutong's evolution maps the three stages of Kubernetes operations, each step dri
 ### 4. Inspection System
 - Declarative YAML rules: `query` (nGQL) + `check` + `severity` + `suggestion`
 - 3 built-in check types: `min_rows` (threshold validation), `field_contains` (substring matching), `command` (external plugin via stdin/stdout JSON)
-- 6 built-in rule categories: certificate expiry, single point of failure, data silo detection, resource quota monitoring, monitoring blind spot scanning, image auditing
+- 5 built-in rule categories: certificate expiry, single point of failure, data silo detection (excludes CRD/FlowSchema/PriorityLevelConfiguration/Lease), node pod density, Prometheus deployment check, image auditing
 - Cron scheduling + manual trigger
 - Historical report comparison, trend analysis, and pass/fail/warn statistics
 
@@ -158,7 +158,7 @@ mutongctl search tavily -q "Pod CrashLoopBackOff troubleshooting"
 | Resource List | `view/src/resource-table.html` | Paginated table (500/page), kind-colored |
 | Alert Management | `view/src/alerts/index.html` | Aggregated alerts, dual-tab drawer |
 | AI Diagnosis | `view/src/diagnosis/index.html` | Chat-style Markdown, stateless diagnosis mode |
-| Inspection Report | `view/src/inspection/index.html` | Manual trigger, 6 built-in rule categories |
+| Inspection Report | `view/src/inspection/index.html` | Manual trigger, table-format results |
 | Inspection History | `view/src/inspection-history/index.html` | Filter, compare, trend analysis |
 | Retrospective Analysis | `view/src/retrospective/index.html` | Timeline + DAG + topology + impact assessment |
 | Retrospective History | `view/src/retrospective-history/index.html` | Filter, edit (UPSERT), Markdown export |

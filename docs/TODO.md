@@ -33,8 +33,8 @@
 - **缺口**：用户无 Web UI 可管理个人 Token（只能 CLI `mutongctl auth login` 获取）
 
 ### 4. 巡检自定义规则
-- **后端**：`/api/v1/inspection/rules` 已实现 POST/PUT/DELETE/toggle 完整 CRUD
-- **现状**：前端巡检页面只展示 6 类内置规则结果
+- **后端**：`/api/v1/inspection/rules` 已实现 POST/PUT/DELETE/toggle 完整 CRUD；`configs/rules/inspection/*.yml` YAML 文件加载（YAML > Go 内置 > DB 优先级）
+- **现状**：前端巡检页面以表格展示 5 类内置规则结果（证书/cert_expiry 仍由 Go 规则处理）
 - **缺口**：无规则创建 / 编辑 / 删除 / 启停的 UI
 
 ### 5. 外部告警源管理

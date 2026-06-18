@@ -1,7 +1,7 @@
 # 监控盲点扫描
 # 检测是否部署了 Prometheus
 name: "monitoring_blindspot"
-description: "Prometheus 部署检查"
+description: "检测集群是否部署了 Prometheus 监控"
 query: |
   MATCH (d:K8sResource{kind:'Deployment',is_deleted:false})
   WHERE toLower(d.K8sResource.name) CONTAINS 'prometheus'

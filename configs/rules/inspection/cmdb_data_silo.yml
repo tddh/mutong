@@ -1,7 +1,7 @@
 # 数据孤岛检测
 # 检测图谱中断开连接的孤立节点
 name: "cmdb_data_silo"
-description: "孤立资源节点"
+description: "检测图谱中断开连接的孤立资源节点"
 query: |
   MATCH (v:K8sResource{is_deleted:false})
   WHERE NOT (v)-[]-()

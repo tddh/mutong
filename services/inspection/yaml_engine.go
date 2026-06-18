@@ -184,15 +184,11 @@ func checkMinRows(rule Rule, rows []map[string]interface{}) []Finding {
 	for _, row := range rows {
 		name := fmt.Sprintf("%v", row["name"])
 		ns := fmt.Sprintf("%v", row["namespace"])
-		loc := name
-		if ns != "" && ns != "<nil>" {
-			loc = ns + "/" + name
-		}
 		findings = append(findings, Finding{
 			Resource:  name,
 			Namespace: ns,
 			Severity:  rule.Severity,
-			Message:   fmt.Sprintf("%s — %s", loc, rule.Description),
+			Message:   fmt.Sprintf("%s/%s: %s", ns, name, rule.Suggestion),
 		})
 	}
 	return findings
@@ -203,17 +199,11 @@ func checkFieldContains(rule Rule, rows []map[string]interface{}) []Finding {
 	for _, row := range rows {
 		val, _ := row[rule.Check.Field].(string)
 		if contains(val, rule.Check.Value) {
-			name := fmt.Sprintf("%v", row["name"])
-			ns := fmt.Sprintf("%v", row["namespace"])
-			loc := name
-			if ns != "" && ns != "<nil>" {
-				loc = ns + "/" + name
-			}
 			findings = append(findings, Finding{
-				Resource:  name,
-				Namespace: ns,
+				Resource:  fmt.Sprintf("%v", row["name"]),
+				Namespace: fmt.Sprintf("%v", row["namespace"]),
 				Severity:  rule.Severity,
-				Message:   fmt.Sprintf("%s — %s", loc, rule.Description),
+				Message:   fmt.Sprintf("%v/%v: %s", row["namespace"], row["name"], rule.Suggestion),
 			})
 		}
 	}

@@ -1,7 +1,7 @@
 # 证书过期检查
 # 检测集群中的 TLS Secret（Go 代码层做 JSON 解析和到期日计算）
 name: "cert_expiry"
-description: "TLS Secret 证书检查"
+description: "检测集群中的 TLS Secret"
 query: |
   MATCH (s:K8sResource{kind:'Secret',is_deleted:false})
   WHERE s.K8sResource.resource_define CONTAINS 'kubernetes.io/tls'

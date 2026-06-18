@@ -1,7 +1,7 @@
 # 单点故障检测
 # 检测单节点 Pod 密度过高（> 30 个 Pod）
 name: "single_point_failure"
-description: "单节点 Pod 密度过高"
+description: "检测单节点 Pod 密度过高，节点故障影响范围过大"
 query: |
   MATCH (n:K8sResource{kind:'Node',is_deleted:false})
   MATCH (p:K8sResource{kind:'Pod',is_deleted:false})-[:RunsOn]->(n)

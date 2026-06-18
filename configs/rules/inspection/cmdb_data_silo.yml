@@ -1,11 +1,12 @@
 # 数据孤岛检测
-# 检测图谱中断开连接的孤立节点（无任何边的资源）
+# 检测图谱中断开连接的孤立节点
 name: "cmdb_data_silo"
-description: "检测图谱中断开连接的孤立资源节点（数据孤岛）"
+description: "检测图谱中断开连接的孤立资源节点"
 query: |
-  MATCH (r:K8sResource{is_deleted:false})
-  WHERE NOT (r)-[]-()
-  RETURN r.name AS name, r.namespace AS namespace, r.kind AS kind
+  MATCH (v:K8sResource{is_deleted:false})
+  WHERE NOT (v)-[]-()
+  RETURN v.K8sResource.name AS name, v.K8sResource.name_space AS namespace, v.K8sResource.kind AS kind
+  LIMIT 100
 check:
   type: min_rows
   threshold: 1

@@ -1,13 +1,14 @@
 # 镜像审计
-# 检测使用 latest 标签或无标签的容器镜像
+# 检测使用 latest 标签的 Pod
 name: "image_audit"
-description: "检测使用 latest 标签或无版本标签的容器镜像"
+description: "检测使用 latest 标签的容器镜像"
 query: |
-  MATCH (p:Pod{is_deleted:false})-[:OwnedBy]->(d:Deployment)
-  WHERE p.image CONTAINS ':latest' OR NOT p.image CONTAINS ':'
-  RETURN d.name AS name, d.namespace AS namespace, p.image AS image
+  MATCH (p:K8sResource{kind:'Pod',is_deleted:false})
+  WHERE p.K8sResource.resource_define CONTAINS ':latest'
+  RETURN p.K8sResource.name AS name, p.K8sResource.name_space AS namespace
+  LIMIT 200
 check:
   type: min_rows
   threshold: 1
 severity: warning
-suggestion: "使用了 latest 标签或无版本标签的镜像，建议固定镜像版本（SHA256 digest）以确保可复现性"
+suggestion: "使用了 latest 标签的镜像，建议固定镜像版本以确保可复现性"

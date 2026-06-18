@@ -1,13 +1,14 @@
 # 证书过期检查
-# 检查 TLS 证书是否在未来 30 天内过期
+# 检测集群中的 TLS Secret（Go 代码层做 JSON 解析和到期日计算）
 name: "cert_expiry"
-description: "检查 TLS 证书过期时间，提前 30 天告警"
+description: "检测集群中的 TLS Secret"
 query: |
-  MATCH (c:Certificate)
-  WHERE c.expiry_date < datetime() + duration({days: 30})
-  RETURN c.name AS name, c.namespace AS namespace, c.expiry_date AS expiry_date
+  MATCH (s:K8sResource{kind:'Secret',is_deleted:false})
+  WHERE s.K8sResource.resource_define CONTAINS 'kubernetes.io/tls'
+  RETURN s.K8sResource.name AS name, s.K8sResource.name_space AS namespace
+  LIMIT 100
 check:
   type: min_rows
   threshold: 1
 severity: warning
-suggestion: "发现即将过期的 TLS 证书，请尽快续期以避免服务中断"
+suggestion: "发现 TLS Secret，请检查证书有效期并确保及时续期"

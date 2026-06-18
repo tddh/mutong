@@ -1,7 +1,7 @@
 # 镜像审计
 # 检测使用 latest 标签的 Pod
 name: "image_audit"
-description: "检测使用 latest 标签的容器镜像"
+description: "使用 latest 标签"
 query: |
   MATCH (p:K8sResource{kind:'Pod',is_deleted:false})
   WHERE p.K8sResource.resource_define CONTAINS ':latest'

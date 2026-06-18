@@ -1,7 +1,7 @@
 # 资源使用检查
 # 检测节点上 Pod 密度过高（> 50 个 Pod）
 name: "resource_quota"
-description: "检测节点上 Pod 密度过高"
+description: "节点 Pod 密度过高"
 query: |
   MATCH (n:K8sResource{kind:'Node',is_deleted:false})
   MATCH (p:K8sResource{kind:'Pod',is_deleted:false})-[:RunsOn]->(n)

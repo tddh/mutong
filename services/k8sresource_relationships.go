@@ -426,7 +426,7 @@ func (d *K8sResoureService) processClusterRoleRelationship(unstructuredObj *unst
 		return
 	}
 
-	if clusterRoleUID, found := d.lookupUID("ClusterRole", "", obj.Name); found {
+	if clusterRoleUID, found := d.lookupUID("ClusterRole", "", obj.RoleRef.Name); found {
 		_ = d.insertEdge("BelongsToClusterRole", string(unstructuredObj.GetUID()), clusterRoleUID)
 	}
 

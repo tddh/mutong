@@ -3,6 +3,26 @@ import { NavBar } from '../components/SharedComponents.js'
 import { API } from '../utils/api.js'
 import '../styles/common.css'
 
+const SEVERITY_COLORS = { critical: '#cf1322', warning: '#faad14', info: '#1890ff' }
+const SEVERITY_BG = { critical: '#fff1f0', warning: '#fff7e6', info: '#e6f7ff' }
+
+function severityBadge(severity) {
+  const s = (severity || '').toLowerCase()
+  return h('span', {
+    style: {
+      display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
+      fontSize: '12px', fontWeight: 600,
+      color: SEVERITY_COLORS[s] || '#666', background: SEVERITY_BG[s] || '#f5f5f5',
+    },
+  }, (severity || '').toUpperCase())
+}
+
+const thStyle = {
+  textAlign: 'left', padding: '10px 12px', fontWeight: 600, fontSize: '12px',
+  color: 'var(--text-secondary)', borderBottom: '2px solid var(--border-color)', whiteSpace: 'nowrap',
+}
+const tdStyle = { padding: '8px 12px', verticalAlign: 'top', fontSize: '13px' }
+
 createApp({
   components: { NavBar },
   setup() {
@@ -35,12 +55,33 @@ createApp({
     return { report, loading, running, runInspection }
   },
   render() {
-    const issueList = (this.report?.issues || []).map((issue) =>
-      h('li', { key: issue.ruleName, style: 'color:var(--text-secondary)' }, [
-        h('b', null, issue.ruleName),
-        `: ${issue.message}`,
-      ]),
-    )
+    const issues = this.report?.issues || []
+    const issueTable = issues.length
+      ? h('div', { style: 'overflow-x:auto;margin-top:12px;' }, [
+          h('table', { style: 'width:100%;border-collapse:collapse;font-size:13px;' }, [
+            h('thead', null, [
+              h('tr', { style: 'background:var(--bg-color);' }, [
+                h('th', thStyle, '级别'),
+                h('th', thStyle, '规则'),
+                h('th', thStyle, '资源'),
+                h('th', thStyle, '建议'),
+              ]),
+            ]),
+            h('tbody', null, issues.map((issue, idx) =>
+              h('tr', {
+                key: `${issue.ruleName}-${idx}`,
+                style: { borderBottom: '1px solid #f0f0f0' },
+              }, [
+                h('td', tdStyle, severityBadge(issue.severity)),
+                h('td', tdStyle, issue.ruleName),
+                h('td', tdStyle, (issue.resources || []).join(', ') || '-'),
+                h('td', { ...tdStyle, maxWidth: '400px', color: 'var(--text-secondary)' }, issue.suggestion || '-'),
+              ])
+            )),
+          ]),
+        ])
+      : null
+
     return h('div', [
       h(NavBar),
       h('div', { class: 'container' }, [
@@ -90,9 +131,7 @@ createApp({
                       `Warning: ${this.report.summary?.warning || 0}`,
                     ),
                   ]),
-                  this.report.issues?.length
-                    ? h('ul', { style: 'margin-top:12px;padding-left:20px;' }, issueList)
-                    : null,
+                  issueTable,
                 ],
               )
             : h('div', { class: 'card', style: 'text-align:center;color:#666;' }, '暂无巡检报告'),

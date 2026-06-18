@@ -5,6 +5,7 @@ description: "检测图谱中断开连接的孤立资源节点"
 query: |
   MATCH (v:K8sResource{is_deleted:false})
   WHERE NOT (v)-[]-()
+    AND v.K8sResource.kind NOT IN ['CustomResourceDefinition', 'FlowSchema', 'PriorityLevelConfiguration', 'Lease']
   RETURN v.K8sResource.name AS name, v.K8sResource.name_space AS namespace, v.K8sResource.kind AS kind
   LIMIT 100
 check:

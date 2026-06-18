@@ -1,0 +1,18 @@
+# PVC 资源画像
+kind: PVC
+metrics:
+  - name: capacity_bytes
+    promql: 'kube_persistentvolumeclaim_resource_requests_storage_bytes{persistentvolumeclaim="{{name}}",namespace="{{namespace}}"}'
+    unit: "bytes"
+topology:
+  - relation: "MountsPVC"
+    direction: "inbound"
+    label: "mounted_by_pods"
+  - relation: "BelongsTo"
+    direction: "outbound"
+    label: "namespace"
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"PersistentVolumeClaim" AND involvedObject.name:"{{name}}"'
+    limit: 20

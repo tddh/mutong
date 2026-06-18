@@ -38,6 +38,8 @@ type Config struct {
 	Elasticsearch    ElasticsearchConf          `yaml:"elasticsearch" json:"elasticsearch"`
 	Executor         ExecutorConf               `yaml:"executor" json:"executor"`
 	ResourceProfiles map[string]ResourceProfile `yaml:"resourceProfiles" json:"resourceProfiles,omitempty"`
+	// ResourceProfileFiles 显式指定的画像文件路径列表（留空则自动扫描 configs/profiles/*.yml）
+	ResourceProfileFiles []string `yaml:"resourceProfileFiles" json:"resourceProfileFiles,omitempty"`
 	// RoleConfig provides role-based access control (RBAC) configuration
 	Role RoleConf `yaml:"roles" json:"roles"`
 	// BusinessTopology provides business topology configuration
@@ -84,6 +86,15 @@ type EvidenceProfile struct {
 	Level    string `yaml:"level" json:"level,omitempty"`
 	Limit    int    `yaml:"limit" json:"limit,omitempty"`
 	Fallback string `yaml:"fallback" json:"fallback,omitempty"`
+}
+
+// ResourceProfileFile 表示单个资源类型的画像配置文件格式
+// 用于 configs/profiles/ 目录下的独立 profile YAML 文件
+type ResourceProfileFile struct {
+	Kind     string            `yaml:"kind" json:"kind"`
+	Metrics  []MetricProfile   `yaml:"metrics" json:"metrics,omitempty"`
+	Topology []TopologyProfile `yaml:"topology" json:"topology,omitempty"`
+	Evidence []EvidenceProfile `yaml:"evidence" json:"evidence,omitempty"`
 }
 
 // OpenTelemetryConf holds the configuration for OpenTelemetry tracing integration

@@ -1,0 +1,18 @@
+# Ingress 资源画像
+kind: Ingress
+metrics:
+  - name: requests_per_second
+    promql: 'sum(rate(nginx_ingress_controller_requests{ingress="{{name}}",namespace="{{namespace}}"}[5m]))'
+    unit: "req/sec"
+  - name: error_rate
+    promql: 'sum(rate(nginx_ingress_controller_requests{ingress="{{name}}",namespace="{{namespace}}",status=~"5.."}[5m]))'
+    unit: "req/sec"
+topology:
+  - relation: "BelongsTo"
+    direction: "outbound"
+    label: "namespace"
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"Ingress" AND involvedObject.name:"{{name}}"'
+    limit: 20

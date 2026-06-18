@@ -1,0 +1,21 @@
+# StatefulSet 资源画像
+kind: StatefulSet
+metrics:
+  - name: replicas_ready
+    promql: 'kube_statefulset_status_replicas_ready{statefulset="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: replicas_current
+    promql: 'kube_statefulset_status_replicas_current{statefulset="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: replicas_desired
+    promql: 'kube_statefulset_replicas{statefulset="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+topology:
+  - relation: "OwnedBy"
+    direction: "outbound"
+    label: "namespace"
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"StatefulSet" AND involvedObject.name:"{{name}}"'
+    limit: 20

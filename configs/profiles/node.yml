@@ -1,0 +1,22 @@
+# Node 资源画像
+kind: Node
+metrics:
+  - name: cpu_usage_percent
+    promql: '100 - (avg(rate(node_cpu_seconds_total{instance="{{name}}",mode="idle"}[5m])) * 100)'
+    unit: "percent"
+  - name: mem_usage_percent
+    promql: '(1 - node_memory_MemAvailable_bytes{instance="{{name}}"} / node_memory_MemTotal_bytes{instance="{{name}}"}) * 100'
+    unit: "percent"
+  - name: disk_usage_percent
+    promql: '(1 - node_filesystem_avail_bytes{instance="{{name}}",mountpoint="/"} / node_filesystem_size_bytes{instance="{{name}}",mountpoint="/"}) * 100'
+    unit: "percent"
+topology:
+  - relation: "RunsOn"
+    direction: "inbound"
+    label: "pods_on_node"
+    maxResults: 20
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"Node" AND involvedObject.name:"{{name}}"'
+    limit: 20

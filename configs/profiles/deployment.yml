@@ -1,0 +1,27 @@
+# Deployment 资源画像
+kind: Deployment
+metrics:
+  - name: replicas_desired
+    promql: 'kube_deployment_status_replicas{deployment="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: replicas_ready
+    promql: 'kube_deployment_status_replicas_ready{deployment="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: replicas_available
+    promql: 'kube_deployment_status_replicas_available{deployment="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: rollout_status
+    promql: 'kube_deployment_status_observed_generation{deployment="{{name}}",namespace="{{namespace}}"} == kube_deployment_metadata_generation{deployment="{{name}}",namespace="{{namespace}}"}'
+    unit: "boolean"
+topology:
+  - relation: "OwnedBy"
+    direction: "outbound"
+    label: "namespace"
+  - relation: "OwnedBy"
+    direction: "inbound"
+    label: "replicasets"
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"Deployment" AND involvedObject.name:"{{name}}"'
+    limit: 20

@@ -1,0 +1,21 @@
+# Service 资源画像
+kind: Service
+metrics:
+  - name: endpoint_ready_count
+    promql: 'kube_endpoint_address_available{endpoint="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+  - name: endpoint_not_ready_count
+    promql: 'kube_endpoint_address_not_ready{endpoint="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+topology:
+  - relation: "SvcToPods"
+    direction: "outbound"
+    label: "backend_pods"
+  - relation: "BelongsTo"
+    direction: "outbound"
+    label: "namespace"
+evidence:
+  - source: "k8s_events"
+    level: "Warning"
+    query: 'involvedObject.kind:"Service" AND involvedObject.name:"{{name}}"'
+    limit: 20

@@ -1,0 +1,32 @@
+# Pod 资源画像（同心圆模型数据源定义）
+# 资源类型: Pod
+kind: Pod
+metrics:
+  - name: cpu_usage_cores
+    promql: 'sum(rate(container_cpu_usage_seconds_total{pod="{{name}}",namespace="{{namespace}}"}[5m]))'
+    unit: "cores"
+  - name: mem_usage_bytes
+    promql: 'container_memory_working_set_bytes{pod="{{name}}",namespace="{{namespace}}"}'
+    unit: "bytes"
+  - name: net_receive_bytes
+    promql: 'rate(container_network_receive_bytes_total{pod="{{name}}",namespace="{{namespace}}"}[5m])'
+    unit: "bytes/sec"
+  - name: restart_count
+    promql: 'kube_pod_container_status_restarts_total{pod="{{name}}",namespace="{{namespace}}"}'
+    unit: "count"
+topology:
+  - relation: "OwnedBy"
+    direction: "outbound"
+    label: "controller"
+  - relation: "RunsOn"
+    direction: "outbound"
+    label: "node"
+  - relation: "SvcToPods"
+    direction: "inbound"
+    label: "services"
+evidence:
+  - source: "elasticsearch"
+    index: "k8s-logs-*"
+    query: 'kubernetes.pod.name:"{{name}}" AND kubernetes.namespace:"{{namespace}}" AND log.level:"error"'
+    limit: 50
+    fallback: "k8s_events"

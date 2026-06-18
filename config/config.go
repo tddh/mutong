@@ -186,6 +186,8 @@ func (c *Config) SetDefaultConfig() {
 	c.initLogger()
 	c.Logger.Info("SetDefaultConfig start")
 
+	c.loadResourceProfiles()
+
 	c.SetupBigCache()
 
 	// Allow env vars to override sensitive config values
@@ -1308,5 +1310,81 @@ func (c *Config) setExecutorInternalDefaults() {
 	}
 	if exec.DefaultHPA.TargetCPU == 0 {
 		exec.DefaultHPA.TargetCPU = 50
+	}
+}
+
+// loadResourceProfiles 扫描 configs/profiles/ 目录，加载所有 *.yml 资源画像文件
+// 并与 ResourceProfiles 中直接定义的画像合并，直接定义的优先
+func (c *Config) loadResourceProfiles() {
+	var files []string
+
+	// 1. 通过 ResourceProfileFiles 显式指定的文件
+	for _, f := range c.ResourceProfileFiles {
+		if _, err := os.Stat(f); err == nil {
+			files = append(files, f)
+		} else {
+			c.Logger.Warn("resourceProfile file not found, skipping", zap.String("file", f))
+		}
+	}
+
+	// 2. 自动扫描 configs/profiles/ 目录
+	profileDir := "configs/profiles"
+	if entries, err := os.ReadDir(profileDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yml") {
+				continue
+			}
+			path := filepath.Join(profileDir, entry.Name())
+			// 避免重复加载（显式指定的文件优先级高）
+			alreadyListed := false
+			for _, f := range c.ResourceProfileFiles {
+				if f == path {
+					alreadyListed = true
+					break
+				}
+			}
+			if !alreadyListed {
+				files = append(files, path)
+			}
+		}
+		sort.Strings(files)
+	}
+
+	if len(files) == 0 {
+		return
+	}
+
+	// 初始化 ResourceProfiles map（如果尚未初始化）
+	if c.ResourceProfiles == nil {
+		c.ResourceProfiles = make(map[string]ResourceProfile)
+	}
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			c.Logger.Warn("failed to read resource profile file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		var pf ResourceProfileFile
+		if err := yaml.Unmarshal(data, &pf); err != nil {
+			c.Logger.Warn("failed to parse resource profile file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		if pf.Kind == "" {
+			c.Logger.Warn("resource profile file missing 'kind' field, skipping", zap.String("file", f))
+			continue
+		}
+
+		// 直接定义的 ResourceProfiles 优先（不覆盖已有 key）
+		if _, exists := c.ResourceProfiles[pf.Kind]; !exists {
+			c.ResourceProfiles[pf.Kind] = ResourceProfile{
+				Metrics:  pf.Metrics,
+				Topology: pf.Topology,
+				Evidence: pf.Evidence,
+			}
+			c.Logger.Debug("loaded resource profile", zap.String("kind", pf.Kind), zap.String("file", f))
+		}
 	}
 }

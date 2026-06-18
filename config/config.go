@@ -1247,6 +1247,40 @@ func (c *Config) InitInspectionService(logger interfaces.Logger, graphDB interfa
 // loadInspectionRules 扫描巡检规则文件（YAML 声明式），加载并注册到 InspectionEngine。
 // 规则来源优先级：YAML 文件 > Go 硬编码 > DB 规则（同名覆盖取决于 RegisterRule 先到先得语义）
 func (c *Config) loadInspectionRules(engine *insp_service.InspectionEngine, graphDB interfaces.GraphDB) {
+	files := c.scanRuleFiles()
+	if len(files) == 0 {
+		return
+	}
+
+	// 创建共享 YAMLEngine，所有规则复用同一实例
+	yamlEngine := insp_service.NewYAMLEngine(c.GetLogger(), graphDB, nil)
+
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			c.Logger.Warn("failed to read inspection rule file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		var rule insp_service.Rule
+		if err := yaml.Unmarshal(data, &rule); err != nil {
+			c.Logger.Warn("failed to parse inspection rule file", zap.String("file", f), zap.Error(err))
+			continue
+		}
+
+		if rule.Name == "" {
+			c.Logger.Warn("inspection rule file missing 'name' field, skipping", zap.String("file", f))
+			continue
+		}
+
+		adapter := insp_service.NewYAMLRuleAdapterWithEngine(rule, yamlEngine)
+		engine.RegisterRule(adapter)
+		c.Logger.Debug("loaded inspection rule from YAML", zap.String("rule", rule.Name), zap.String("file", f))
+	}
+}
+
+// scanRuleFiles 收集 RuleFiles 指定的文件路径，自动扫描默认目录，去重并过滤目录
+func (c *Config) scanRuleFiles() []string {
 	var files []string
 
 	// 1. 通过 Inspection.RuleFiles 显式指定的文件/glob
@@ -1282,42 +1316,25 @@ func (c *Config) loadInspectionRules(engine *insp_service.InspectionEngine, grap
 	}
 
 	if len(files) == 0 {
-		return
+		return nil
 	}
 
-	// 去重 + 排序
+	// 去重 + 排序 + 过滤目录
 	seen := make(map[string]bool)
 	var unique []string
 	for _, f := range files {
-		if !seen[f] {
-			seen[f] = true
-			unique = append(unique, f)
+		if seen[f] {
+			continue
 		}
+		info, err := os.Stat(f)
+		if err != nil || info.IsDir() {
+			continue
+		}
+		seen[f] = true
+		unique = append(unique, f)
 	}
 	sort.Strings(unique)
-
-	for _, f := range unique {
-		data, err := os.ReadFile(f)
-		if err != nil {
-			c.Logger.Warn("failed to read inspection rule file", zap.String("file", f), zap.Error(err))
-			continue
-		}
-
-		var rule insp_service.Rule
-		if err := yaml.Unmarshal(data, &rule); err != nil {
-			c.Logger.Warn("failed to parse inspection rule file", zap.String("file", f), zap.Error(err))
-			continue
-		}
-
-		if rule.Name == "" {
-			c.Logger.Warn("inspection rule file missing 'name' field, skipping", zap.String("file", f))
-			continue
-		}
-
-		adapter := insp_service.NewYAMLRuleAdapter(rule, c.GetLogger(), graphDB)
-		engine.RegisterRule(adapter)
-		c.Logger.Debug("loaded inspection rule from YAML", zap.String("rule", rule.Name), zap.String("file", f))
-	}
+	return unique
 }
 
 func (c *Config) setServerDefaults() {

@@ -153,6 +153,15 @@ func (e *YAMLEngine) executeQuery(query string) ([]map[string]interface{}, error
 	return rows, nil
 }
 
+// CheckRule 对单条规则执行查询和检查，返回检查发现
+func (e *YAMLEngine) CheckRule(rule Rule) ([]Finding, error) {
+	rows, err := e.executeQuery(rule.Query)
+	if err != nil {
+		return nil, err
+	}
+	return e.check(rule, rows)
+}
+
 func (e *YAMLEngine) check(rule Rule, rows []map[string]interface{}) ([]Finding, error) {
 	switch rule.Check.Type {
 	case "min_rows":

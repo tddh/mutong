@@ -74,8 +74,9 @@ services:
     container_name: mutong-redis
     ports:
       - "6379:6379"
+    command: redis-server --requirepass ${MUTONG_REDIS_PASSWORD:-change_me}
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${MUTONG_REDIS_PASSWORD:-change_me}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -95,6 +96,7 @@ services:
       MUTONG_NEBULA_USER: root
       MUTONG_NEBULA_PASS: change_me
       MUTONG_REDIS_ADDR: redis:6379
+      MUTONG_REDIS_PASSWORD: ${MUTONG_REDIS_PASSWORD:-change_me}
     depends_on:
       postgres:
         condition: service_healthy

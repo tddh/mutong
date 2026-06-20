@@ -377,13 +377,33 @@ func initOAuth2(cfg *config.Config) (fosite.OAuth2Provider, *redis.Client) {
 	}
 	var rdb *redis.Client
 	if redisAddr := os.Getenv("MUTONG_REDIS_ADDR"); redisAddr != "" {
-		rdb = redis.NewClient(&redis.Options{Addr: redisAddr})
+		redisOpts := &redis.Options{Addr: redisAddr}
+		if redisPassword := os.Getenv("MUTONG_REDIS_PASSWORD"); redisPassword != "" {
+			redisOpts.Password = redisPassword
+		}
+		if redisDB := os.Getenv("MUTONG_REDIS_DB"); redisDB != "" {
+			if db, err := strconv.Atoi(redisDB); err == nil {
+				redisOpts.DB = db
+			} else {
+				cfg.Logger.Warn("Invalid MUTONG_REDIS_DB value, using default DB 0",
+					zap.String("value", redisDB), zap.Error(err))
+			}
+		}
+		rdb = redis.NewClient(redisOpts)
+		if redisOpts.Password == "" {
+			cfg.Logger.Warn("MUTONG_REDIS_PASSWORD not set, Redis connection will use no authentication",
+				zap.String("hint", "Set MUTONG_REDIS_PASSWORD to enable Redis AUTH"))
+		}
 	} else if cfg.Diagnosis.Session.Redis != "" {
 		rdb = redis.NewClient(&redis.Options{
 			Addr:     cfg.Diagnosis.Session.Redis,
 			Password: cfg.Diagnosis.Session.Password,
 			DB:       cfg.Diagnosis.Session.DB,
 		})
+		if cfg.Diagnosis.Session.Password == "" {
+			cfg.Logger.Warn("diagnosis.session.password is empty, Redis connection will use no authentication",
+				zap.String("hint", "Set a password in config.diagnosis.yaml session.password field"))
+		}
 	}
 	oauth2Cfg := &authsvc.OAuth2Config{
 		IssuerURL:            os.Getenv("MUTONG_ISSUER_URL"),

@@ -28,6 +28,11 @@ func NewRedisStorage(addr string, password string, db int, ttl time.Duration, lo
 		PoolSize: 20,
 	})
 
+	if password == "" {
+		logger.Warn("Redis password is empty — diagnosis session data and cached diagnosis results will be stored without authentication",
+			zap.String("hint", "Set a password in config.diagnosis.yaml session.password or MUTONG_REDIS_PASSWORD env var"))
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {

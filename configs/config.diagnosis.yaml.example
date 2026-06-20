@@ -23,7 +23,8 @@ diagnosis:
   session:
     enabled: true
     redis: "localhost:6379"
-    password: ""
+    # ⚠️ 生产环境务必设置密码，Redis 无密码保护会导致诊断数据、会话记录和登录限流数据泄露
+    password: ""  # 通过 MUTONG_REDIS_PASSWORD 环境变量设置
     db: 9
     ttl: 1800
 

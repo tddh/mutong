@@ -204,6 +204,16 @@ func (c *Config) SetDefaultConfig() {
 		c.Nebula.Pass = nebulaPass
 	}
 
+	// Redis password (override YAML config)
+	if redisPassword := os.Getenv("MUTONG_REDIS_PASSWORD"); redisPassword != "" {
+		c.Diagnosis.Session.Password = redisPassword
+	}
+	if redisDB := os.Getenv("MUTONG_REDIS_DB"); redisDB != "" {
+		if db, err := strconv.Atoi(redisDB); err == nil {
+			c.Diagnosis.Session.DB = db
+		}
+	}
+
 	// External search API keys (override YAML config)
 	if tavilyKey := os.Getenv("MUTONG_TAVILY_KEY"); tavilyKey != "" {
 		c.ExternalSearch.Tavily.APIKey = tavilyKey

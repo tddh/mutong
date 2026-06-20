@@ -125,10 +125,11 @@ services:
     container_name: mutong-redis
     ports:
       - "6379:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-change_me}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-change_me}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5

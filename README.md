@@ -504,6 +504,9 @@ executor:
 | `MUTONG_NEBULA_USER` | Nebula 用户名 | - |
 | `MUTONG_NEBULA_PASS` | Nebula 密码 | - |
 | `MUTONG_LLM_API_KEY` | LLM API Key | - |
+| `MUTONG_REDIS_ADDR` | Redis 地址 | - |
+| `MUTONG_REDIS_PASSWORD` | Redis 密码 | - |
+| `MUTONG_REDIS_DB` | Redis 数据库编号 | - |
 
 ## 安装与运行
 

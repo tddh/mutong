@@ -1363,6 +1363,9 @@ func (c *Config) setServerDefaults() {
 	if c.Server.IdleTimeoutSec == 0 {
 		c.Server.IdleTimeoutSec = 120
 	}
+	if c.Server.SSEWriteTimeoutSec == 0 {
+		c.Server.SSEWriteTimeoutSec = 300
+	}
 	if c.Server.ShutdownTimeoutSec == 0 {
 		c.Server.ShutdownTimeoutSec = 10
 	}

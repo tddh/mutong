@@ -104,3 +104,5 @@ server:
   idleTimeoutSec: 120
   shutdownTimeoutSec: 30
   rateLimitPerSec: 100
+  # SSE 流式连接写超时（诊断对话/stream 等长连接），LLM 推理可能停顿数十秒，默认 300
+  sseWriteTimeoutSec: 300

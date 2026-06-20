@@ -743,7 +743,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			zap.Int("max_concurrent", 4),
 		)
 
-		diagCtrl := controllers.NewDiagnosisController(logger, diagEngine, promSvcGlobal.AsMetricsQuerier(), chatManager, cacheTTL, k8sC, logQ, cfg.GetCache(), inspectionProcessor, k8sSvc.GetInformerFactory)
+		diagCtrl := controllers.NewDiagnosisController(logger, diagEngine, promSvcGlobal.AsMetricsQuerier(), chatManager, cacheTTL, k8sC, logQ, cfg.GetCache(), inspectionProcessor, k8sSvc.GetInformerFactory, time.Duration(cfg.Server.SSEWriteTimeoutSec)*time.Second)
 
 		if cfg.ExternalSearch.Enabled {
 			sanitCfg := diagnosis_svc.SanitizerConfig{

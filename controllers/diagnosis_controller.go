@@ -23,30 +23,32 @@ import (
 )
 
 type DiagnosisController struct {
-	logger         interfaces.Logger
-	engine         *diagnosis_svc.Engine
-	mcpSrv         *mcp.Server
-	metricsQuerier interfaces.MetricsQuerier
-	chatManager    *diagnosis_svc.ChatSessionManager
-	cacheTTL       time.Duration
-	k8sClient      *kubernetes.Clientset
-	logQuerier     interfaces.LogQuerier
-	cache          interfaces.Cache
-	inspectionSvc  interfaces.InspectionProcessor
+	logger          interfaces.Logger
+	engine          *diagnosis_svc.Engine
+	mcpSrv          *mcp.Server
+	metricsQuerier  interfaces.MetricsQuerier
+	chatManager     *diagnosis_svc.ChatSessionManager
+	cacheTTL        time.Duration
+	k8sClient       *kubernetes.Clientset
+	logQuerier      interfaces.LogQuerier
+	cache           interfaces.Cache
+	inspectionSvc   interfaces.InspectionProcessor
+	sseWriteTimeout time.Duration
 }
 
-func NewDiagnosisController(logger interfaces.Logger, engine *diagnosis_svc.Engine, metricsQuerier interfaces.MetricsQuerier, chatManager *diagnosis_svc.ChatSessionManager, cacheTTL time.Duration, k8sClient *kubernetes.Clientset, logQuerier interfaces.LogQuerier, cache interfaces.Cache, inspectionSvc interfaces.InspectionProcessor, informerGetter func() dynamicinformer.DynamicSharedInformerFactory) *DiagnosisController {
+func NewDiagnosisController(logger interfaces.Logger, engine *diagnosis_svc.Engine, metricsQuerier interfaces.MetricsQuerier, chatManager *diagnosis_svc.ChatSessionManager, cacheTTL time.Duration, k8sClient *kubernetes.Clientset, logQuerier interfaces.LogQuerier, cache interfaces.Cache, inspectionSvc interfaces.InspectionProcessor, informerGetter func() dynamicinformer.DynamicSharedInformerFactory, sseWriteTimeout time.Duration) *DiagnosisController {
 	return &DiagnosisController{
-		logger:         logger,
-		engine:         engine,
-		metricsQuerier: metricsQuerier,
-		mcpSrv:         mcp.NewServer(logger, engine, metricsQuerier, k8sClient, logQuerier, cache, engine.GetVectorRetriever(), inspectionSvc, informerGetter),
-		chatManager:    chatManager,
-		cacheTTL:       cacheTTL,
-		k8sClient:      k8sClient,
-		logQuerier:     logQuerier,
-		cache:          cache,
-		inspectionSvc:  inspectionSvc,
+		logger:          logger,
+		engine:          engine,
+		metricsQuerier:  metricsQuerier,
+		mcpSrv:          mcp.NewServer(logger, engine, metricsQuerier, k8sClient, logQuerier, cache, engine.GetVectorRetriever(), inspectionSvc, informerGetter),
+		chatManager:     chatManager,
+		cacheTTL:        cacheTTL,
+		k8sClient:       k8sClient,
+		logQuerier:      logQuerier,
+		cache:           cache,
+		inspectionSvc:   inspectionSvc,
+		sseWriteTimeout: sseWriteTimeout,
 	}
 }
 
@@ -56,6 +58,17 @@ func (c *DiagnosisController) SetRetrospectiveGenerator(gen func(ctx context.Con
 
 func (c *DiagnosisController) SetExternalSearch(tavily *search.TavilyClient, github *search.GitHubClient, sanitizer *diagnosis_svc.Sanitizer, auditFn mcp.AuditLogFunc) {
 	c.mcpSrv.WithExternalSearch(tavily, github, sanitizer, auditFn)
+}
+
+func (c *DiagnosisController) sseWriteLine(w http.ResponseWriter, flusher http.Flusher) func(string) {
+	return func(line string) {
+		fmt.Fprint(w, line+"\n")
+		flusher.Flush()
+		if c.sseWriteTimeout > 0 {
+			rc := http.NewResponseController(w)
+			_ = rc.SetWriteDeadline(time.Now().Add(c.sseWriteTimeout))
+		}
+	}
 }
 
 func (c *DiagnosisController) RegisterRoutes(app *gin.Engine) {
@@ -814,10 +827,7 @@ func (c *DiagnosisController) askChat(ginCtx *gin.Context) {
 		return
 	}
 
-	writeLine := func(line string) {
-		fmt.Fprint(ginCtx.Writer, line+"\n")
-		flusher.Flush()
-	}
+	writeLine := c.sseWriteLine(ginCtx.Writer, flusher)
 
 	outerCtx, outerCancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer outerCancel()
@@ -1029,10 +1039,7 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 	fmt.Fprint(ginCtx.Writer, ":\n\n")
 	flusher.Flush()
 
-	writeLine := func(line string) {
-		fmt.Fprint(ginCtx.Writer, line+"\n")
-		flusher.Flush()
-	}
+	writeLine := c.sseWriteLine(ginCtx.Writer, flusher)
 
 	allToolDefsAndHandlers := c.mcpSrv.GetEinoToolDefsAndHandlers()
 	einoTools := diagnosis_svc.ConvertToEinoTools(allToolDefsAndHandlers, c.logger)

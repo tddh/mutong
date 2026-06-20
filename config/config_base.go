@@ -525,4 +525,9 @@ type ServerConfig struct {
 	IdleTimeoutSec     int    `mapstructure:"idleTimeoutSec"`
 	ShutdownTimeoutSec int    `mapstructure:"shutdownTimeoutSec"`
 	RateLimitPerSec    int    `mapstructure:"rateLimitPerSec"`
+	// SSEWriteTimeoutSec is the write timeout for SSE streaming endpoints.
+	// SSE connections (diagnosis chat/stream) need a much longer timeout than
+	// regular HTTP requests because LLM inference can pause for tens of seconds
+	// between chunks. Default: 300 (5 minutes).
+	SSEWriteTimeoutSec int `mapstructure:"sseWriteTimeoutSec"`
 }

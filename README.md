@@ -374,6 +374,7 @@ log:
 server:
   address: "0.0.0.0"
   port: 8888
+  sseWriteTimeoutSec: 300  # SSE 写超时，诊断对话等长连接场景
 ```
 
 ### 告警配置（config.alert.yaml）
@@ -428,7 +429,9 @@ diagnosis:
   session:
     enabled: true
     redis: "localhost:6379"
-    ttl: 1800
+    password: ""         # 生产环境务必设置，通过 MUTONG_REDIS_PASSWORD 环境变量
+    db: 9
+    ttl: 1800            # Redis 会话 TTL（秒），PG 保留 30 天自动清理
 
 # 外部知识库搜索
 external_search:

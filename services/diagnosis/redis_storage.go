@@ -113,7 +113,7 @@ func (r *RedisStorage) GetSession(ctx context.Context, id string) (*ChatSession,
 
 	session := &ChatSession{
 		ID:         vals["id"],
-		UserID:     uint(parseInt64(vals["user_id"])),
+		UserID:     parseUint(vals["user_id"]),
 		CreatedAt:  time.Unix(parseInt64(vals["created_at"]), 0),
 		LastActive: time.Unix(parseInt64(vals["last_active"]), 0),
 		SSEChan:    make(chan *SSEEvent, 100),
@@ -227,6 +227,12 @@ func parseInt64(s string) int64 {
 	var n int64
 	_, _ = fmt.Sscanf(s, "%d", &n)
 	return n
+}
+
+func parseUint(s string) uint {
+	var n uint64
+	_, _ = fmt.Sscanf(s, "%d", &n)
+	return uint(n)
 }
 
 // -----------------------------------------------------------------------

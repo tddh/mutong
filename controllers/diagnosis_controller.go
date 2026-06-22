@@ -1156,9 +1156,9 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 		}
 	}
 
-	exitEvent := fmt.Sprintf(`{"type":"action","action_type":"exit"`)
+	exitEvent := `{"type":"action","action_type":"exit"`
 	if sessionID != "" {
-		exitEvent += fmt.Sprintf(`,"session_id":%q`, sessionID)
+		exitEvent += `,"session_id":"` + sessionID + `"`
 	}
 	exitEvent += "}"
 	writeLine(exitEvent)

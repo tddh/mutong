@@ -86,7 +86,6 @@ const App = {
       try {
         const res = await fetch('/api/v1/diagnosis/chat/sessions?limit=50')
         const data = await res.json()
-        console.log('[DEBUG] loadSessionList: got', data.total, 'sessions, showing', (data.sessions||[]).length)
         sessions.value = data.sessions || []
       } catch {
         // ignore
@@ -103,7 +102,11 @@ const App = {
         currentSessionId.value = id
         messages.value = s.messages || []
         context.value = s.context || null
-        hasContext.value = !!(s.context?.resource_kind || s.context?.alert || (s.messages && s.messages.length > 0))
+        hasContext.value = !!(
+          s.context?.resource_kind ||
+          s.context?.alert ||
+          (s.messages && s.messages.length > 0)
+        )
       } catch {
         // ignore
       }
@@ -112,7 +115,7 @@ const App = {
     async function deleteSession(id) {
       try {
         await fetch(`/api/v1/diagnosis/chat/sessions/${id}`, { method: 'DELETE' })
-        sessions.value = sessions.value.filter(s => s.id !== id)
+        sessions.value = sessions.value.filter((s) => s.id !== id)
         if (currentSessionId.value === id) newChat()
       } catch {
         // ignore
@@ -225,7 +228,11 @@ const App = {
         const response = await fetch('/api/v1/diagnosis/chat/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: history, context: context.value, session_id: currentSessionId.value || '' }),
+          body: JSON.stringify({
+            messages: history,
+            context: context.value,
+            session_id: currentSessionId.value || '',
+          }),
           signal: controller.signal,
         })
         clearTimeout(fetchTimeoutId)
@@ -302,9 +309,8 @@ const App = {
                       isLoading.value = false
                       flushTokensNow()
                       if (event.session_id) {
-                        console.log('[DEBUG] exit handler: session_id=', event.session_id, 'sessions_len=', sessions.value.length)
                         currentSessionId.value = event.session_id
-                        if (!sessions.value.some(s => s.id === event.session_id)) {
+                        if (!sessions.value.some((s) => s.id === event.session_id)) {
                           sessions.value.unshift({
                             id: event.session_id,
                             title: (lastUserMessage.value || '').substring(0, 50),
@@ -314,9 +320,6 @@ const App = {
                             created_at: new Date().toISOString(),
                             status: 1,
                           })
-                          console.log('[DEBUG] session added to sidebar:', event.session_id, 'total=', sessions.value.length)
-                        } else {
-                          console.log('[DEBUG] session already in sidebar, skip:', event.session_id)
                         }
                       }
                       // 工具标记完成，3 秒后清除

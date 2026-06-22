@@ -81,7 +81,7 @@ func (c *DiagnosisController) RegisterRoutes(app *gin.Engine) {
 	api.GET("/tools", c.listMCPTools)
 	api.POST("/mcp/tool/:name", c.executeMCPTool)
 
-	// New stateless endpoints
+	// Chat endpoints（首次消息自动创建用户会话，续接消息追加到同一会话）
 	api.POST("/chat/context", c.chatContext)
 	api.POST("/chat/ask", c.askChat)
 

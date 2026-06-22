@@ -157,7 +157,7 @@ mutongctl search tavily -q "Pod CrashLoopBackOff troubleshooting"
 | Topology | `view/src/topology/index.html` | Force-graph, dual view (physical/business) |
 | Resource List | `view/src/resource-table.html` | Paginated table (500/page), kind-colored |
 | Alert Management | `view/src/alerts/index.html` | Aggregated alerts, dual-tab drawer |
-| AI Diagnosis | `view/src/diagnosis/index.html` | Chat-style Markdown, stateless diagnosis mode |
+| AI Diagnosis | `view/src/diagnosis/index.html` | Chat-style Markdown streaming (30ms buffer), tool call floating panel, sidebar session history with LLM title summary, layered timeout (300s total / 15s first token / 60s idle), stream retry |
 | Inspection Report | `view/src/inspection/index.html` | Manual trigger, table-format results |
 | Inspection History | `view/src/inspection-history/index.html` | Filter, compare, trend analysis |
 | Retrospective Analysis | `view/src/retrospective/index.html` | Timeline + DAG + topology + impact assessment |

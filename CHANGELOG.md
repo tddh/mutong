@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- AI 诊断聊天会话持久化：`chat_sessions` 表新增 `user_id`/`title` 字段，`chat/ask` 自动创建/续接会话
+- 会话历史 API：`GET /chat/sessions`（当前用户列表）、`GET /chat/sessions/:id`（详情）、`DELETE /chat/sessions/:id`（软删除）
+- 侧栏会话列表（前端）：新建对话 / 切换会话 / 删除，刷新页面不丢失
+- LLM 智能标题摘要（Eino chatModel，15 字内中文，异步非阻塞生成）
+- PG 会话定时清理（每小时，720h 保留期），Redis 密码认证支持
+- Server `sseWriteTimeoutSec` 配置（SSE 流式写超时，默认 300s）
 - 外部知识库搜索（Tavily + GitHub Issues）：MCP 工具 search_knowledge_base / search_github_issues，支持 AI 诊断中 LLM 自动调用及 mutongctl 手动触发
 - mutongctl search 命令（github / tavily 子命令）
 - HTTP 连接池统一工厂 `services/httpclient`（共享 Transport，MaxIdleConns: 100）
@@ -32,6 +38,10 @@
 - 巡检规则 YAML 文件加载：configs/rules/inspection/*.yml，5 类内置规则独立文件，加载优先级 YAML > Go 内置 > DB
 
 ### Changed
+- `chat/ask` 从无状态改为自动创建/续接用户会话（登录后首次消息即创建，侧栏同步显示）
+- 移除前端快捷诊断按钮和引导面板，改为会话侧栏（新建/切换/删除）
+- `chat_sessions` 表新增 `user_id:uint`（联合索引 `idx_user_status`）+ `title:varchar(255)` 字段
+- 会话 PG 保留期从 30 分钟改为 30 天
 - cmdb_data_silo 巡检规则排除 CRD/FlowSchema/PriorityLevelConfiguration/Lease 资源类型
 - 巡检报告前端改为表格展示（级别/规则/资源/建议 4 列）
 

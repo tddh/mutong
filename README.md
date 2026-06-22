@@ -801,7 +801,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | 拓扑图 | `view/src/topology/index.html` | force-graph 力导向图，物理/业务双视图，左侧边栏筛选，右侧详情面板（指标徽章/关联资源） |
 | 资源列表 | `view/src/resource-table.html` | 表格分页（500条/页），按 Kind 着色，支持关键词搜索（300ms 防抖）+ Terminal 跳转 |
 | 告警管理 | `view/src/alerts/index.html` | 聚合告警展开/折叠，按业务应用/团队/关键度筛选，右侧抽屉双选项卡（基本信息 + AI 诊断） |
-| AI 诊断 | `view/src/diagnosis/index.html` | 对话式 Markdown 流式渲染（30ms 增量缓冲），工具调用浮动面板（pulse 动画 + 自动消失），4 个快速诊断按钮，支持一次性无状态诊断模式，分层超时（总 300s / 首 token 15s / 空闲 60s），流中断可重试 |
+| AI 诊断 | `view/src/diagnosis/index.html` | 对话式 Markdown 流式渲染（30ms 增量缓冲），工具调用浮动面板（pulse 动画 + 自动消失），侧栏会话历史管理 + LLM 摘要标题，新建/续接/删除会话，分层超时（总 300s / 首 token 15s / 空闲 60s），流中断可重试 |
 | 巡检报告 | `view/src/inspection/index.html` | 手动触发巡检，表格展示各规则检查结果（级别/规则/资源/建议），5 类内置规则 |
 | 巡检历史 | `view/src/inspection-history/index.html` | 历史报告筛选、详情查看、报告对比、趋势分析（7/14/30/60/90 天） |
 | 复盘分析 | `view/src/retrospective/index.html` | 输入指纹生成复盘：事件时间线 + 因果 DAG + 业务拓扑 + 影响评估 + 指标快照 + 关键日志 + 改进项看板 |

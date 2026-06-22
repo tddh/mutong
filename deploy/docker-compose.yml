@@ -14,6 +14,8 @@ services:
       MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}
       MUTONG_NEBULA_USER: ${NEBULA_USER:-root}
       MUTONG_NEBULA_PASS: ${NEBULA_PASSWORD:-nebula}
+      MUTONG_REDIS_ADDR: redis:6379
+      MUTONG_REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me}
     volumes:
       - mutong_config:/app/configs
     depends_on:

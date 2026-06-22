@@ -72,6 +72,7 @@ func (r *RedisStorage) CreateSession(ctx context.Context, session *ChatSession) 
 
 	pipe.HSet(ctx, sessionKey, map[string]interface{}{
 		"id":                session.ID,
+		"user_id":           session.UserID,
 		"status":            "active",
 		"alert_fingerprint": alertFP,
 		"resource_kind":     resourceKind,
@@ -112,6 +113,7 @@ func (r *RedisStorage) GetSession(ctx context.Context, id string) (*ChatSession,
 
 	session := &ChatSession{
 		ID:         vals["id"],
+		UserID:     uint(parseInt64(vals["user_id"])),
 		CreatedAt:  time.Unix(parseInt64(vals["created_at"]), 0),
 		LastActive: time.Unix(parseInt64(vals["last_active"]), 0),
 		SSEChan:    make(chan *SSEEvent, 100),

@@ -658,8 +658,11 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | GET | `/api/v1/diagnosis/status` | 诊断服务状态 |
 | GET | `/api/v1/diagnosis/tools` | 列出所有 MCP 工具 |
 | POST | `/api/v1/diagnosis/mcp/tool/{name}` | 执行指定 MCP 工具 |
-| POST | `/api/v1/diagnosis/chat/ask` | AI 诊断问答（无状态，推荐） |
+| POST | `/api/v1/diagnosis/chat/ask` | AI 诊断问答（SSE 流式，自动创建会话历史） |
 | POST | `/api/v1/diagnosis/chat/context` | 建立诊断上下文 |
+| GET | `/api/v1/diagnosis/chat/sessions` | 当前用户会话历史列表 |
+| GET | `/api/v1/diagnosis/chat/sessions/{id}` | 加载指定会话详情 |
+| DELETE | `/api/v1/diagnosis/chat/sessions/{id}` | 删除指定会话 |
 | GET | `/api/v1/diagnosis/chat/session/by-alert` | 按告警指纹查询会话 |
 | DELETE | `/api/v1/diagnosis/chat/{sessionId}` | 关闭会话 |
 

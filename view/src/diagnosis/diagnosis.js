@@ -66,12 +66,66 @@ const App = {
     let ttftTimer = null
     let idleTimer = null
 
-    const quickButtons = [
-      { label: 'Pod 诊断', kind: 'Pod', icon: '📦' },
-      { label: 'Deployment 诊断', kind: 'Deployment', icon: '🚀' },
-      { label: 'Service 诊断', kind: 'Service', icon: '🔗' },
-      { label: '节点异常', kind: 'Node', icon: '🖥️' },
-    ]
+    // 会话历史
+    const isAuthenticated = ref(false)
+    const sessions = ref([])
+    const currentSessionId = ref(null)
+
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me')
+        isAuthenticated.value = res.ok
+        if (res.ok) loadSessionList()
+      } catch {
+        isAuthenticated.value = false
+      }
+    }
+
+    async function loadSessionList() {
+      if (!isAuthenticated.value) return
+      try {
+        const res = await fetch('/api/v1/diagnosis/chat/sessions?limit=50')
+        const data = await res.json()
+        console.log('[DEBUG] loadSessionList: got', data.total, 'sessions, showing', (data.sessions||[]).length)
+        sessions.value = data.sessions || []
+      } catch {
+        // ignore
+      }
+    }
+
+    async function loadSession(id) {
+      try {
+        const res = await fetch(`/api/v1/diagnosis/chat/sessions/${id}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (!data || !data.session) return
+        const s = data.session
+        currentSessionId.value = id
+        messages.value = s.messages || []
+        context.value = s.context || null
+        hasContext.value = !!(s.context?.resource_kind || s.context?.alert || (s.messages && s.messages.length > 0))
+      } catch {
+        // ignore
+      }
+    }
+
+    async function deleteSession(id) {
+      try {
+        await fetch(`/api/v1/diagnosis/chat/sessions/${id}`, { method: 'DELETE' })
+        sessions.value = sessions.value.filter(s => s.id !== id)
+        if (currentSessionId.value === id) newChat()
+      } catch {
+        // ignore
+      }
+    }
+
+    function newChat() {
+      currentSessionId.value = null
+      messages.value = []
+      context.value = null
+      hasContext.value = false
+      toolCalls.value = []
+    }
 
     async function init() {
       const params = new URLSearchParams(window.location.search)
@@ -171,7 +225,7 @@ const App = {
         const response = await fetch('/api/v1/diagnosis/chat/ask', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: history, context: context.value }),
+          body: JSON.stringify({ messages: history, context: context.value, session_id: currentSessionId.value || '' }),
           signal: controller.signal,
         })
         clearTimeout(fetchTimeoutId)
@@ -247,6 +301,24 @@ const App = {
                     if (event.action_type === 'exit') {
                       isLoading.value = false
                       flushTokensNow()
+                      if (event.session_id) {
+                        console.log('[DEBUG] exit handler: session_id=', event.session_id, 'sessions_len=', sessions.value.length)
+                        currentSessionId.value = event.session_id
+                        if (!sessions.value.some(s => s.id === event.session_id)) {
+                          sessions.value.unshift({
+                            id: event.session_id,
+                            title: (lastUserMessage.value || '').substring(0, 50),
+                            resource_kind: context.value?.resource_kind || '',
+                            resource_name: context.value?.resource_name || '',
+                            last_active_at: new Date().toISOString(),
+                            created_at: new Date().toISOString(),
+                            status: 1,
+                          })
+                          console.log('[DEBUG] session added to sidebar:', event.session_id, 'total=', sessions.value.length)
+                        } else {
+                          console.log('[DEBUG] session already in sidebar, skip:', event.session_id)
+                        }
+                      }
                       // 工具标记完成，3 秒后清除
                       toolCalls.value = toolCalls.value.map((t) => ({ ...t, status: 'completed' }))
                       setTimeout(() => {
@@ -281,6 +353,7 @@ const App = {
         if (!assistantMsg.content) {
           assistantMsg.content = 'AI 未返回有效内容，请重试或尝试换个问法。'
         }
+        hasContext.value = true
         scrollToBottom()
       } catch (error) {
         flushTokensNow()
@@ -358,16 +431,6 @@ const App = {
       await sendMessage()
     }
 
-    async function startQuickDiagnosis(kind) {
-      inputMessage.value = `请诊断 ${kind} 问题`
-      await startChat({
-        resource_kind: kind,
-        resource_name: '',
-        namespace: '',
-        description: `诊断 ${kind}`,
-      })
-    }
-
     function scrollToBottom() {
       nextTick(() => {
         if (chatContainer.value) {
@@ -387,12 +450,23 @@ const App = {
       businessImpactCollapsed.value = !businessImpactCollapsed.value
     }
 
+    function formatTime(t) {
+      if (!t) return ''
+      const d = new Date(t)
+      const diff = Date.now() - d.getTime()
+      if (diff < 60000) return '刚刚'
+      if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前'
+      if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前'
+      return d.toLocaleDateString()
+    }
+
     function riskLabel(level) {
       const map = { critical: '🔴 严重', high: '🟠 高风险', medium: '🟡 中风险', low: '🟢 低风险' }
       return map[level] || level
     }
 
     onMounted(() => {
+      checkAuth()
       init()
     })
 
@@ -403,7 +477,9 @@ const App = {
       isLoading,
       chatContainer,
       hasContext,
-      quickButtons,
+      isAuthenticated,
+      sessions,
+      currentSessionId,
       businessImpact,
       businessAppCalls,
       businessImpactCollapsed,
@@ -411,13 +487,16 @@ const App = {
       aggregatedToolCalls,
       startChat,
       sendMessage,
-      startQuickDiagnosis,
       toggleBusinessImpact,
       handleKeyPress,
       riskLabel,
       renderMarkdown,
       retryMessage,
       lastUserMessage,
+      loadSession,
+      deleteSession,
+      newChat,
+      formatTime,
     }
   },
   template: `
@@ -425,6 +504,19 @@ const App = {
         <div class="diagnosis-page">
             <div class="diagnosis-layout">
                 <div class="diagnosis-sidebar">
+                    <div v-if="isAuthenticated" class="session-panel">
+                        <button class="new-chat-btn" @click="newChat">+ 新对话</button>
+                        <div class="session-list" v-if="sessions.length">
+                            <div v-for="s in sessions" :key="s.id"
+                                 :class="['session-item', { active: s.id === currentSessionId }]"
+                                 @click="loadSession(s.id)">
+                                <div class="session-title">{{ s.title || '新对话' }}</div>
+                                <div class="session-meta">{{ s.resource_kind || '' }} · {{ formatTime(s.last_active_at) }}</div>
+                                <button class="session-delete" @click.stop="deleteSession(s.id)">×</button>
+                            </div>
+                        </div>
+                        <div v-else class="session-empty">暂无对话记录</div>
+                    </div>
                     <div v-if="hasContext" class="context-card">
                         <h3>📋 诊断上下文</h3>
                         <div class="context-info">
@@ -488,21 +580,6 @@ const App = {
                                     <span class="value">{{ context.enrich_tags.criticality || '-' }}</span>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                    <div v-else class="guide-panel">
-                        <h3>👋 AI 诊断助手</h3>
-                        <p class="guide-text">请描述你要排查的问题，或选择快捷诊断开始。</p>
-                        <div class="quick-buttons">
-                            <button
-                                v-for="btn in quickButtons"
-                                :key="btn.kind"
-                                class="quick-btn"
-                                @click="startQuickDiagnosis(btn.kind)"
-                            >
-                                <span class="icon">{{ btn.icon }}</span>
-                                <span>{{ btn.label }}</span>
-                            </button>
                         </div>
                     </div>
                 </div>

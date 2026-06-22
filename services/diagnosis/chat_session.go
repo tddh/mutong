@@ -13,6 +13,8 @@ import (
 	"gitee.com/tddh/mutong/interfaces"
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
+
+	"github.com/cloudwego/eino/schema"
 )
 
 // ChatStartRequest 创建聊天会话的请求
@@ -74,6 +76,7 @@ type SSEEvent struct {
 // ChatSession 聊天会话
 type ChatSession struct {
 	ID         string
+	UserID     uint // 归属用户 ID，用于删除鉴权
 	CreatedAt  time.Time
 	LastActive time.Time
 	mu         sync.RWMutex
@@ -108,14 +111,15 @@ func NewChatSessionManager(logger interfaces.Logger, llmProvider interfaces.LLMP
 		pgStore:     pgStore,
 		stopCh:      make(chan struct{}),
 	}
-	go mgr.startCleanup(5*time.Minute, 30*time.Minute)
+	go mgr.startCleanup(1*time.Hour, 720*time.Hour) // 每小时清理超过 30 天的过期会话
 	return mgr
 }
 
 // Create 创建新会话
-func (m *ChatSessionManager) Create(ctx context.Context, req ChatStartRequest) (*ChatSession, *diagnosis.DiagnosisResult, error) {
+func (m *ChatSessionManager) Create(ctx context.Context, userID uint, req ChatStartRequest) (*ChatSession, *diagnosis.DiagnosisResult, error) {
 	session := &ChatSession{
 		ID:         "sess_" + uuid.New().String()[:8],
+		UserID:     userID,
 		CreatedAt:  time.Now(),
 		LastActive: time.Now(),
 		Context: &DiagnosisContext{
@@ -304,11 +308,9 @@ func (m *ChatSessionManager) Create(ctx context.Context, req ChatStartRequest) (
 	}
 
 	if m.pgStore != nil {
-		go func() {
-			if err := m.pgStore.ArchiveSession(bgCtx, session); err != nil {
-				m.logger.Warn("ArchiveSession failed", zap.Error(err))
-			}
-		}()
+		if err := m.pgStore.ArchiveSession(bgCtx, session, userID, req.Description); err != nil {
+			m.logger.Warn("ArchiveSession failed", zap.Error(err))
+		}
 	}
 
 	m.logger.Info("Chat session created", zap.String("session_id", session.ID))
@@ -399,6 +401,83 @@ func (m *ChatSessionManager) Delete(id string) {
 	}
 
 	m.logger.Info("Chat session deleted", zap.String("session_id", id))
+}
+
+func (m *ChatSessionManager) ListSessions(ctx context.Context, userID uint, limit, offset int) ([]SessionSummary, int64, error) {
+	if m.pgStore == nil {
+		return nil, 0, fmt.Errorf("pgStore not available")
+	}
+	sessions, total, err := m.pgStore.ListSessions(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var summaries []SessionSummary
+	for _, s := range sessions {
+		summaries = append(summaries, SessionSummary{
+			ID:           s.ID,
+			Title:        s.Title,
+			ResourceKind: s.ResourceKind,
+			ResourceName: s.ResourceName,
+			CreatedAt:    s.CreatedAt,
+			LastActiveAt: s.LastActiveAt,
+			Status:       s.Status,
+		})
+	}
+	return summaries, total, nil
+}
+
+type SessionSummary struct {
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	ResourceKind string    `json:"resource_kind"`
+	ResourceName string    `json:"resource_name"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
+	Status       int8      `json:"status"`
+}
+
+func (m *ChatSessionManager) LoadSession(ctx context.Context, sessionID string) (*ChatSession, error) {
+	if val, ok := m.sessions.Load(sessionID); ok {
+		session := val.(*ChatSession)
+		if m.pgStore != nil {
+			pgSession, err := m.pgStore.GetSession(ctx, sessionID)
+			if err == nil && len(pgSession.Messages) > len(session.Messages) {
+				session.mu.Lock()
+				session.Messages = pgSession.Messages
+				session.mu.Unlock()
+			}
+		}
+		return session, nil
+	}
+	if m.redis != nil {
+		session, err := m.redis.GetSession(ctx, sessionID)
+		if err == nil {
+			m.sessions.Store(session.ID, session)
+			return session, nil
+		}
+	}
+	if m.pgStore != nil {
+		session, err := m.pgStore.GetSession(ctx, sessionID)
+		if err == nil {
+			m.sessions.Store(session.ID, session)
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("session not found: %s", sessionID)
+}
+
+func (m *ChatSessionManager) GenerateTitle(sessionID string, userMsg, assistantMsg string) {
+	if m.pgStore == nil {
+		return
+	}
+	title := summarizeTitle(m.llmProvider, userMsg, assistantMsg)
+	if title != "" {
+		_ = m.pgStore.UpdateTitle(context.Background(), sessionID, title)
+	} else {
+		m.logger.Debug("title generation returned empty, keeping temporary title",
+			zap.String("session_id", sessionID))
+	}
 }
 
 // AddMessage 添加消息到会话
@@ -514,4 +593,39 @@ func (m *ChatSessionManager) GetRedisStorage() *RedisStorage {
 
 func (m *ChatSessionManager) GetPostgresStorage() *PostgresStorage {
 	return m.pgStore
+}
+
+func summarizeTitle(llmProvider interfaces.LLMProvider, userMsg, assistantMsg string) string {
+	if llmProvider == nil {
+		return ""
+	}
+	einoProvider, ok := llmProvider.(*EinoLLMProvider)
+	if !ok {
+		return ""
+	}
+	chatModel := einoProvider.GetChatModel()
+	if chatModel == nil {
+		return ""
+	}
+
+	prompt := fmt.Sprintf("用15字以内中文总结这段对话主题：\n用户：%s\n助手：%s", userMsg, assistantMsg)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	msg, err := chatModel.Generate(ctx, []*schema.Message{
+		schema.UserMessage(prompt),
+	})
+	if err != nil {
+		return ""
+	}
+
+	title := strings.TrimSpace(msg.Content)
+	runes := []rune(title)
+	if len(runes) == 0 {
+		return ""
+	}
+	if len(runes) > 15 {
+		title = string(runes[:15]) + "..."
+	}
+	return title
 }

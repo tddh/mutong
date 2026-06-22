@@ -27,9 +27,11 @@ func NewPostgresStorage(db *gorm.DB, logger interfaces.Logger) *PostgresStorage 
 	}
 }
 
-func (p *PostgresStorage) ArchiveSession(ctx context.Context, session *ChatSession) error {
+func (p *PostgresStorage) ArchiveSession(ctx context.Context, session *ChatSession, userID uint, title string) error {
 	sessionModel := &diagnosis_model.ChatSessionModel{
 		ID:           session.ID,
+		UserID:       userID,
+		Title:        title,
 		Status:       1,
 		CreatedAt:    session.CreatedAt,
 		LastActiveAt: session.LastActive,
@@ -45,8 +47,8 @@ func (p *PostgresStorage) ArchiveSession(ctx context.Context, session *ChatSessi
 	}
 
 	if err := p.db.WithContext(ctx).Create(sessionModel).Error; err != nil {
-		p.logger.Error("MySQL ArchiveSession failed", zap.Error(err))
-		return fmt.Errorf("mysql archive session: %w", err)
+		p.logger.Error("PG ArchiveSession failed", zap.Error(err), zap.Uint("user_id", userID))
+		return fmt.Errorf("pg archive session: %w", err)
 	}
 
 	if session.Context != nil {
@@ -84,11 +86,11 @@ func (p *PostgresStorage) ArchiveSession(ctx context.Context, session *ChatSessi
 		}
 
 		if err := p.db.WithContext(ctx).Create(contextModel).Error; err != nil {
-			p.logger.Warn("MySQL archive context failed", zap.Error(err))
+			p.logger.Warn("PG archive context failed", zap.Error(err))
 		}
 	}
 
-	p.logger.Info("Session archived to MySQL", zap.String("session_id", session.ID))
+	p.logger.Info("Session archived to PG", zap.String("session_id", session.ID), zap.Uint("user_id", userID))
 	return nil
 }
 
@@ -109,11 +111,11 @@ func (p *PostgresStorage) ArchiveMessages(ctx context.Context, sessionID string,
 	}
 
 	if err := p.db.WithContext(ctx).Create(&messageModels).Error; err != nil {
-		p.logger.Error("MySQL ArchiveMessages failed", zap.Error(err))
-		return fmt.Errorf("mysql archive messages: %w", err)
+		p.logger.Error("ArchiveMessages failed", zap.Error(err))
+		return fmt.Errorf("archive messages: %w", err)
 	}
 
-	p.logger.Info("Messages archived to MySQL", zap.String("session_id", sessionID), zap.Int("count", len(messages)))
+	p.logger.Info("Messages archived", zap.String("session_id", sessionID), zap.Int("count", len(messages)))
 	return nil
 }
 
@@ -123,7 +125,7 @@ func (p *PostgresStorage) GetSessionByAlert(ctx context.Context, fingerprint str
 		Where("alert_fingerprint = ? AND status = ?", fingerprint, 1).
 		Order("created_at DESC").
 		First(&sessionModel).Error; err != nil {
-		return nil, fmt.Errorf("mysql get session by alert: %w", err)
+		return nil, fmt.Errorf("pg get session by alert: %w", err)
 	}
 
 	session := &ChatSession{
@@ -179,10 +181,89 @@ func (p *PostgresStorage) UpdateSessionStatus(ctx context.Context, sessionID str
 		Model(&diagnosis_model.ChatSessionModel{}).
 		Where("id = ?", sessionID).
 		Updates(updates).Error; err != nil {
-		return fmt.Errorf("mysql update session status: %w", err)
+		return fmt.Errorf("pg update session status: %w", err)
 	}
 
 	return nil
+}
+
+func (p *PostgresStorage) ListSessions(ctx context.Context, userID uint, limit, offset int) ([]diagnosis_model.ChatSessionModel, int64, error) {
+	var sessions []diagnosis_model.ChatSessionModel
+	var total int64
+
+	query := p.db.WithContext(ctx).
+		Model(&diagnosis_model.ChatSessionModel{}).
+		Where("user_id = ? AND status IN (1, 2)", userID)
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count sessions: %w", err)
+	}
+
+	if err := query.
+		Order("last_active_at DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&sessions).Error; err != nil {
+		return nil, 0, fmt.Errorf("list sessions: %w", err)
+	}
+
+	return sessions, total, nil
+}
+
+func (p *PostgresStorage) GetSession(ctx context.Context, sessionID string) (*ChatSession, error) {
+	var sessionModel diagnosis_model.ChatSessionModel
+	if err := p.db.WithContext(ctx).Where("id = ?", sessionID).First(&sessionModel).Error; err != nil {
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+
+	session := &ChatSession{
+		ID:         sessionModel.ID,
+		UserID:     sessionModel.UserID,
+		CreatedAt:  sessionModel.CreatedAt,
+		LastActive: sessionModel.LastActiveAt,
+		SSEChan:    make(chan *SSEEvent, 100),
+		Context: &DiagnosisContext{
+			ResourceKind: sessionModel.ResourceKind,
+			ResourceName: sessionModel.ResourceName,
+			Namespace:    sessionModel.Namespace,
+		},
+	}
+
+	var contextModel diagnosis_model.DiagnosisContextModel
+	if err := p.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		First(&contextModel).Error; err == nil {
+		if contextModel.AlertInfo != nil {
+			var alert alert_models.ProcessedAlert
+			if err := json.Unmarshal([]byte(*contextModel.AlertInfo), &alert); err == nil {
+				session.Context.Alert = &alert
+			}
+		}
+	}
+
+	var messageModels []diagnosis_model.ChatMessageModel
+	if err := p.db.WithContext(ctx).
+		Where("session_id = ?", sessionModel.ID).
+		Order("created_at ASC").
+		Find(&messageModels).Error; err == nil {
+		for _, msgModel := range messageModels {
+			session.Messages = append(session.Messages, ChatMessage{
+				ID:        msgModel.MsgID,
+				Role:      msgModel.Role,
+				Content:   msgModel.Content,
+				Timestamp: msgModel.CreatedAt,
+			})
+		}
+	}
+
+	return session, nil
+}
+
+func (p *PostgresStorage) UpdateTitle(ctx context.Context, sessionID string, title string) error {
+	return p.db.WithContext(ctx).
+		Model(&diagnosis_model.ChatSessionModel{}).
+		Where("id = ?", sessionID).
+		Update("title", title).Error
 }
 
 func (p *PostgresStorage) CleanupExpired(ctx context.Context, ttl time.Duration) error {
@@ -192,7 +273,7 @@ func (p *PostgresStorage) CleanupExpired(ctx context.Context, ttl time.Duration)
 	if err := p.db.WithContext(ctx).
 		Where("last_active_at < ? AND status = ?", expiredAt, 1).
 		Find(&expiredSessions).Error; err != nil {
-		return fmt.Errorf("mysql find expired sessions: %w", err)
+		return fmt.Errorf("pg find expired sessions: %w", err)
 	}
 
 	if len(expiredSessions) == 0 {
@@ -208,7 +289,7 @@ func (p *PostgresStorage) CleanupExpired(ctx context.Context, ttl time.Duration)
 	p.db.WithContext(ctx).Where("session_id IN ?", sessionIDs).Delete(&diagnosis_model.ChatMessageModel{})
 	p.db.WithContext(ctx).Where("session_id IN ?", sessionIDs).Delete(&diagnosis_model.DiagnosisContextModel{})
 
-	p.logger.Info("Cleaned up expired sessions from MySQL", zap.Int("count", len(expiredSessions)))
+	p.logger.Info("Cleaned up expired sessions from PG", zap.Int("count", len(expiredSessions)))
 	return nil
 }
 

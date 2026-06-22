@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +84,11 @@ func (c *DiagnosisController) RegisterRoutes(app *gin.Engine) {
 	// New stateless endpoints
 	api.POST("/chat/context", c.chatContext)
 	api.POST("/chat/ask", c.askChat)
+
+	chat := api.Group("/chat")
+	chat.GET("/sessions", c.listSessions)
+	chat.GET("/sessions/:id", c.getSession)
+	chat.DELETE("/sessions/:id", c.deleteSession)
 
 	if c.chatManager != nil {
 		// getSessionByAlert 保留（非 deprecated，有实际用途）
@@ -238,7 +245,8 @@ func (c *DiagnosisController) startChat(ctx *gin.Context) {
 		return
 	}
 
-	session, initialResult, err := c.chatManager.Create(ctx.Request.Context(), req)
+	userID, _ := GetUserID(ctx)
+	session, initialResult, err := c.chatManager.Create(ctx.Request.Context(), userID, req)
 	if err != nil {
 		c.logger.Error("Failed to create chat session", zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -739,8 +747,9 @@ func (c *DiagnosisController) chatContext(ginCtx *gin.Context) {
 }
 
 type askChatRequest struct {
-	Messages []diagnosis_svc.ChatMessage `json:"messages"`
-	Context  struct {
+	SessionID string                      `json:"session_id"`
+	Messages  []diagnosis_svc.ChatMessage `json:"messages"`
+	Context   struct {
 		ResourceKind string `json:"resource_kind"`
 		ResourceName string `json:"resource_name"`
 		Namespace    string `json:"namespace"`
@@ -1047,6 +1056,34 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 	chatModel := provider.GetChatModel()
 	agent := diagnosis_svc.NewDiagnosisAgent(chatModel, einoTools, c.logger)
 
+	// 阶段1：首个问题立即创建会话（侧栏立即可见）
+	var sessionID string
+	if req.SessionID == "" {
+		firstMsg := firstUserMessage(req.Messages)
+		title := truncateString(firstMsg, 50)
+		if title == "" {
+			title = fmt.Sprintf("新对话 %s", time.Now().Format("15:04"))
+		}
+		userID, _ := GetUserID(ginCtx)
+		c.logger.Info("creating session before SSE", zap.String("title", title), zap.Int("msg_count", len(req.Messages)), zap.Uint("user_id", userID))
+		chatReq := diagnosis_svc.ChatStartRequest{
+			ResourceKind: req.Context.ResourceKind,
+			ResourceName: req.Context.ResourceName,
+			Namespace:    req.Context.Namespace,
+			Description:  title,
+		}
+		session, _, createErr := c.chatManager.Create(context.Background(), userID, chatReq)
+		if createErr == nil {
+			sessionID = session.ID
+			c.logger.Info("session created OK", zap.String("session_id", sessionID), zap.Uint("user_id", userID))
+		} else {
+			c.logger.Error("FAILED to create session", zap.Error(createErr))
+		}
+	} else {
+		sessionID = req.SessionID
+		c.logger.Info("skipping session creation", zap.String("req_session_id", req.SessionID))
+	}
+
 	outerCtx, outerCancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer outerCancel()
 
@@ -1058,6 +1095,7 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 
 	toolCallCount := 0
 	startTime := time.Now()
+	var assistantText strings.Builder
 	err := agent.RunStreamWithMessages(outerCtx, history, sysMsg, func(chunk string, toolCall *diagnosis_svc.ToolCallInfo) error {
 		if toolCall != nil {
 			if toolCall.Name == "" {
@@ -1074,6 +1112,7 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 			return nil
 		}
 		if chunk != "" {
+			assistantText.WriteString(chunk)
 			content, _ := json.Marshal(chunk)
 			writeLine(fmt.Sprintf(`{"type":"stream_chunk","content":%s}`, string(content)))
 		}
@@ -1094,5 +1133,122 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 			zap.Duration("duration", time.Since(startTime)),
 		)
 	}
-	writeLine(`{"type":"action","action_type":"exit"}`)
+
+	// 阶段2：保存消息 + 触发 LLM 标题生成
+	if sessionID != "" {
+		allMessages := make([]diagnosis_svc.ChatMessage, len(req.Messages))
+		copy(allMessages, req.Messages)
+		answer := assistantText.String()
+		if answer != "" {
+			allMessages = append(allMessages, diagnosis_svc.ChatMessage{
+				Role:    "assistant",
+				Content: answer,
+			})
+		}
+		if pgStore := c.chatManager.GetPostgresStorage(); pgStore != nil {
+			if err := pgStore.ArchiveMessages(context.Background(), sessionID, allMessages); err != nil {
+				c.logger.Error("failed to archive messages", zap.Error(err))
+			}
+		}
+		firstMsg := firstUserMessage(req.Messages)
+		if firstMsg != "" && answer != "" {
+			go c.chatManager.GenerateTitle(sessionID, firstMsg, answer)
+		}
+	}
+
+	exitEvent := fmt.Sprintf(`{"type":"action","action_type":"exit"`)
+	if sessionID != "" {
+		exitEvent += fmt.Sprintf(`,"session_id":%q`, sessionID)
+	}
+	exitEvent += "}"
+	writeLine(exitEvent)
+	c.logger.Info("exit event sent", zap.String("session_id", sessionID), zap.Int("msg_count", len(req.Messages)))
+}
+
+func firstUserMessage(msgs []diagnosis_svc.ChatMessage) string {
+	for _, m := range msgs {
+		if m.Role == "user" {
+			return m.Content
+		}
+	}
+	return ""
+}
+
+func truncateString(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "..."
+}
+
+func (c *DiagnosisController) listSessions(ginCtx *gin.Context) {
+	userID, _ := GetUserID(ginCtx)
+	limit := 20
+	offset := 0
+	if v, err := strconv.Atoi(ginCtx.DefaultQuery("limit", "20")); err == nil && v > 0 && v <= 50 {
+		limit = v
+	}
+	if v, err := strconv.Atoi(ginCtx.DefaultQuery("offset", "0")); err == nil && v >= 0 {
+		offset = v
+	}
+
+	sessions, total, err := c.chatManager.ListSessions(ginCtx.Request.Context(), userID, limit, offset)
+	if err != nil {
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.logger.Info("listSessions result",
+		zap.Uint("user_id", userID),
+		zap.Int64("total", total),
+		zap.Int("returned", len(sessions)))
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"sessions": sessions,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
+}
+
+func (c *DiagnosisController) getSession(ginCtx *gin.Context) {
+	sessionID := ginCtx.Param("id")
+	session, err := c.chatManager.LoadSession(ginCtx.Request.Context(), sessionID)
+	if err != nil {
+		ginCtx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	userID, _ := GetUserID(ginCtx)
+	if session.UserID != 0 && userID != 0 && session.UserID != userID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{"error": "permission denied"})
+		return
+	}
+
+	ginCtx.JSON(http.StatusOK, gin.H{
+		"session": gin.H{
+			"id":         session.ID,
+			"messages":   session.GetMessages(),
+			"context":    session.Context,
+			"created_at": session.CreatedAt,
+		},
+	})
+}
+
+func (c *DiagnosisController) deleteSession(ginCtx *gin.Context) {
+	sessionID := ginCtx.Param("id")
+	userID, _ := GetUserID(ginCtx)
+
+	session, err := c.chatManager.LoadSession(ginCtx.Request.Context(), sessionID)
+	if err != nil {
+		ginCtx.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+	if session.UserID != userID {
+		ginCtx.JSON(http.StatusForbidden, gin.H{"error": "permission denied"})
+		return
+	}
+	c.chatManager.Delete(sessionID)
+	ginCtx.JSON(http.StatusOK, gin.H{"status": "deleted"})
 }

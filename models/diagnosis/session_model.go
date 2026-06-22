@@ -5,7 +5,9 @@ import "time"
 // ChatSessionModel 会话主表 GORM 模型
 type ChatSessionModel struct {
 	ID               string     `gorm:"primaryKey;type:varchar(32);comment:会话ID" json:"id"`
-	Status           int8       `gorm:"type:smallint;not null;default:1;comment:1:active 2:closed 3:expired" json:"status"`
+	UserID           uint       `gorm:"index:idx_user_status;not null;default:0;comment:用户ID" json:"user_id"`
+	Title            string     `gorm:"type:varchar(255);comment:会话标题" json:"title"`
+	Status           int8       `gorm:"index:idx_user_status;type:smallint;not null;default:1;comment:1:active 2:closed 3:expired" json:"status"`
 	AlertFingerprint string     `gorm:"type:varchar(64);index:idx_alert;comment:关联告警指纹" json:"alert_fingerprint"`
 	ResourceKind     string     `gorm:"type:varchar(50);comment:资源类型" json:"resource_kind"`
 	ResourceName     string     `gorm:"type:varchar(200);comment:资源名称" json:"resource_name"`

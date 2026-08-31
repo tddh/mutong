@@ -2,11 +2,6 @@ package services
 
 import (
 	"context"
-	"fmt"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	"gitee.com/tddh/mutong/interfaces"
 	commonv1 "go.opentelemetry.io/proto/otlp/common/v1"
@@ -17,13 +12,9 @@ import (
 
 type FlowTopologySyncer struct {
 	logger       interfaces.Logger
-	graphDB      interfaces.GraphDB
 	messageQueue interfaces.MessageQueue
-	// 复用 TraceTopologySyncer 的 owner_name 别名解析 + 写边能力
-	resolver   *TraceTopologySyncer
-	stopCh     chan struct{}
-	edgeBuffer []pendingCallEdge
-	bufferMu   sync.Mutex
+	resolver     *TraceTopologySyncer
+	stopCh       chan struct{}
 }
 
 var flowMetricNames = map[string]bool{
@@ -33,13 +24,11 @@ var flowMetricNames = map[string]bool{
 
 func NewFlowTopologySyncer(
 	logger interfaces.Logger,
-	graphDB interfaces.GraphDB,
 	messageQueue interfaces.MessageQueue,
 	resolver *TraceTopologySyncer,
 ) *FlowTopologySyncer {
 	return &FlowTopologySyncer{
 		logger:       logger,
-		graphDB:      graphDB,
 		messageQueue: messageQueue,
 		resolver:     resolver,
 		stopCh:       make(chan struct{}),
@@ -49,12 +38,10 @@ func NewFlowTopologySyncer(
 func (s *FlowTopologySyncer) Start() {
 	s.logger.Info("FlowTopologySyncer starting")
 	go s.consumeLoop()
-	go s.flushLoop()
 }
 
 func (s *FlowTopologySyncer) Stop() {
 	close(s.stopCh)
-	s.flushBuffer()
 	s.logger.Info("FlowTopologySyncer stopped")
 }
 
@@ -112,62 +99,7 @@ func (s *FlowTopologySyncer) handleFlowPoint(attrs []*commonv1.KeyValue) {
 		return
 	}
 
-	s.bufferMu.Lock()
-	s.edgeBuffer = append(s.edgeBuffer, pendingCallEdge{from: caller.uid, to: callee.uid, cacheKey: caller.uid + "->" + callee.uid})
-	shouldFlush := len(s.edgeBuffer) >= callsFlushThreshold
-	s.bufferMu.Unlock()
-
-	if shouldFlush {
-		go s.flushBuffer()
-	}
-}
-
-func (s *FlowTopologySyncer) flushLoop() {
-	ticker := time.NewTicker(flushInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-s.stopCh:
-			return
-		case <-ticker.C:
-			s.flushBuffer()
-		}
-	}
-}
-
-func (s *FlowTopologySyncer) flushBuffer() {
-	s.bufferMu.Lock()
-	if len(s.edgeBuffer) == 0 {
-		s.bufferMu.Unlock()
-		return
-	}
-	batch := s.edgeBuffer
-	s.edgeBuffer = nil
-	s.bufferMu.Unlock()
-
-	const batchSize = 200
-	values := make([]string, 0, len(batch))
-	for _, edge := range batch {
-		values = append(values, fmt.Sprintf(
-			"%s -> %s:()",
-			strconv.Quote(edge.from),
-			strconv.Quote(edge.to),
-		))
-		if len(values) >= batchSize {
-			s.flushChunk(values)
-			values = values[:0]
-		}
-	}
-	if len(values) > 0 {
-		s.flushChunk(values)
-	}
-}
-
-func (s *FlowTopologySyncer) flushChunk(values []string) {
-	query := fmt.Sprintf("INSERT EDGE CallsApp () VALUES %s;", strings.Join(values, ", "))
-	if _, err := s.graphDB.ExecuteAndCheck(query); err != nil {
-		s.logger.Error("flow: flush CallsApp edges failed", zapError(err))
-	}
+	s.resolver.upsertCallEdge(caller, callee)
 }
 
 func flowAttr(attrs []*commonv1.KeyValue, keys ...string) string {

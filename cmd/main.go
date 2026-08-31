@@ -374,7 +374,6 @@ func initializeServices(cfg *config.Config) (interfaces.RoleInterface, interface
 		} else {
 			flowSyncer = services.NewFlowTopologySyncer(
 				cfg.GetLogger(),
-				cfg.GetGraphDB(),
 				flowMQ,
 				traceSyncer,
 			)

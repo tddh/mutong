@@ -11,6 +11,8 @@ type BusinessApp struct {
 	Environment  string `json:"environment" nebula:"environment"`
 	Team         string `json:"team" nebula:"team"`
 	BusinessUnit string `json:"business_unit" nebula:"business_unit"`
+	OwnerName    string `json:"owner_name" nebula:"owner_name"`
+	OwnerKind    string `json:"owner_kind" nebula:"owner_kind"`
 }
 
 // BelongsToAppEdge 资源属于业务应用的边

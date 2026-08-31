@@ -178,11 +178,14 @@ CREATE TAG IF NOT EXISTS BusinessApp (
     criticality string,
     environment string,
     team string,
-    business_unit string
+    business_unit string,
+    owner_name string,
+    owner_kind string
 ) comment = '业务应用实体';
 
 CREATE TAG INDEX IF NOT EXISTS `bizapp_name` ON `BusinessApp`(`app_name`(128));
 CREATE TAG INDEX IF NOT EXISTS `bizapp_ns` ON `BusinessApp`(`namespace`(128));
+CREATE TAG INDEX IF NOT EXISTS `bizapp_owner_name` ON `BusinessApp`(`owner_name`(128));
 
 CREATE EDGE IF NOT EXISTS BelongsToApp () comment = '资源属于业务应用';
 CREATE EDGE IF NOT EXISTS CallsApp () comment = '应用间调用关系（仅存骨架，指标由 Prometheus 承担）';

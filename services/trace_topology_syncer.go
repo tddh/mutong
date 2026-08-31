@@ -59,6 +59,7 @@ type businessAppRef struct {
 	uid       string
 	appName   string
 	namespace string
+	podName   string
 }
 
 func NewTraceTopologySyncer(
@@ -339,11 +340,12 @@ func (s *TraceTopologySyncer) processSpanRecord(msg *interfaces.Message) bool {
 					zap.String("app_name", callee.appName),
 					zap.String("namespace", callee.namespace))
 
-				if caller.uid == callee.uid {
+				if caller.uid == callee.uid && caller.podName != "" && caller.podName == callee.podName {
 					atomic.AddInt64(&s.droppedSelfCall, 1)
-					s.logger.Debug("TRACE_PROCESS Self-call filtered",
+					s.logger.Debug("TRACE_PROCESS Same-pod self-call filtered",
 						zap.String("uid", caller.uid),
-						zap.String("app_name", caller.appName))
+						zap.String("app_name", caller.appName),
+						zap.String("pod", caller.podName))
 					continue
 				}
 
@@ -397,6 +399,7 @@ func (s *TraceTopologySyncer) resolveCallerBusinessApp(rs *v1.ResourceSpans) (bu
 		s.logger.Debug("CALLER_RESOLVE resolved via owner_name alias",
 			zap.String("owner_name", appName),
 			zap.String("canonical_app", ref.appName))
+		ref.podName = extractResourceAttr(rs, "k8s.pod.name")
 		return ref, true
 	}
 
@@ -412,7 +415,7 @@ func (s *TraceTopologySyncer) resolveCallerBusinessApp(rs *v1.ResourceSpans) (bu
 		zap.String("uid", uid),
 		zap.String("app_name", appName),
 		zap.String("namespace", namespace))
-	return businessAppRef{uid: uid, appName: appName, namespace: namespace}, true
+	return businessAppRef{uid: uid, appName: appName, namespace: namespace, podName: extractResourceAttr(rs, "k8s.pod.name")}, true
 }
 
 func (s *TraceTopologySyncer) resolvePeerBusinessApp(span *v1.Span, peerNsMap map[string]string) (businessAppRef, bool) {
@@ -488,7 +491,7 @@ func (s *TraceTopologySyncer) resolvePeerBusinessApp(span *v1.Span, peerNsMap ma
 		zap.String("uid", uid),
 		zap.String("app_name", appName),
 		zap.String("namespace", namespace))
-	return businessAppRef{uid: uid, appName: appName, namespace: namespace}, true
+	return businessAppRef{uid: uid, appName: appName, namespace: namespace, podName: extractPodNameFromAddress(rawPeer)}, true
 }
 
 func (s *TraceTopologySyncer) resolvePeerFromAddress(rawPeer string) (appName, namespace string) {

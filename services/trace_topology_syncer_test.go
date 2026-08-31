@@ -371,22 +371,43 @@ func TestLookup_EmptyNS_AutoCreateEmptyNS(t *testing.T) {
 
 // --- processSpanRecord tests
 
-func TestProcessSpan_SelfCallFiltered(t *testing.T) {
+func TestProcessSpan_SamePodSelfCallFiltered(t *testing.T) {
 	db := newDB(func(q string) (*nebula.ResultSet, error) { return nil, nil })
 	s := newTraceSyncer(db, "")
 	rs := tpRes([]*commonv1.KeyValue{
 		sa("k8s.owner.name", "kafka"),
 		sa("k8s.namespace.name", "messaging"),
+		sa("k8s.pod.name", "kafka-0"),
 	})
 	rs.ScopeSpans = []*v1.ScopeSpans{{Spans: []*v1.Span{
-		tpSpan([]*commonv1.KeyValue{sa("peer.service", "kafka.messaging.svc.cluster.local")}, v1.Span_SPAN_KIND_CLIENT),
+		tpSpan([]*commonv1.KeyValue{sa("peer.service", "kafka-0.messaging.svc.cluster.local")}, v1.Span_SPAN_KIND_CLIENT),
 	}}}
 	s.processSpanRecord(&interfaces.Message{Value: tpMarshal(rs)})
 	s.bufferMu.Lock()
 	n := len(s.edgeBuffer)
 	s.bufferMu.Unlock()
 	if n != 0 {
-		t.Errorf("want 0 edges, got %d", n)
+		t.Errorf("same-pod self-call should be filtered, got %d edges", n)
+	}
+}
+
+func TestProcessSpan_CrossReplicaSameWorkloadKept(t *testing.T) {
+	db := newDB(func(q string) (*nebula.ResultSet, error) { return nil, nil })
+	s := newTraceSyncer(db, "")
+	rs := tpRes([]*commonv1.KeyValue{
+		sa("k8s.owner.name", "kafka"),
+		sa("k8s.namespace.name", "messaging"),
+		sa("k8s.pod.name", "kafka-0"),
+	})
+	rs.ScopeSpans = []*v1.ScopeSpans{{Spans: []*v1.Span{
+		tpSpan([]*commonv1.KeyValue{sa("peer.service", "kafka-1.messaging.svc.cluster.local")}, v1.Span_SPAN_KIND_CLIENT),
+	}}}
+	s.processSpanRecord(&interfaces.Message{Value: tpMarshal(rs)})
+	s.bufferMu.Lock()
+	n := len(s.edgeBuffer)
+	s.bufferMu.Unlock()
+	if n != 1 {
+		t.Fatalf("cross-replica same-workload should keep self-loop edge, got %d", n)
 	}
 }
 

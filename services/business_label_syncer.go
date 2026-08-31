@@ -280,9 +280,11 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 		Environment:  bizAttrs.Environment,
 		Team:         bizAttrs.Team,
 		BusinessUnit: bizAttrs.BusinessUnit,
+		OwnerName:    unstructuredObj.GetName(),
+		OwnerKind:    unstructuredObj.GetKind(),
 	}
 
-	attrsHash := s.hashBusinessAttrs(appName, namespace, bizAttrs)
+	attrsHash := s.hashBusinessAttrs(appName, namespace, unstructuredObj.GetName(), unstructuredObj.GetKind(), bizAttrs)
 	hashKey := "bls-hash:" + namespace + ":" + appName
 	eKey := cacheKeyPrefixE + uid + "->" + bizUID
 
@@ -313,9 +315,9 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 	_ = s.cache.Set(cacheKey, []byte(resourceVersion))
 }
 
-func (s *BusinessLabelSyncer) hashBusinessAttrs(appName, namespace string, bizAttrs config.NamespaceMappingEntry) string {
+func (s *BusinessLabelSyncer) hashBusinessAttrs(appName, namespace, ownerName, ownerKind string, bizAttrs config.NamespaceMappingEntry) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{
-		appName, namespace,
+		appName, namespace, ownerName, ownerKind,
 		bizAttrs.Criticality, bizAttrs.Environment, bizAttrs.Team, bizAttrs.BusinessUnit,
 	}, "|")))
 	return string(h[:])
@@ -478,7 +480,7 @@ func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem)
 	values := make([]string, 0, len(items))
 	for _, item := range items {
 		values = append(values, fmt.Sprintf(
-			`%s:(%s, %s, %s, %s, %s, %s, %s)`,
+			`%s:(%s, %s, %s, %s, %s, %s, %s, %s, %s)`,
 			strconv.Quote(item.app.UID),
 			strconv.Quote(item.app.UID),
 			strconv.Quote(item.app.AppName),
@@ -487,9 +489,11 @@ func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem)
 			strconv.Quote(item.app.Environment),
 			strconv.Quote(item.app.Team),
 			strconv.Quote(item.app.BusinessUnit),
+			strconv.Quote(item.app.OwnerName),
+			strconv.Quote(item.app.OwnerKind),
 		))
 	}
-	query := fmt.Sprintf(`INSERT VERTEX BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit) VALUES %s;`,
+	query := fmt.Sprintf(`INSERT VERTEX BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit, owner_name, owner_kind) VALUES %s;`,
 		strings.Join(values, ", "))
 	if _, err := s.graphDB.ExecuteAndCheck(query); err != nil {
 		s.logger.Error("Failed to batch upsert BusinessApp vertices",

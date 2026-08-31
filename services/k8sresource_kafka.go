@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 	"gitee.com/tddh/mutong/interfaces"
 	"gitee.com/tddh/mutong/models"
 	"github.com/allegro/bigcache/v3"
-	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -36,7 +36,10 @@ func humanBytes(b int) string {
 }
 
 type bizPublishTask struct {
-	obj       *unstructured.Unstructured
+	jsonBytes []byte
+	uid       string
+	kind      string
+	name      string
 	eventType string
 	group     string
 }
@@ -45,7 +48,7 @@ func (d *K8sResoureService) startBizPublishWorker() {
 	go func() {
 		defer close(d.bizPublishDone)
 		for task := range d.bizPublishChan {
-			d.publishToBusinessWorkloadTopic(task.obj, task.eventType, task.group)
+			d.publishToBusinessWorkloadTopic(task.jsonBytes, task.uid, task.kind, task.name, task.eventType, task.group)
 		}
 	}()
 }
@@ -56,7 +59,6 @@ func (d *K8sResoureService) seedToKafka(key string, obj []byte, group string, ev
 		return
 	}
 
-	jsoniter := jsoniter.ConfigCompatibleWithStandardLibrary
 	msg := models.KafkaResourceMessage{
 		EventType: eventType,
 		Group:     group,
@@ -64,7 +66,7 @@ func (d *K8sResoureService) seedToKafka(key string, obj []byte, group string, ev
 		Object:    obj,
 	}
 
-	jsonBytes, err := jsoniter.Marshal(msg)
+	jsonBytes, err := json.Marshal(msg)
 	if err != nil {
 		d.logger.Error("Failed to marshal message to JSON", zap.Error(err))
 		return
@@ -232,7 +234,7 @@ func (d *K8sResoureService) processKafkaMessageFromInterface(msg *interfaces.Mes
 		zap.String("topic", msg.Topic))
 
 	var kafkaMsg models.KafkaResourceMessage
-	err := jsoniter.ConfigCompatibleWithStandardLibrary.Unmarshal(msg.Value, &kafkaMsg)
+	err := json.Unmarshal(msg.Value, &kafkaMsg)
 	if err != nil {
 		d.logger.Error("Failed to unmarshal Kafka message",
 			zap.String("key", string(msg.Key)),
@@ -391,14 +393,24 @@ func (d *K8sResoureService) processKafkaMessage(unstructuredObj *unstructured.Un
 
 	if d.businessWorkloadProducer != nil && d.businessWorkloadTopic != "" {
 		if d.workloadKinds[unstructuredObj.GetKind()] {
-			select {
-			case d.bizPublishChan <- bizPublishTask{
-				obj: unstructuredObj, eventType: eventType, group: group,
-			}:
-			default:
-				d.logger.Warn("Business publish channel full, dropping message",
-					zap.String("name", unstructuredObj.GetName()),
-					zap.String("kind", unstructuredObj.GetKind()))
+			jsonBytes, err := unstructuredObj.MarshalJSON()
+			if err != nil {
+				d.logger.Error("Failed to marshal for business topic", zap.Error(err))
+			} else {
+				select {
+				case d.bizPublishChan <- bizPublishTask{
+					jsonBytes: jsonBytes,
+					uid:       string(unstructuredObj.GetUID()),
+					kind:      unstructuredObj.GetKind(),
+					name:      unstructuredObj.GetName(),
+					eventType: eventType,
+					group:     group,
+				}:
+				default:
+					d.logger.Warn("Business publish channel full, dropping message",
+						zap.String("name", unstructuredObj.GetName()),
+						zap.String("kind", unstructuredObj.GetKind()))
+				}
 			}
 		}
 	}

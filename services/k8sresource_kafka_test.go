@@ -400,7 +400,7 @@ func TestProcessKafkaMessage_AddedWorkloadPublishesAfterSuccess(t *testing.T) {
 	// Drain async publish channel for synchronous test assertion
 	for len(svc.bizPublishChan) > 0 {
 		task := <-svc.bizPublishChan
-		svc.publishToBusinessWorkloadTopic(task.obj, task.eventType, task.group)
+		svc.publishToBusinessWorkloadTopic(task.jsonBytes, task.uid, task.kind, task.name, task.eventType, task.group)
 	}
 
 	if len(mockBP.produceSyncCalls) != 1 {
@@ -445,7 +445,7 @@ func TestProcessKafkaMessage_DeletedWorkloadPublishesAfterSuccess(t *testing.T) 
 	// Drain async publish channel for synchronous test assertion
 	for len(svc.bizPublishChan) > 0 {
 		task := <-svc.bizPublishChan
-		svc.publishToBusinessWorkloadTopic(task.obj, task.eventType, task.group)
+		svc.publishToBusinessWorkloadTopic(task.jsonBytes, task.uid, task.kind, task.name, task.eventType, task.group)
 	}
 
 	if len(mockBP.produceSyncCalls) != 1 {

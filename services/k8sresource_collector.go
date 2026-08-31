@@ -351,14 +351,15 @@ func (d *K8sResoureService) addEventHandlers(informer cache.SharedIndexInformer,
 			unstructuredObjOld, _ := oldObj.(*unstructured.Unstructured)
 			unstructuredObjNew, _ := newObj.(*unstructured.Unstructured)
 
-			oldObjectStatus := unstructuredObjOld.Object["status"]
-			NewObjectStatus := unstructuredObjNew.Object["status"]
-			unstructuredObjOld.Object["status"] = nil
-			unstructuredObjNew.Object["status"] = nil
+			// DeepCopy before comparing — the original objects are owned by
+			// the Informer's cache and MUST NOT be mutated. Other goroutines
+			// (e.g. MCP listResourcesFromCache) may read them concurrently.
+			oldCopy := unstructuredObjOld.DeepCopy()
+			newCopy := unstructuredObjNew.DeepCopy()
+			delete(oldCopy.Object, "status")
+			delete(newCopy.Object, "status")
 
-			if unstructuredObjNew.GetKind() != "Lease" && !equality.Semantic.DeepEqual(unstructuredObjNew.Object, unstructuredObjOld.Object) {
-				unstructuredObjOld.Object["status"] = oldObjectStatus
-				unstructuredObjNew.Object["status"] = NewObjectStatus
+			if unstructuredObjNew.GetKind() != "Lease" && !equality.Semantic.DeepEqual(newCopy.Object, oldCopy.Object) {
 				d.handleResourceEvent(newObj, "Updated", group, clusterName)
 			}
 		},
@@ -456,6 +457,10 @@ func (d *K8sResoureService) handleResourceEvent(obj any, eventType string, group
 			zap.String("group", group),
 			zap.String("kind", unstructuredObj.GetKind()))
 	}
+	// Pre-compute uid before spawning goroutine — unstructuredObj is shared
+	// by the K8s Informer and MUST NOT be accessed asynchronously.
+	uid := string(unstructuredObj.GetUID())
+
 	d.kafkaWg.Add(1)
 	go func() {
 		defer d.kafkaWg.Done()
@@ -463,35 +468,29 @@ func (d *K8sResoureService) handleResourceEvent(obj any, eventType string, group
 		case d.kafkaSem <- struct{}{}:
 		default:
 			d.logger.Debug("Kafka semaphore saturated, waiting for capacity",
-				zap.String("uid", string(unstructuredObj.GetUID())))
+				zap.String("uid", uid))
 			d.kafkaSem <- struct{}{}
 		}
 		defer func() { <-d.kafkaSem }()
 		defer func() {
 			if r := recover(); r != nil {
 				d.logger.Error("seedToKafka goroutine panic recovered",
-					zap.String("uid", string(unstructuredObj.GetUID())),
+					zap.String("uid", uid),
 					zap.Any("panic", r))
 			}
 		}()
-		d.seedToKafka(string(unstructuredObj.GetUID()), jsonTxt, group, eventType, clusterName)
+		d.seedToKafka(uid, jsonTxt, group, eventType, clusterName)
 	}()
 }
 
-func (d *K8sResoureService) publishToBusinessWorkloadTopic(obj *unstructured.Unstructured, eventType, group string) {
+func (d *K8sResoureService) publishToBusinessWorkloadTopic(jsonBytes []byte, uid, kind, name, eventType, group string) {
 	d.logger.Debug("entered publishToBusinessWorkloadTopic",
-		zap.String("kind", obj.GetKind()),
-		zap.String("name", obj.GetName()),
-		zap.String("uid", string(obj.GetUID())),
+		zap.String("kind", kind),
+		zap.String("name", name),
+		zap.String("uid", uid),
 		zap.String("topic", d.businessWorkloadTopic),
 		zap.String("eventType", eventType),
 		zap.String("group", group))
-
-	jsonBytes, err := obj.MarshalJSON()
-	if err != nil {
-		d.logger.Error("Failed to marshal workload for business topic", zap.Error(err))
-		return
-	}
 
 	msg := models.KafkaResourceMessage{
 		EventType: eventType,
@@ -502,7 +501,7 @@ func (d *K8sResoureService) publishToBusinessWorkloadTopic(obj *unstructured.Uns
 
 	record := &kgo.Record{
 		Topic: d.businessWorkloadTopic,
-		Key:   []byte(string(obj.GetUID())),
+		Key:   []byte(uid),
 		Value: msgBytes,
 	}
 
@@ -510,23 +509,23 @@ func (d *K8sResoureService) publishToBusinessWorkloadTopic(obj *unstructured.Uns
 	defer cancel()
 
 	d.logger.Debug("about to call ProduceSync",
-		zap.String("kind", obj.GetKind()),
-		zap.String("name", obj.GetName()),
-		zap.String("uid", string(obj.GetUID())),
+		zap.String("kind", kind),
+		zap.String("name", name),
+		zap.String("uid", uid),
 		zap.String("topic", d.businessWorkloadTopic))
 
 	if err := d.businessWorkloadProducer.ProduceSync(ctx, []*kgo.Record{record}).FirstErr(); err != nil {
 		d.logger.Error("Failed to publish to business workload topic",
-			zap.String("kind", obj.GetKind()),
-			zap.String("name", obj.GetName()),
-			zap.String("uid", string(obj.GetUID())),
+			zap.String("kind", kind),
+			zap.String("name", name),
+			zap.String("uid", uid),
 			zap.String("topic", d.businessWorkloadTopic),
 			zap.Error(err))
 	} else {
 		d.logger.Debug("Published to business workload topic",
-			zap.String("kind", obj.GetKind()),
-			zap.String("name", obj.GetName()),
-			zap.String("uid", string(obj.GetUID())),
+			zap.String("kind", kind),
+			zap.String("name", name),
+			zap.String("uid", uid),
 			zap.String("topic", d.businessWorkloadTopic))
 	}
 }

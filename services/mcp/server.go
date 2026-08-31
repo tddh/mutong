@@ -973,7 +973,7 @@ func (s *Server) handleListResourcesFromCache(ctx context.Context, args map[stri
 	var items []string
 	activeCount := 0
 	for _, obj := range allItems {
-		u := obj.(*unstructured.Unstructured)
+		u := obj.(*unstructured.Unstructured).DeepCopy()
 		if namespace != "" && u.GetNamespace() != namespace {
 			continue
 		}

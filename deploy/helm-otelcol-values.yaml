@@ -15,12 +15,16 @@ config:
       timeout: 5s
       send_batch_size: 1000
   exporters:
-    kafka:
+    kafka/traces:
       brokers: ["kafka:9092"]
-      topic: 
-        default: "otlp_spans" 
+      encoding: otlp_proto
+      topic: mutong_trace_01
       producer:
         compression: zstd
+    kafka/metrics:
+      brokers: ["kafka:9092"]
+      encoding: otlp_proto
+      topic: mutong_flow_01
   extensions:
     health_check:
       endpoint: "${env:MY_POD_IP}:13133"
@@ -32,4 +36,8 @@ config:
       traces:
         receivers: [otlp]
         processors: [batch]
-        exporters: [kafka]
+        exporters: [kafka/traces]
+      metrics:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [kafka/metrics]

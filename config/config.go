@@ -233,6 +233,7 @@ func (c *Config) SetDefaultConfig() {
 	c.SetupKafkaClient()
 	c.SetupTraceKafkaClient()
 	c.SetupBusinessWorkloadClient()
+	c.SetupFlowKafkaClient()
 
 	c.setServerDefaults()
 	c.setKafkaInternalDefaults()
@@ -981,6 +982,46 @@ func (c *Config) GetBusinessWorkloadMessageQueue() *KafkaAdapter {
 		return nil
 	}
 	return NewKafkaAdapter(c.Kafka.BusinessWorkloadClient, c.Logger)
+}
+
+// SetupFlowKafkaClient 初始化 Flow Kafka 客户端（消费 Beyla L4 network flow metrics）
+func (c *Config) SetupFlowKafkaClient() {
+	if c.Kafka.FlowTopic == "" || c.Kafka.FlowGroup == "" {
+		c.Logger.Info("Flow Kafka not configured, skipping",
+			zap.String("flowTopic", c.Kafka.FlowTopic),
+			zap.String("flowGroup", c.Kafka.FlowGroup))
+		return
+	}
+
+	brokers := strings.Split(c.Kafka.Broker, ",")
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.AllowAutoTopicCreation(),
+		kgo.ConsumerGroup(c.Kafka.FlowGroup),
+		kgo.ConsumeTopics(c.Kafka.FlowTopic),
+		kgo.ConsumePreferringLagFn(kgo.PreferLagAt(1)),
+		kgo.ConsumeResetOffset(kgo.NewOffset().AtEnd()),
+		kgo.AutoCommitMarks(),
+		kgo.AutoCommitInterval(10 * time.Second),
+	}
+
+	var err error
+	c.Kafka.FlowClient, err = kgo.NewClient(opts...)
+	if err != nil {
+		c.Logger.Error("create flow kafka client failed", zap.Error(err))
+		os.Exit(1)
+	}
+	c.Logger.Info("create flow kafka client success",
+		zap.String("topic", c.Kafka.FlowTopic),
+		zap.String("group", c.Kafka.FlowGroup))
+}
+
+// GetFlowMessageQueue 获取 Flow 消息队列适配器
+func (c *Config) GetFlowMessageQueue() *KafkaAdapter {
+	if c.Kafka.FlowClient == nil {
+		return nil
+	}
+	return NewKafkaAdapter(c.Kafka.FlowClient, c.Logger)
 }
 
 // GetCache 获取缓存适配器

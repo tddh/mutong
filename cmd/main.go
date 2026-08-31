@@ -134,7 +134,7 @@ func runApp(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	roleSvc, userSvc, k8sresourceSvc, alertProcessor, graphDB, labelSyncer, traceSyncer := initializeServices(cfg)
+	roleSvc, userSvc, k8sresourceSvc, alertProcessor, graphDB, labelSyncer, traceSyncer, flowSyncer := initializeServices(cfg)
 	ctrls := initializeControllers(roleSvc, userSvc, k8sresourceSvc)
 	ctrls.InitCollectWithContext(ctx)
 
@@ -250,6 +250,18 @@ func runApp(cmd *cobra.Command, args []string) {
 		defer traceSyncer.Stop()
 	}
 
+	if flowSyncer != nil {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logger.Error("FlowTopologySyncer goroutine panic recovered", zap.Any("panic", r))
+				}
+			}()
+			flowSyncer.Start()
+		}()
+		defer flowSyncer.Stop()
+	}
+
 	<-ctx.Done()
 }
 
@@ -275,7 +287,7 @@ func initializeConfig(path string) *config.Config {
 	return config.NewConfig(path)
 }
 
-func initializeServices(cfg *config.Config) (interfaces.RoleInterface, interfaces.UserInterface, *services.K8sResoureService, alert_interfaces.AlertProcessor, interfaces.GraphDB, *services.BusinessLabelSyncer, *services.TraceTopologySyncer) {
+func initializeServices(cfg *config.Config) (interfaces.RoleInterface, interfaces.UserInterface, *services.K8sResoureService, alert_interfaces.AlertProcessor, interfaces.GraphDB, *services.BusinessLabelSyncer, *services.TraceTopologySyncer, *services.FlowTopologySyncer) {
 	roleSvc := services.NewRoleService()
 	userSvc := services.NewUserService(cfg.DB)
 
@@ -354,7 +366,22 @@ func initializeServices(cfg *config.Config) (interfaces.RoleInterface, interface
 		labelSyncer.SetRelationCache(traceSyncer.RelationCache())
 	}
 
-	return roleSvc, userSvc, k8sresourceSvc.(*services.K8sResoureService), alertProcessor, cfg.GetGraphDB(), labelSyncer, traceSyncer
+	var flowSyncer *services.FlowTopologySyncer
+	if cfg.BusinessTopology.Enabled && traceSyncer != nil {
+		flowMQ := cfg.GetFlowMessageQueue()
+		if flowMQ == nil {
+			cfg.Logger.Warn("Flow Kafka client not configured, FlowTopologySyncer disabled")
+		} else {
+			flowSyncer = services.NewFlowTopologySyncer(
+				cfg.GetLogger(),
+				cfg.GetGraphDB(),
+				flowMQ,
+				traceSyncer,
+			)
+		}
+	}
+
+	return roleSvc, userSvc, k8sresourceSvc.(*services.K8sResoureService), alertProcessor, cfg.GetGraphDB(), labelSyncer, traceSyncer, flowSyncer
 }
 
 func initializeControllers(roleSvc interfaces.RoleInterface, userSvc interfaces.UserInterface, k8sresourceSvc interfaces.K8sResourceInterface) *controllers.Controllers {

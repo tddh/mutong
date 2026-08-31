@@ -149,13 +149,19 @@ type Kafka struct {
 	BusinessWorkloadTopic  string `yaml:"businessWorkloadTopic" json:"businessWorkloadTopic,omitempty"`
 	BusinessWorkloadGroup  string `yaml:"businessWorkloadGroup" json:"businessWorkloadGroup,omitempty"`
 	BusinessWorkloadClient *kgo.Client
-	WorkloadKinds          []string `yaml:"workloadKinds" json:"workloadKinds,omitempty"`
-	WorkerPoolSize         int      `yaml:"workerPoolSize" json:"workerPoolSize,omitempty"`
-	TaskChanBuffer         int      `yaml:"taskChanBuffer" json:"taskChanBuffer,omitempty"`
-	MaxBackoffMs           int      `yaml:"maxBackoffMs" json:"maxBackoffMs,omitempty"`
-	PublishTimeoutSec      int      `yaml:"publishTimeoutSec" json:"publishTimeoutSec,omitempty"`
-	KafkaSemaphore         int      `yaml:"kafkaSemaphore" json:"kafkaSemaphore,omitempty"`
-	BizPublishChanBuffer   int      `yaml:"bizPublishChanBuffer" json:"bizPublishChanBuffer,omitempty"`
+
+	// Flow 专用 Kafka 配置（用于消费 Beyla L4 network flow metrics）
+	FlowTopic  string `yaml:"flowTopic" json:"flowTopic,omitempty"`
+	FlowGroup  string `yaml:"flowGroup" json:"flowGroup,omitempty"`
+	FlowClient *kgo.Client
+
+	WorkloadKinds        []string `yaml:"workloadKinds" json:"workloadKinds,omitempty"`
+	WorkerPoolSize       int      `yaml:"workerPoolSize" json:"workerPoolSize,omitempty"`
+	TaskChanBuffer       int      `yaml:"taskChanBuffer" json:"taskChanBuffer,omitempty"`
+	MaxBackoffMs         int      `yaml:"maxBackoffMs" json:"maxBackoffMs,omitempty"`
+	PublishTimeoutSec    int      `yaml:"publishTimeoutSec" json:"publishTimeoutSec,omitempty"`
+	KafkaSemaphore       int      `yaml:"kafkaSemaphore" json:"kafkaSemaphore,omitempty"`
+	BizPublishChanBuffer int      `yaml:"bizPublishChanBuffer" json:"bizPublishChanBuffer,omitempty"`
 }
 
 type Nebula struct {

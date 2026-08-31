@@ -66,6 +66,9 @@ kafka:
   # Business Workload 专用配置
   businessWorkloadTopic: business-workloads
   businessWorkloadGroup: mutong-business-workload
+  # Flow 专用配置（Beyla L4 network flow metrics）
+  flowTopic: mutong_flow_01
+  flowGroup: mutong_flow_v01
   workloadKinds:
     - Deployment
     - StatefulSet

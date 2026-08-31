@@ -392,6 +392,14 @@ func (s *TraceTopologySyncer) resolveCallerBusinessApp(rs *v1.ResourceSpans) (bu
 		zap.String("app_name", appName),
 		zap.String("namespace", namespace))
 
+	// 先按 owner 名反查 canonical 顶点（BLS 已用 label 建好），消除双身份
+	if ref, ok := s.lookupByOwnerName(appName, namespace); ok {
+		s.logger.Debug("CALLER_RESOLVE resolved via owner_name alias",
+			zap.String("owner_name", appName),
+			zap.String("canonical_app", ref.appName))
+		return ref, true
+	}
+
 	uid, ok := s.lookupOrInsertBusinessApp(appName, namespace)
 	if !ok {
 		s.logger.Debug("CALLER_RESOLVE lookupOrInsertBusinessApp failed",

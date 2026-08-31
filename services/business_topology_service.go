@@ -215,7 +215,7 @@ func (s *BusinessTopologyService) getResourceAppLabels(resourceUID string) (appN
 
 func (s *BusinessTopologyService) matchBusinessAppByName(appName, namespace string) interfaces.BusinessAppContext {
 	query := fmt.Sprintf(`
-		MATCH (a:BusinessApp) WHERE a.BusinessApp.app_name == %s AND a.BusinessApp.namespace == %s AND a.BusinessApp.is_deleted == false
+		MATCH (a:BusinessApp) WHERE a.BusinessApp.app_name == %s AND a.BusinessApp.namespace == %s
 		RETURN a.BusinessApp.uid as uid, a.BusinessApp.app_name as app_name, a.BusinessApp.namespace as namespace, a.BusinessApp.criticality as criticality, a.BusinessApp.environment as environment, a.BusinessApp.team as team, a.BusinessApp.business_unit as business_unit LIMIT 1`,
 		strconv.Quote(appName), strconv.Quote(namespace))
 	return s.queryBusinessAppByRawSQL(query)
@@ -257,7 +257,6 @@ func (s *BusinessTopologyService) queryBusinessApp(resourceUID string, hops int)
 }
 
 func (s *BusinessTopologyService) queryBusinessAppByRawSQL(query string) interfaces.BusinessAppContext {
-
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet.GetRowSize() == 0 {
 		s.logger.Debug("No BusinessApp found")

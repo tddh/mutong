@@ -515,20 +515,7 @@ func (s *TraceTopologySyncer) resolvePeerFromAddress(rawPeer string) (appName, n
 		return "", ""
 	}
 
-	parts := strings.SplitN(host, ".", 2)
-	if len(parts) == 0 || parts[0] == "" {
-		return "", ""
-	}
-	appName = parts[0]
-
-	if len(parts) > 1 {
-		dnsParts := strings.SplitN(parts[1], ".", 2)
-		if len(dnsParts) > 0 && dnsParts[0] != "" {
-			namespace = dnsParts[0]
-		}
-	}
-
-	return appName, namespace
+	return parseK8sFQDN(host)
 }
 
 func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace string) (string, bool) {

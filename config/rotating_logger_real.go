@@ -4,17 +4,16 @@
 package config
 
 import (
-	"go.uber.org/zap"
+	"github.com/agentine/sawmill/compat"
 	"go.uber.org/zap/zapcore"
-	lj "gopkg.in/natefinch/lumberjack.v2"
 )
 
-// newRotatingLogger creates a lumberjack-based writer wrapped for zap
+// newRotatingLogger creates a sawmill-based writer wrapped for zap
 func newRotatingLogger(filename string, maxSize int, maxAge int) (zapcore.WriteSyncer, error) {
 	if filename == "" {
 		return nil, nil
 	}
-	cfg := lj.Logger{
+	cfg := compat.Logger{
 		Filename: filename,
 		MaxSize:  maxSize,
 		MaxAge:   maxAge,

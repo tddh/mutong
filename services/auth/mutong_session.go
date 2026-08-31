@@ -3,16 +3,24 @@ package auth
 import (
 	"time"
 
-	"github.com/mohae/deepcopy"
+	"gitee.com/tddh/mutong/interfaces"
 	"github.com/ory/fosite"
 	foauth2 "github.com/ory/fosite/handler/oauth2"
 	fopenid "github.com/ory/fosite/handler/openid"
 	"github.com/ory/fosite/token/jwt"
+	"github.com/tiendc/go-deepcopy"
+	"go.uber.org/zap"
 )
 
 // MutongSession satisfies both JWTSessionContainer (for JWT access tokens) and
 // openid.Session (for OpenID Connect id_token support) by embedding
 // oauth2.JWTSession and adding IDToken fields.
+var sessionLogger interfaces.Logger
+
+func SetSessionLogger(l interfaces.Logger) {
+	sessionLogger = l
+}
+
 type MutongSession struct {
 	*foauth2.JWTSession
 	Claims  *jwt.IDTokenClaims
@@ -75,7 +83,16 @@ func (s *MutongSession) Clone() fosite.Session {
 	if s == nil {
 		return nil
 	}
-	return deepcopy.Copy(s).(fosite.Session)
+	clone := &MutongSession{}
+	if err := deepcopy.Copy(clone, s); err != nil {
+		if sessionLogger != nil {
+			sessionLogger.Error("MutongSession.Clone deepcopy failed, falling back to shallow copy", zap.Error(err))
+		}
+		clone.JWTSession = s.JWTSession
+		clone.Claims = s.Claims
+		clone.Headers = s.Headers
+	}
+	return clone
 }
 
 var (

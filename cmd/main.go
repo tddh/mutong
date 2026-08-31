@@ -86,6 +86,7 @@ func runApp(cmd *cobra.Command, args []string) {
 
 	cfg := initializeConfig(configPath)
 	logger := cfg.Logger
+	authsvc.SetSessionLogger(cfg.GetLogger())
 	pyroscopeServer(logger)
 
 	// 确保资源在退出时关闭

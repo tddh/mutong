@@ -2,13 +2,13 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"gitee.com/tddh/mutong/interfaces"
 	"github.com/allegro/bigcache/v3"
-	jsoniter "github.com/json-iterator/go"
 	"go.uber.org/zap"
 )
 
@@ -63,8 +63,8 @@ func (c *ResourceCache) Get(key string) (interface{}, bool) {
 	}
 
 	var entry CacheEntry
-	if err := jsoniter.Unmarshal(data, &entry); err != nil {
-		c.logger.Warn("Failed to unmarshal cache entry", zap.String("key", key))
+	if err := json.Unmarshal(data, &entry); err != nil {
+		c.logger.Warn("Failed to unmarshal cache entry", zap.String("key", key), zap.Error(err))
 		return nil, false
 	}
 
@@ -81,8 +81,9 @@ func (c *ResourceCache) Set(key string, data interface{}) error {
 		Timestamp: time.Now().Unix(),
 	}
 
-	jsonData, err := jsoniter.Marshal(entry)
+	jsonData, err := json.Marshal(entry)
 	if err != nil {
+		c.logger.Error("Failed to marshal cache entry", zap.String("key", key), zap.Error(err))
 		return fmt.Errorf("failed to marshal cache entry: %w", err)
 	}
 

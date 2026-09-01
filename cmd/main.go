@@ -864,6 +864,9 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		if diagEngine != nil {
 			retroSvc.WithHybridRetriever(diagEngine.GetHybridRetriever())
 		}
+		if k8sExec != nil {
+			retroSvc.WithExecutor(k8sExec)
+		}
 		// Wire retrospective generator to MCP server
 		if diagCtrl != nil && retroSvc != nil {
 			diagCtrl.SetRetrospectiveGenerator(func(ctx context.Context, fingerprint string) (string, error) {

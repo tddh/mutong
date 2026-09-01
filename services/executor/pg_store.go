@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	ex "gitee.com/tddh/mutong/models/executor"
@@ -69,6 +70,7 @@ type auditLogModel struct {
 	Reason       string
 	Risk         string
 	Result       string
+	Success      bool
 	Fingerprint  string `gorm:"index"`
 	AutoExecuted bool
 	ApprovedBy   string
@@ -95,7 +97,48 @@ func NewPostgresAuditStore(db *gorm.DB, table string) (AuditLogStore, error) {
 	if err := db.AutoMigrate(&auditLogModel{}); err != nil {
 		return nil, err
 	}
+	backfillSuccessFlag(db)
 	return &PostgresAuditStore{db: db, table: table}, nil
+}
+
+// backfillSuccessFlag 回填历史审计记录的 success 标志（旧版表无此列）。
+// 只匹配 Execute 已知的成功消息模式，幂等，不会把失败/待审批记录误标为成功。
+// 注意：AutoMigrate 为存量行填的是 NULL（不是 false），需先归一化，否则 "success = false" 匹配不到。
+func backfillSuccessFlag(db *gorm.DB) {
+	if err := db.Model(&auditLogModel{}).Where("success IS NULL").Update("success", false).Error; err != nil {
+		fmt.Printf("[executor] normalize null success flag failed: %v\n", err)
+	}
+
+	patterns := []string{
+		"pod restarted%",
+		"pod deleted",
+		"scaled deployment%",
+		"created HPA%",
+		"updated HPA%",
+		"updated ConfigMap%",
+		"updated Secret%",
+		"updated resource limits%",
+		"updated image for%",
+		"rollout restart triggered%",
+		"annotations updated",
+		"labels updated",
+	}
+	conds := make([]string, 0, len(patterns))
+	args := make([]interface{}, 0, len(patterns)+1)
+	args = append(args, false)
+	for _, p := range patterns {
+		conds = append(conds, "result LIKE ?")
+		args = append(args, p)
+	}
+	query := "success = ? AND (" + strings.Join(conds, " OR ") + ")"
+	tx := db.Model(&auditLogModel{}).Where(query, args...).Update("success", true)
+	if tx.Error != nil {
+		fmt.Printf("[executor] backfill audit success flag failed: %v\n", tx.Error)
+		return
+	}
+	if tx.RowsAffected > 0 {
+		fmt.Printf("[executor] backfill audit success flag: rows affected = %d\n", tx.RowsAffected)
+	}
 }
 
 func (s *PostgresAuditStore) Save(log ex.AuditLog) error {
@@ -110,6 +153,7 @@ func (s *PostgresAuditStore) Save(log ex.AuditLog) error {
 		Reason:       log.Plan.Reason,
 		Risk:         string(log.Plan.Risk),
 		Result:       log.Result.Message,
+		Success:      log.Result.Success,
 		Fingerprint:  log.Plan.Fingerprint,
 		AutoExecuted: log.AutoExecuted,
 		ApprovedBy:   log.ApprovedBy,
@@ -175,7 +219,7 @@ func (s *PostgresAuditStore) List(filters map[string]string) ([]ex.AuditLog, err
 	out := make([]ex.AuditLog, 0, len(rows))
 	for _, r := range rows {
 		plan := planFromRow(r)
-		res := ex.ExecutionResult{Message: r.Result, Timestamp: r.Timestamp}
+		res := ex.ExecutionResult{Message: r.Result, Success: r.Success, Timestamp: r.Timestamp}
 		a := ex.AuditLog{
 			ID:           fmt.Sprintf("audit-%d", r.ID),
 			Plan:         plan,
@@ -199,7 +243,7 @@ func (s *PostgresAuditStore) GetByID(id string) (*ex.AuditLog, error) {
 		return nil, err
 	}
 	plan := planFromRow(r)
-	res := ex.ExecutionResult{Message: r.Result, Timestamp: r.Timestamp}
+	res := ex.ExecutionResult{Message: r.Result, Success: r.Success, Timestamp: r.Timestamp}
 	a := ex.AuditLog{ID: fmt.Sprintf("audit-%d", r.ID), Plan: plan, Result: res, AutoExecuted: r.AutoExecuted, ApprovedBy: r.ApprovedBy, Timestamp: r.Timestamp}
 	return &a, nil
 }

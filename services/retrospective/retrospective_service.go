@@ -34,6 +34,7 @@ type Service struct {
 	llmProvider     interfaces.LLMProvider
 	diagCache       DiagnosisCache
 	hybridRetriever *diagnosis_svc.HybridRetriever
+	executor        interfaces.Executor
 }
 
 func NewService(logger interfaces.Logger, graphDB interfaces.GraphDB, alertStorage alert_interfaces.AlertProcessor, db *gorm.DB, llmProvider interfaces.LLMProvider, diagCache DiagnosisCache) *Service {
@@ -273,6 +274,8 @@ func (s *Service) GeneratePostmortem(ctx context.Context, fingerprint string) (*
 	if alert.ResourceType == "Pod" && alert.ResourceName != "" {
 		s.enrichWorkloadContext(report, alert.ResourceName, alert.Namespace)
 	}
+
+	s.enrichFromExecutionRecords(ctx, report, fingerprint)
 
 	if s.llmProvider != nil {
 		s.enrichWithLLM(report, alert, fingerprint)
@@ -569,6 +572,33 @@ func (s *Service) FormatReport(report *retrospective.PostmortemReport) string {
 		sb.WriteString(fmt.Sprintf("%s\n\n", report.Resolution.Final))
 	}
 
+	// === 自愈执行记录 ===
+	if len(report.ExecutionActions) > 0 {
+		sb.WriteString("## 🔧 自愈执行记录\n\n")
+		sb.WriteString("| 时间 | 动作 | 目标 | 风险 | 方式 | 结果 |\n|------|------|------|------|------|------|\n")
+		for _, e := range report.ExecutionActions {
+			mode := "待审批"
+			if e.Success {
+				if e.ApprovedBy != "" {
+					mode = "人工审批(" + e.ApprovedBy + ")"
+				} else if e.AutoExecuted {
+					mode = "自动执行"
+				}
+			} else if e.ApprovedBy != "" {
+				mode = "审批后拒绝"
+			}
+			status := "❌ 失败"
+			if e.Success {
+				status = "✅ 成功"
+			} else if strings.Contains(e.Message, "pending") || strings.Contains(e.Message, "approval") {
+				status = "⏳ 待审批"
+			}
+			sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n",
+				e.Timestamp.Format("01-02 15:04:05"), e.Action, e.Target, e.Risk, mode, status))
+		}
+		sb.WriteString("\n")
+	}
+
 	// === 经验教训 ===
 	if len(report.LessonsLearned) > 0 {
 		sb.WriteString("## 💡 经验教训\n\n")
@@ -753,6 +783,12 @@ func (s *Service) extractKnowledge(report *retrospective.PostmortemReport, finge
 
 func (s *Service) WithHybridRetriever(hr *diagnosis_svc.HybridRetriever) *Service {
 	s.hybridRetriever = hr
+	return s
+}
+
+// WithExecutor 注入自愈执行器，复盘报告将包含该告警的审批/执行审计记录
+func (s *Service) WithExecutor(exec interfaces.Executor) *Service {
+	s.executor = exec
 	return s
 }
 
@@ -1145,6 +1181,76 @@ func (s *Service) enrichFromDiagnosisCache(report *retrospective.PostmortemRepor
 	report.DiagnosisLogs = result.RecentLogs
 	report.ImpactAssessment = &result.Impact
 	report.RelatedAlerts = result.RelatedAlerts
+}
+
+// enrichFromExecutionRecords 把该告警的自愈执行审计（提议/审批/执行）写入复盘报告
+func (s *Service) enrichFromExecutionRecords(ctx context.Context, report *retrospective.PostmortemReport, fingerprint string) {
+	if s.executor == nil || fingerprint == "" {
+		return
+	}
+	qctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	logs, err := s.executor.GetAuditLogs(qctx, map[string]string{"fingerprint": fingerprint})
+	if err != nil {
+		s.logger.Warn("Failed to load execution audit for postmortem", zap.String("fingerprint", fingerprint), zap.Error(err))
+		return
+	}
+	if len(logs) == 0 {
+		return
+	}
+
+	var successActions []string
+	for _, l := range logs {
+		rec := retrospective.ExecutionActionRecord{
+			Timestamp:    l.Timestamp,
+			Action:       string(l.Plan.Action),
+			Target:       l.Plan.Target,
+			Risk:         string(l.Plan.Risk),
+			ApprovedBy:   l.ApprovedBy,
+			AutoExecuted: l.AutoExecuted,
+			Success:      l.Result.Success,
+			Message:      l.Result.Message,
+			Reason:       l.Plan.Reason,
+		}
+		report.ExecutionActions = append(report.ExecutionActions, rec)
+
+		// 时间线事件：提议/审批/执行各归其位
+		eventType := "remediation_proposed"
+		desc := fmt.Sprintf("自愈提议: %s → %s（待审批）", l.Plan.Action, l.Plan.Target)
+		if l.Result.Success {
+			eventType = "remediation_executed"
+			if l.ApprovedBy != "" {
+				desc = fmt.Sprintf("人工审批并执行成功: %s → %s（审批人: %s）", l.Plan.Action, l.Plan.Target, l.ApprovedBy)
+			} else if l.AutoExecuted {
+				desc = fmt.Sprintf("自动模式执行成功: %s → %s", l.Plan.Action, l.Plan.Target)
+			} else {
+				desc = fmt.Sprintf("执行成功: %s → %s", l.Plan.Action, l.Plan.Target)
+			}
+			successActions = append(successActions, fmt.Sprintf("%s → %s", l.Plan.Action, l.Plan.Target))
+		} else if l.ApprovedBy != "" {
+			eventType = "remediation_rejected"
+			desc = fmt.Sprintf("审批后执行被护栏拒绝: %s → %s（%s）", l.Plan.Action, l.Plan.Target, l.Result.Message)
+		}
+		report.Timeline = append(report.Timeline, retrospective.TimelineEvent{
+			Timestamp:   l.Timestamp,
+			EventType:   eventType,
+			Description: desc,
+			Source:      "executor",
+			Severity:    "info",
+			Resource:    l.Plan.Target,
+		})
+	}
+
+	// 按时间排序，保持时间线有序
+	sort.Slice(report.Timeline, func(i, j int) bool {
+		return report.Timeline[i].Timestamp.Before(report.Timeline[j].Timestamp)
+	})
+
+	// 有成功执行的修复动作时，补充到解决措施
+	if len(successActions) > 0 {
+		report.Resolution.Final = fmt.Sprintf("%s\n\n已通过自愈执行完成修复: %s", report.Resolution.Final, strings.Join(successActions, "; "))
+	}
 }
 
 func (s *Service) enrichWithLLM(report *retrospective.PostmortemReport, alert *alert_models.ProcessedAlert, fingerprint string) {

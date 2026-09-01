@@ -30,6 +30,19 @@ type CausalChain struct {
 	Impact    string       `json:"impact"`
 }
 
+// ExecutionActionRecord 复盘报告中引用的自愈执行审计记录
+type ExecutionActionRecord struct {
+	Timestamp    time.Time `json:"timestamp"`
+	Action       string    `json:"action"`
+	Target       string    `json:"target"`
+	Risk         string    `json:"risk,omitempty"`
+	ApprovedBy   string    `json:"approved_by,omitempty"`   // 审批人；空表示未审批（待审批或自动执行）
+	AutoExecuted bool      `json:"auto_executed"`           // 是否自动模式执行
+	Success      bool      `json:"success"`
+	Message      string    `json:"message,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
+}
+
 // EditableField 可编辑字段，保留 AI 原始值和人工修正值
 type EditableField struct {
 	AIGenerated string `json:"ai_generated"` // LLM 原始输出（只读）
@@ -73,6 +86,9 @@ type PostmortemReport struct {
 	WhatWentWell        []string `json:"what_went_well,omitempty"`
 	WhatWentWrong       []string `json:"what_went_wrong,omitempty"`
 	ContributingFactors []string `json:"contributing_factors,omitempty"`
+
+	// 自愈执行记录（审批/执行的审计闭环）
+	ExecutionActions []ExecutionActionRecord `json:"execution_actions,omitempty"`
 }
 
 type BusinessReportContext struct {

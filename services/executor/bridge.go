@@ -108,6 +108,7 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 		Confidence:   root.Confidence,
 		Risk:         exModel.RiskLevel(rem.RiskLevel),
 		ApprovedBy:   "",
+		Fingerprint:  result.Request.Fingerprint,
 		CreatedAt:    time.Now(),
 	}
 

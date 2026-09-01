@@ -14,4 +14,6 @@ type Executor interface {
 	IsAutoMode() bool
 	// GetAuditLogs retrieves audit logs filtered by provided criteria
 	GetAuditLogs(ctx context.Context, filters map[string]string) ([]ex.AuditLog, error)
+	// RecordAudit writes an audit log entry without executing, used to record plans generated but not executed
+	RecordAudit(ctx context.Context, log ex.AuditLog) error
 }

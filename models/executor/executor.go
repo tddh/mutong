@@ -49,8 +49,9 @@ type ExecutionPlan struct {
 	Reason        string            `json:"reason"` // AI diagnosis conclusion
 	Confidence    float64           `json:"confidence"`
 	Risk          RiskLevel         `json:"risk"`
-	ApprovedBy    string            `json:"approvedBy"` // empty if auto, username if approved
-	Replicas      int32             `json:"replicas"`   // desired number of replicas for deployments
+	ApprovedBy    string            `json:"approvedBy"`  // empty if auto, username if approved
+	Fingerprint   string            `json:"fingerprint"` // alert fingerprint this plan was derived from
+	Replicas      int32             `json:"replicas"`    // desired number of replicas for deployments
 	MinReplicas   int32             `json:"minReplicas"`
 	MaxReplicas   int32             `json:"maxReplicas"`
 	TargetCPU     int32             `json:"targetCpu"`

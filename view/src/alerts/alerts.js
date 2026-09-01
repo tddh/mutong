@@ -169,6 +169,7 @@ createApp({
     const diagnosisLoading = ref(false)
     const diagnosisError = ref(null)
     const rerunningDiagnosis = ref(false)
+    const executionRecords = ref(null)
 
     // 业务过滤器状态
     const businessFilterApp = ref('')
@@ -185,6 +186,7 @@ createApp({
       diagnosisResult.value = null
       diagnosisLoading.value = false
       diagnosisError.value = null
+      executionRecords.value = null
     }
 
     const closeDrawer = () => {
@@ -192,12 +194,16 @@ createApp({
       diagnosisResult.value = null
       diagnosisLoading.value = false
       diagnosisError.value = null
+      executionRecords.value = null
     }
 
     const switchTab = (tab) => {
       activeTab.value = tab
       if (tab === 'diagnosis' && !diagnosisResult.value && !diagnosisLoading.value) {
         runDiagnosis()
+      }
+      if (tab === 'diagnosis') {
+        loadExecutionRecords()
       }
     }
 
@@ -233,6 +239,19 @@ createApp({
         diagnosisError.value = e.message || '重新诊断执行失败'
       } finally {
         rerunningDiagnosis.value = false
+      }
+    }
+
+    const loadExecutionRecords = async () => {
+      const fp = getAlertFingerprint(selectedAlert.value)
+      if (!fp) {
+        executionRecords.value = []
+        return
+      }
+      try {
+        executionRecords.value = await API.executor.audit({ fingerprint: fp })
+      } catch (e) {
+        executionRecords.value = []
       }
     }
 
@@ -291,6 +310,7 @@ createApp({
       diagnosisLoading,
       diagnosisError,
       rerunningDiagnosis,
+      executionRecords,
       selectAlert,
       closeDrawer,
       switchTab,
@@ -1970,6 +1990,42 @@ createApp({
           ],
         ),
       )
+      if (this.executionRecords && this.executionRecords.length > 0) {
+        const execCards = this.executionRecords.map((rec, idx) => {
+          const p = rec.plan || {}
+          const r = rec.result || {}
+          const rOk = r.success
+          const rAuto = rec.autoExecuted
+          const rStatus = rAuto ? (rOk ? '已自动执行成功' : '已自动执行失败') : (rOk ? '已执行' : '待审批/未执行')
+          const rColor = rOk ? '#52c41a' : (rAuto ? '#ff4d4f' : '#faad14')
+          const target = p.target || (p.namespace ? p.namespace + '/' + p.resourceName : p.resourceName)
+          const actionText = (p.action || '').replace(/_/g, ' ')
+          const riskText = p.risk || ''
+          const opText = rAuto ? '自动执行' : (rec.approvedBy ? '审批人: ' + rec.approvedBy : '未自动执行')
+          return h('div', {
+            key: idx,
+            style: {
+              padding: '12px',
+              background: '#fff',
+              border: '1px solid var(--border-color)',
+              borderRadius: '6px',
+              marginBottom: idx < this.executionRecords.length - 1 ? '8px' : 0,
+              opacity: idx === 0 ? 1 : 0.75,
+            },
+          }, [
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' } }, [
+              h('span', { style: { fontWeight: 600, fontSize: '13px' } }, actionText),
+              h('span', { style: { fontSize: '12px', color: rColor, fontWeight: 600 } }, rStatus),
+            ]),
+            h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' } },
+              '目标: ' + target + (riskText ? ' · 风险: ' + riskText : '')),
+            h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' } }, opText),
+            r.message ? h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)' } }, '结果: ' + r.message) : null,
+            h('div', { style: { fontSize: '11px', color: '#bbb', marginTop: '4px' } }, rec.timestamp ? new Date(rec.timestamp).toLocaleString() : ''),
+          ])
+        })
+        sections.push(sectionBlock('⚙️ 执行记录', h('div', null, execCards)))
+      }
       return h('div', null, sections)
     },
   },

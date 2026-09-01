@@ -335,6 +335,11 @@ func (e *K8sExecutor) appendAuditLog(a ex.AuditLog) {
 	}
 }
 
+func (e *K8sExecutor) RecordAudit(_ context.Context, log ex.AuditLog) error {
+	e.appendAuditLog(log)
+	return nil
+}
+
 func (e *K8sExecutor) restartPod(ctx context.Context, namespace, name string) error {
 	if namespace == "" {
 		namespace = e.cfg.GetExecutorConf().DefaultNamespace

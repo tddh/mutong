@@ -842,6 +842,8 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			}
 			if autoDiag != nil {
 				aSvc.SetAutoDiagnosisPipeline(autoDiag)
+				autoDiag.SetDiagnosisResultStore(chatManager.GetRedisStorage(), chatManager.GetPostgresStorage(), cacheTTL)
+				go autoDiag.Start(context.Background())
 			}
 		}
 

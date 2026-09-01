@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"strings"
 	"time"
 
 	"gitee.com/tddh/mutong/models/diagnosis"
@@ -173,14 +174,8 @@ func ExtractK8sLabels(labels map[string]string) AlertLabels {
 		resourceType = labels["kubernetes_kind"]
 	}
 	resourceName := labels["name"]
-	if resourceName == "" {
-		resourceName = labels["pod"]
-	}
-	if resourceName == "" {
-		resourceName = labels["node"]
-	}
-	if resourceName == "" {
-		resourceName = labels["service"]
+	if resourceName == "" && resourceType != "" {
+		resourceName = labels[strings.ToLower(resourceType)]
 	}
 
 	return AlertLabels{

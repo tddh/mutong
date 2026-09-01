@@ -69,6 +69,10 @@ export const API = {
   },
   executor: {
     status: () => request('/api/v1/executor/status').catch(() => null),
+    audit: (params) => {
+      const q = new URLSearchParams(params).toString()
+      return request(`/api/v1/executor/audit${q ? '?' + q : ''}`).catch(() => [])
+    },
   },
   inspection: {
     execute: () => request('/api/v1/inspection/execute', { method: 'POST' }),

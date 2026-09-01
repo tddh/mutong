@@ -100,6 +100,9 @@ func (c *ExecutorController) status(ctx *gin.Context) {
 // auditLogs returns audit logs with optional filters
 func (c *ExecutorController) auditLogs(ctx *gin.Context) {
 	filters := map[string]string{}
+	if v := ctx.Query("fingerprint"); v != "" {
+		filters["fingerprint"] = v
+	}
 	if v := ctx.Query("action"); v != "" {
 		filters["action"] = v
 	}

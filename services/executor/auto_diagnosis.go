@@ -5,27 +5,32 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.uber.org/zap"
 
 	"gitee.com/tddh/mutong/interfaces"
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	diagnosisPkg "gitee.com/tddh/mutong/models/diagnosis"
+	ex "gitee.com/tddh/mutong/models/executor"
 	diagEngine "gitee.com/tddh/mutong/services/diagnosis"
 )
 
 // AutoDiagnosisPipeline watches for processed alerts and triggers diagnosis -> remediation
 type AutoDiagnosisPipeline struct {
-	logger     interfaces.Logger
-	engine     *diagEngine.Engine
-	bridge     *RemediationBridge
-	executor   interfaces.Executor
-	executorMu sync.RWMutex
-	alertQueue chan *alert_models.ProcessedAlert
-	enabled    bool
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
-	stopped    atomic.Bool
+	logger       interfaces.Logger
+	engine       *diagEngine.Engine
+	bridge       *RemediationBridge
+	executor     interfaces.Executor
+	executorMu   sync.RWMutex
+	alertQueue   chan *alert_models.ProcessedAlert
+	enabled      bool
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	stopped      atomic.Bool
+	redisStorage *diagEngine.RedisStorage
+	pgStorage    *diagEngine.PostgresStorage
+	cacheTTL     time.Duration
 }
 
 // NewAutoDiagnosisPipeline creates a new auto-diagnosis pipeline instance
@@ -45,6 +50,13 @@ func (p *AutoDiagnosisPipeline) SetExecutor(executor interfaces.Executor) {
 	p.executorMu.Lock()
 	defer p.executorMu.Unlock()
 	p.executor = executor
+}
+
+// SetDiagnosisResultStore 注入诊断结果存储，让自动诊断结果可被前端复用（否则点开告警会现场重新诊断）
+func (p *AutoDiagnosisPipeline) SetDiagnosisResultStore(redis *diagEngine.RedisStorage, pg *diagEngine.PostgresStorage, cacheTTL time.Duration) {
+	p.redisStorage = redis
+	p.pgStorage = pg
+	p.cacheTTL = cacheTTL
 }
 
 func (p *AutoDiagnosisPipeline) getExecutor() interfaces.Executor {
@@ -162,6 +174,17 @@ func (p *AutoDiagnosisPipeline) processAlert(ctx context.Context, alert *alert_m
 			return
 		}
 
+		if p.redisStorage != nil {
+			if err := p.redisStorage.CacheDiagnosisResult(ctx, alert.Fingerprint, res, p.cacheTTL); err != nil && p.logger != nil {
+				p.logger.Warn("Auto-diagnosis failed to cache diagnosis result", zap.String("fingerprint", alert.Fingerprint), zap.Error(err))
+			}
+		}
+		if p.pgStorage != nil {
+			if err := p.pgStorage.SaveDiagnosisResult(ctx, alert.Fingerprint, res, ""); err != nil && p.logger != nil {
+				p.logger.Warn("Auto-diagnosis failed to persist diagnosis result", zap.String("fingerprint", alert.Fingerprint), zap.Error(err))
+			}
+		}
+
 		exec := p.getExecutor()
 		autoMode := false
 		if exec != nil {
@@ -171,6 +194,7 @@ func (p *AutoDiagnosisPipeline) processAlert(ctx context.Context, alert *alert_m
 		if plan == nil {
 			return
 		}
+		plan.Fingerprint = alert.Fingerprint
 		if shouldAuto {
 			if exec != nil {
 				if _, err := p.bridge.ExecuteRemediation(ctx, plan, exec); err != nil {
@@ -184,8 +208,22 @@ func (p *AutoDiagnosisPipeline) processAlert(ctx context.Context, alert *alert_m
 				}
 			}
 		} else {
-			if p.logger != nil {
-				p.logger.Info("Auto-diagnosis produced remediation plan but manual approval required", zap.String("plan_id", plan.ID))
+			if exec != nil {
+				audit := ex.AuditLog{
+					ID:           generateAuditID(),
+					Plan:         *plan,
+					Result:       ex.ExecutionResult{Success: false, Message: "pending approval (not auto-executed)", Timestamp: time.Now()},
+					AutoExecuted: false,
+					ApprovedBy:   "",
+					Timestamp:    time.Now(),
+				}
+				if err := exec.RecordAudit(ctx, audit); err != nil && p.logger != nil {
+					p.logger.Warn("Auto-diagnosis failed to record pending plan", zap.String("plan_id", plan.ID), zap.Error(err))
+				}
+			} else {
+				if p.logger != nil {
+					p.logger.Info("Auto-diagnosis produced remediation plan but manual approval required", zap.String("plan_id", plan.ID))
+				}
 			}
 		}
 	}()

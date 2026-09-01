@@ -20,6 +20,8 @@ func (m *MockExecutor) GetAuditLogs(_ context.Context, _ map[string]string) ([]e
 	return []ex.AuditLog{}, nil
 }
 
+func (m *MockExecutor) RecordAudit(_ context.Context, _ ex.AuditLog) error { return nil }
+
 func (m *MockExecutor) IsAutoMode() bool   { return false }
 func (m *MockExecutor) SetAutoMode(_ bool) {}
 
@@ -43,7 +45,12 @@ func TestRemediationBridge_CreatePlanFromDiagnosis(t *testing.T) {
 	b := NewRemediationBridge()
 	root := diagModel.RootCause{ResourceType: "Pod", Namespace: "default", ResourceName: "pod-1", Confidence: 0.9}
 	rem := diagModel.RemediationSuggestion{Action: "Restart", AutoFixable: true, RiskLevel: "low"}
-	result := &diagModel.DiagnosisResult{Summary: "summary", RootCauses: []diagModel.RootCause{root}, Remediations: []diagModel.RemediationSuggestion{rem}}
+	result := &diagModel.DiagnosisResult{
+		Summary:      "summary",
+		Request:      diagModel.DiagnosisRequest{Fingerprint: "fp-test-123"},
+		RootCauses:   []diagModel.RootCause{root},
+		Remediations: []diagModel.RemediationSuggestion{rem},
+	}
 	plan, shouldAuto := b.CreatePlanFromDiagnosis(result, true)
 	if plan == nil {
 		t.Fatalf("expected a plan to be created from diagnosis")
@@ -53,6 +60,9 @@ func TestRemediationBridge_CreatePlanFromDiagnosis(t *testing.T) {
 	}
 	if plan.Action != ex.ActionRestartPod {
 		t.Fatalf("expected plan action to be RestartPod, got %v", plan.Action)
+	}
+	if plan.Fingerprint != "fp-test-123" {
+		t.Fatalf("expected plan fingerprint to be fp-test-123, got %q", plan.Fingerprint)
 	}
 }
 

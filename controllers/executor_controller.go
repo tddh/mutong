@@ -1,8 +1,12 @@
 package controllers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -38,6 +42,7 @@ func (c *ExecutorController) RegisterRoutes(app *gin.Engine) {
 	api.POST("/execute", c.execute)
 	api.POST("/toggle", c.toggleAutoMode)
 	api.POST("/diagnose-and-execute", c.diagnoseAndExecute)
+	api.POST("/audit/:id/approve", c.approveAudit)
 }
 
 // requireAdminKey checks for admin-level authorization for dangerous operations.
@@ -71,6 +76,68 @@ func (c *ExecutorController) execute(ctx *gin.Context) {
 	if err != nil {
 		c.logger.Error("Executor execution failed", zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, res)
+}
+
+// approveAudit 批准某条待审批的执行计划并立即执行
+// POST /api/v1/executor/audit/:id/approve
+func (c *ExecutorController) approveAudit(ctx *gin.Context) {
+	if !c.requireAdminKey(ctx) {
+		return
+	}
+	id := ctx.Param("id")
+	if id == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "audit id is required"})
+		return
+	}
+	// 审计列表返回的 ID 形如 "audit-<dbid>"，底层按数字主键查询
+	numID, err := strconv.Atoi(strings.TrimPrefix(id, "audit-"))
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid audit id: " + id})
+		return
+	}
+	auditLog, err := c.exec.GetAuditLogByID(strconv.Itoa(numID))
+	if err != nil {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "audit log not found: " + id})
+		return
+	}
+	if auditLog.Result.Success {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "该计划已执行成功，无需审批"})
+		return
+	}
+	if auditLog.ApprovedBy != "" {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "该计划已被审批: " + auditLog.ApprovedBy})
+		return
+	}
+
+	approver := ctx.GetString("username")
+	if approver == "" {
+		approver = GetUserUUID(ctx)
+	}
+	if approver == "" {
+		if uid, ok := GetUserID(ctx); ok {
+			approver = fmt.Sprintf("user-%d", uid)
+		} else {
+			approver = "unknown"
+		}
+	}
+
+	plan := auditLog.Plan
+	plan.ApprovedBy = approver
+	c.logger.Info("Execution plan approved",
+		zap.String("audit_id", id),
+		zap.String("plan_id", plan.ID),
+		zap.String("action", string(plan.Action)),
+		zap.String("target", plan.Target),
+		zap.String("approved_by", approver))
+
+	res, execErr := c.exec.Execute(ctx.Request.Context(), plan)
+	if execErr != nil {
+		// 执行层业务拒绝（护栏、K8s 拒绝等）：作为执行结果返回，不是接口错误
+		c.logger.Warn("Approved plan execution rejected", zap.Error(execErr), zap.String("plan_id", plan.ID))
+		ctx.JSON(http.StatusOK, exModel.ExecutionResult{Success: false, Message: execErr.Error(), Timestamp: time.Now()})
 		return
 	}
 	ctx.JSON(http.StatusOK, res)

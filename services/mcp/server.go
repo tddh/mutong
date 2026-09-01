@@ -46,6 +46,8 @@ type Server struct {
 	inspectionSvc   interfaces.InspectionProcessor
 	informerGetter  func() dynamicinformer.DynamicSharedInformerFactory
 	retroGen        RetroGenerator
+	executor        interfaces.Executor
+	diagReader      DiagnosisResultReader
 }
 
 type ToolHandler func(ctx context.Context, args map[string]string) (string, error)
@@ -137,7 +139,7 @@ func (s *Server) ExecuteTool(ctx context.Context, name string, args map[string]s
 }
 
 func (s *Server) ListTools() []diagnosis.ToolDefinition {
-	return []diagnosis.ToolDefinition{
+	defs := []diagnosis.ToolDefinition{
 		{
 			Name:        "query_topology",
 			Description: "从 Nebula Graph 查询 K8s 资源拓扑关系，查找资源间的上下游依赖、服务关联。用于分析资源间依赖关系。",
@@ -329,6 +331,10 @@ func (s *Server) ListTools() []diagnosis.ToolDefinition {
 			},
 		},
 	}
+	if s.executor != nil {
+		defs = append(defs, execToolDefs()...)
+	}
+	return defs
 }
 
 func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string) (string, error) {

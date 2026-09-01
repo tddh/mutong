@@ -165,6 +165,10 @@ func (s *AlertSuppressor) checkTopologySuppression(a *alert_models.EnrichedAlert
 		parent := path[i]
 		parentAlerts := s.getParentAlerts(parent.Type, parent.Name)
 		for _, parentAlert := range parentAlerts {
+			// 跳过自身：告警不应抑制自己（自身已先登记进活跃表，按节点匹配会命中自己）
+			if parentAlert.Fingerprint == a.Fingerprint {
+				continue
+			}
 			if parentAlert.Status != "firing" {
 				continue
 			}
@@ -260,8 +264,13 @@ func (s *AlertSuppressor) checkCausalSuppression(a *alert_models.EnrichedAlert) 
 	defer s.indexMu.RUnlock()
 	for _, ds := range a.BusinessCalls.Downstreams {
 		key := ds.AppName + "|" + a.BusinessContext.Namespace
-		if fps, ok := s.bizAppAlertIndex[key]; ok && len(fps) > 0 {
-			return true, fmt.Sprintf("causal: downstream %s is firing", ds.AppName)
+		if fps, ok := s.bizAppAlertIndex[key]; ok {
+			for fp := range fps {
+				// 跳过自身：自身告警已先登记进索引，下游包含自身应用时不应自我抑制
+				if fp != a.Fingerprint {
+					return true, fmt.Sprintf("causal: downstream %s is firing", ds.AppName)
+				}
+			}
 		}
 	}
 	return false, ""

@@ -216,10 +216,11 @@ const App = {
         // 增量渲染：启动 30ms 定时刷新
         tokenBuffer.length = 0
 
-        // 分层超时（参考 opencode 配置）
-        const FETCH_TIMEOUT = 300000 // 总超时 300s（opencode 默认）
-        const TTFT_TIMEOUT = 15000 // 首 token 超时 15s
-        const IDLE_TIMEOUT = 60000 // 空闲超时 60s（opencode chunkTimeout 默认 30s，streamIdle 60s）
+        // 分层超时：只保留总超时。首 token/空闲超时已禁用——
+        // 首步 LLM 思考可超过 60s，且传输链路可能攒批到达，激进超时会误掐断正常请求
+        const FETCH_TIMEOUT = 300000 // 总超时 300s
+        const TTFT_TIMEOUT = 0 // 首 token 超时：禁用
+        const IDLE_TIMEOUT = 0 // 空闲超时：禁用
 
         const controller = new AbortController()
         const fetchTimeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
@@ -241,16 +242,19 @@ const App = {
         const decoder = new TextDecoder()
         let buffer = ''
 
-        // 启动 TTFT 超时
-        ttftTimer = setTimeout(() => {
-          if (!firstTokenReceived) {
-            controller.abort()
-          }
-        }, TTFT_TIMEOUT)
+        // 启动 TTFT 超时（禁用时为 0，不启动）
+        if (TTFT_TIMEOUT > 0) {
+          ttftTimer = setTimeout(() => {
+            if (!firstTokenReceived) {
+              controller.abort()
+            }
+          }, TTFT_TIMEOUT)
+        }
 
         let lastChunkTime = Date.now()
 
         const resetIdleTimer = () => {
+          if (IDLE_TIMEOUT <= 0) return
           if (idleTimer) clearTimeout(idleTimer)
           idleTimer = setTimeout(() => {
             controller.abort()
@@ -274,6 +278,13 @@ const App = {
             try {
               const event = JSON.parse(line)
               switch (event.type) {
+                case 'keepalive':
+                  // 服务端保活事件：视为连接活跃，取消首 token 超时（空闲计时已由 chunk 到达重置）
+                  if (!firstTokenReceived && ttftTimer) {
+                    clearTimeout(ttftTimer)
+                    ttftTimer = null
+                  }
+                  break
                 case 'token':
                 case 'stream_chunk':
                   if (!firstTokenReceived) {

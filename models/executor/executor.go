@@ -28,6 +28,8 @@ const (
 	ActionUpdateAnnotations ActionType = "update_annotations"
 	// ActionUpdateLabels patches resource labels
 	ActionUpdateLabels ActionType = "update_labels"
+	// ActionRolloutRestart triggers a rolling restart of a Deployment via pod template annotation
+	ActionRolloutRestart ActionType = "rollout_restart"
 )
 
 // RiskLevel defines execution risk

@@ -23,8 +23,8 @@ func NewKnowledgeBase() *KnowledgeBase {
 				ResourceType: "Pod",
 				Keywords:     []string{"memory", "OOMKilled"},
 				Suggestion: diagnosis.RemediationSuggestion{
-					Action:      "增加内存限制",
-					Description: "Pod 因 OOMKilled 被终止。增加内存 requests/limits 或优化应用内存使用。",
+					Action:      "restart_pod",
+					Description: "Pod 因 OOMKilled 被终止。短期可安全重启恢复；根治需增加内存 requests/limits 或优化应用内存使用。",
 					Steps: []string{
 						"检查当前内存使用: kubectl top pod <pod> -n <namespace>",
 						"在 Deployment 配置中增加内存 limit",
@@ -39,8 +39,8 @@ func NewKnowledgeBase() *KnowledgeBase {
 				ResourceType: "Pod",
 				Keywords:     []string{"CPU", "throttling"},
 				Suggestion: diagnosis.RemediationSuggestion{
-					Action:      "调整 CPU 限制",
-					Description: "Pod CPU 被限流。考虑增加 CPU limits 或优化 CPU 密集型操作。",
+					Action:      "restart_pod",
+					Description: "Pod CPU 被限流。短期可安全重启；根治考虑增加 CPU limits 或优化 CPU 密集型操作。",
 					Steps: []string{
 						"检查 CPU 使用: kubectl top pod <pod> -n <namespace>",
 						"在 Deployment 配置中增加 CPU limit",
@@ -113,7 +113,7 @@ func NewKnowledgeBase() *KnowledgeBase {
 						"考虑为集群增加节点容量",
 					},
 					RiskLevel:   "medium",
-					AutoFixable: true,
+					AutoFixable: false,
 				},
 			},
 			{

@@ -62,6 +62,11 @@ func (c *DiagnosisController) SetExternalSearch(tavily *search.TavilyClient, git
 	c.mcpSrv.WithExternalSearch(tavily, github, sanitizer, auditFn)
 }
 
+// SetSelfHealing 注入自愈执行器与诊断结果读取器，启用执行类 MCP 工具（安全组）
+func (c *DiagnosisController) SetSelfHealing(exec interfaces.Executor, reader mcp.DiagnosisResultReader) {
+	c.mcpSrv.WithSelfHealing(exec, reader)
+}
+
 func (c *DiagnosisController) sseWriteLine(w http.ResponseWriter, flusher http.Flusher) func(string) {
 	return func(line string) {
 		fmt.Fprint(w, line+"\n")
@@ -413,6 +418,15 @@ func (c *DiagnosisController) streamLLMResponse(session *diagnosis_svc.ChatSessi
 - 用户要求查看日志时，优先使用 get_pod_logs 或 get_pod_logs_es
 - 诊断工具：run_diagnosis（运行AI诊断）
 - 外部搜索：search_knowledge_base（Tavily全网搜索，排查方法/最佳实践/技术文档）和 search_github_issues（GitHub Issues搜索，已知Bug/修复方案/社区讨论）。遇到陌生错误、不熟悉的组件、需要参考外部资料时主动使用
+
+## 执行类工具（自愈提议）规则
+- 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
+- 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
+- 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
+- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- 未经用户同意或未明确根因时，不要主动调用执行类工具
 
 ## 回答要求
 - 基于查询结果给出具体分析，不要泛泛而谈
@@ -811,6 +825,15 @@ func (c *DiagnosisController) askChat(ginCtx *gin.Context) {
 - 用户要求查看日志时，优先使用 get_pod_logs 或 get_pod_logs_es
 - 诊断工具：run_diagnosis（运行AI诊断）
 
+## 执行类工具（自愈提议）规则
+- 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
+- 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
+- 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
+- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- 未经用户同意或未明确根因时，不要主动调用执行类工具
+
 ## 回答要求
 - 基于查询结果给出具体分析，不要泛泛而谈
 - 用中文回复`
@@ -1009,6 +1032,15 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 - 用户要求查看日志时，优先使用 get_pod_logs 或 get_pod_logs_es
 - 诊断工具：run_diagnosis（运行AI诊断）
 
+## 执行类工具（自愈提议）规则
+- 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
+- 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
+- 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
+- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- 未经用户同意或未明确根因时，不要主动调用执行类工具
+
 ## 回答要求
 - 基于查询结果给出具体分析，不要泛泛而谈
 - 用中文回复`
@@ -1048,7 +1080,13 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 	fmt.Fprint(ginCtx.Writer, ":\n\n")
 	flusher.Flush()
 
-	writeLine := c.sseWriteLine(ginCtx.Writer, flusher)
+	writeLineRaw := c.sseWriteLine(ginCtx.Writer, flusher)
+	var writeMu sync.Mutex
+	writeLine := func(line string) {
+		writeMu.Lock()
+		writeLineRaw(line)
+		writeMu.Unlock()
+	}
 
 	allToolDefsAndHandlers := c.mcpSrv.GetEinoToolDefsAndHandlers()
 	einoTools := diagnosis_svc.ConvertToEinoTools(allToolDefsAndHandlers, c.logger)
@@ -1096,6 +1134,24 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 	toolCallCount := 0
 	startTime := time.Now()
 	var assistantText strings.Builder
+
+	// 保活：首步 LLM 可能静默 1 分钟以上，前端有 15s 首 token / 60s 空闲超时会误断连。
+	// 启动即发、每 5s 发一次（远小于两个超时阈值），前端把 keepalive 视为连接活跃
+	heartbeatDone := make(chan struct{})
+	go func() {
+		writeLine(`{"type":"keepalive"}`)
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatDone:
+				return
+			case <-ticker.C:
+				writeLine(`{"type":"keepalive"}`)
+			}
+		}
+	}()
+
 	err := agent.RunStreamWithMessages(outerCtx, history, sysMsg, func(chunk string, toolCall *diagnosis_svc.ToolCallInfo) error {
 		if toolCall != nil {
 			if toolCall.Name == "" {
@@ -1118,6 +1174,7 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 		}
 		return nil
 	})
+	close(heartbeatDone)
 	if err != nil {
 		c.logger.Error(
 			"Eino agent streaming failed",

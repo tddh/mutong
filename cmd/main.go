@@ -818,6 +818,13 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			execCtrl.SetDiagnosisEngine(diagEngine)
 		}
 
+		// Wire self-healing execution tools (safe group) into the MCP server
+		if k8sExec != nil && redisStorage != nil {
+			diagCtrl.SetSelfHealing(k8sExec, redisStorage)
+			logger.Info("Self-healing execution tools enabled",
+				zap.Bool("autoMode", k8sExec.IsAutoMode()))
+		}
+
 		// Wire auto-diagnosis pipeline if executor is enabled and we have an AlertService
 		if aSvc, ok := alertProcessor.(*alert.AlertService); ok {
 			if redisStorage != nil {

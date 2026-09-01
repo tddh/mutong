@@ -255,6 +255,38 @@ createApp({
       }
     }
 
+    const approvingId = ref('')
+    const approveExecution = async (rec) => {
+      const p = rec.plan || {}
+      const target = p.target || (p.namespace ? p.namespace + '/' + p.resourceName : p.resourceName)
+      const actionText = (p.action || '').replace(/_/g, ' ')
+      const detailLines = []
+      if (p.image) detailLines.push('镜像: ' + p.image)
+      if (p.containerName) detailLines.push('容器: ' + p.containerName)
+      if (p.configData && Object.keys(p.configData).length) {
+        detailLines.push('资源: ' + Object.entries(p.configData).map(([k, v]) => k + '=' + v).join(', '))
+      }
+      if (p.action === 'scale_deployment' && (p.replicas || p.replicas === 0)) detailLines.push('副本数: ' + p.replicas)
+      const detail = detailLines.length ? '\n' + detailLines.join('\n') : ''
+      if (!window.confirm(`确认批准并执行？\n动作: ${actionText}\n目标: ${target}\n风险: ${p.risk || '-'}${detail}`)) {
+        return
+      }
+      approvingId.value = rec.id
+      try {
+        const res = await API.executor.approve(rec.id)
+        if (res && res.success) {
+          window.alert('执行成功: ' + (res.message || ''))
+        } else {
+          window.alert('执行失败: ' + ((res && res.message) || '未知错误'))
+        }
+      } catch (e) {
+        window.alert('审批请求失败: ' + e.message)
+      } finally {
+        approvingId.value = ''
+        await loadExecutionRecords()
+      }
+    }
+
     onMounted(async () => {
       try {
         const r = await API.alerts.list({ status: 'firing' })
@@ -311,6 +343,8 @@ createApp({
       diagnosisError,
       rerunningDiagnosis,
       executionRecords,
+      approveExecution,
+      approvingId,
       selectAlert,
       closeDrawer,
       switchTab,
@@ -2002,6 +2036,13 @@ createApp({
           const actionText = (p.action || '').replace(/_/g, ' ')
           const riskText = p.risk || ''
           const opText = rAuto ? '自动执行' : (rec.approvedBy ? '审批人: ' + rec.approvedBy : '未自动执行')
+          const detailParts = []
+          if (p.image) detailParts.push('镜像: ' + p.image)
+          if (p.containerName) detailParts.push('容器: ' + p.containerName)
+          if (p.configData && Object.keys(p.configData).length) {
+            detailParts.push('资源: ' + Object.entries(p.configData).map(([k, v]) => k + '=' + v).join(', '))
+          }
+          if (p.action === 'scale_deployment' && (p.replicas || p.replicas === 0)) detailParts.push('副本数: ' + p.replicas)
           return h('div', {
             key: idx,
             style: {
@@ -2019,8 +2060,29 @@ createApp({
             ]),
             h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' } },
               '目标: ' + target + (riskText ? ' · 风险: ' + riskText : '')),
+            detailParts.length
+              ? h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px', wordBreak: 'break-all' } }, detailParts.join(' · '))
+              : null,
             h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' } }, opText),
             r.message ? h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)' } }, '结果: ' + r.message) : null,
+            (!rOk && !rAuto && !rec.approvedBy)
+              ? h('div', { style: { marginTop: '8px' } }, [
+                  h('button', {
+                    onClick: () => this.approveExecution(rec),
+                    disabled: this.approvingId === rec.id,
+                    style: {
+                      padding: '4px 14px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      background: this.approvingId === rec.id ? '#d9d9d9' : '#faad14',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: this.approvingId === rec.id ? 'not-allowed' : 'pointer',
+                    },
+                  }, this.approvingId === rec.id ? '执行中…' : '✅ 批准执行'),
+                ])
+              : null,
             h('div', { style: { fontSize: '11px', color: '#bbb', marginTop: '4px' } }, rec.timestamp ? new Date(rec.timestamp).toLocaleString() : ''),
           ])
         })

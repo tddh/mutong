@@ -124,7 +124,8 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 		action != ex.ActionCreateHPA && action != ex.ActionUpdateHPA &&
 		action != ex.ActionUpdateConfigMap && action != ex.ActionUpdateSecret &&
 		action != ex.ActionUpdateResourceLimits && action != ex.ActionUpdateDeploymentImage &&
-		action != ex.ActionUpdateAnnotations && action != ex.ActionUpdateLabels {
+		action != ex.ActionUpdateAnnotations && action != ex.ActionUpdateLabels &&
+		action != ex.ActionRolloutRestart {
 		return nil, fmt.Errorf("unsupported action: %s", action)
 	}
 
@@ -132,32 +133,33 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 	threshold := execCfg.AutoThreshold
 
 	autoMode := e.IsAutoMode()
-	if autoMode {
-		if plan.Confidence >= threshold {
-			// proceed with execution
+	if plan.ApprovedBy == "" {
+		// 未经人工审批：必须处于自动模式且置信度达标才执行
+		if autoMode {
+			if plan.Confidence < threshold {
+				audit := ex.AuditLog{
+					ID:           generateAuditID(),
+					Plan:         plan,
+					Result:       ex.ExecutionResult{Success: false, Message: "auto mode disabled: confidence below threshold", Timestamp: time.Now()},
+					AutoExecuted: true,
+					ApprovedBy:   "",
+					Timestamp:    time.Now(),
+				}
+				e.appendAuditLog(audit)
+				return &audit.Result, nil
+			}
 		} else {
 			audit := ex.AuditLog{
 				ID:           generateAuditID(),
 				Plan:         plan,
-				Result:       ex.ExecutionResult{Success: false, Message: "auto mode disabled: confidence below threshold", Timestamp: time.Now()},
-				AutoExecuted: true,
-				ApprovedBy:   "",
+				Result:       ex.ExecutionResult{Success: false, Message: "approval required", Timestamp: time.Now()},
+				AutoExecuted: false,
+				ApprovedBy:   plan.ApprovedBy,
 				Timestamp:    time.Now(),
 			}
 			e.appendAuditLog(audit)
 			return &audit.Result, nil
 		}
-	} else {
-		audit := ex.AuditLog{
-			ID:           generateAuditID(),
-			Plan:         plan,
-			Result:       ex.ExecutionResult{Success: false, Message: "approval required", Timestamp: time.Now()},
-			AutoExecuted: false,
-			ApprovedBy:   plan.ApprovedBy,
-			Timestamp:    time.Now(),
-		}
-		e.appendAuditLog(audit)
-		return &audit.Result, nil
 	}
 
 	var res *ex.ExecutionResult
@@ -276,13 +278,21 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 			success = true
 			msg = "labels updated"
 		}
+	case ex.ActionRolloutRestart:
+		err = e.rolloutRestartDeployment(ctx, plan.Namespace, plan.ResourceName)
+		if err != nil {
+			msg = err.Error()
+		} else {
+			success = true
+			msg = fmt.Sprintf("rollout restart triggered for deployment %s/%s", plan.Namespace, plan.ResourceName)
+		}
 	}
 
 	audit := ex.AuditLog{
 		ID:           generateAuditID(),
 		Plan:         plan,
 		Result:       ex.ExecutionResult{Success: success, Message: msg, Timestamp: time.Now()},
-		AutoExecuted: autoMode,
+		AutoExecuted: autoMode && plan.ApprovedBy == "",
 		ApprovedBy:   plan.ApprovedBy,
 		Timestamp:    time.Now(),
 	}
@@ -310,6 +320,11 @@ func (e *K8sExecutor) SetAutoMode(auto bool) {
 
 func (e *K8sExecutor) GetAuditLogs(ctx context.Context, filters map[string]string) ([]ex.AuditLog, error) {
 	return e.auditStore.List(filters)
+}
+
+// GetAuditLogByID 按审计记录 ID 查询单条记录
+func (e *K8sExecutor) GetAuditLogByID(id string) (*ex.AuditLog, error) {
+	return e.auditStore.GetByID(id)
 }
 
 func (e *K8sExecutor) appendAuditLog(a ex.AuditLog) {
@@ -418,6 +433,24 @@ func (e *K8sExecutor) scaleDeployment(ctx context.Context, namespace, name strin
 	scale.Spec.Replicas = replicas
 	// Apply the new scale
 	_, err = e.k8sClient.AppsV1().Deployments(namespace).UpdateScale(ctx, name, scale, metav1.UpdateOptions{})
+	return err
+}
+
+// rolloutRestartDeployment triggers a rolling restart by patching the pod template
+// annotation, equivalent to `kubectl rollout restart deployment/<name>`
+func (e *K8sExecutor) rolloutRestartDeployment(ctx context.Context, namespace, name string) error {
+	if namespace == "" {
+		namespace = e.cfg.GetExecutorConf().DefaultNamespace
+	}
+	deploy, err := e.k8sClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get Deployment: %w", err)
+	}
+	if deploy.Spec.Template.Annotations == nil {
+		deploy.Spec.Template.Annotations = make(map[string]string)
+	}
+	deploy.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
+	_, err = e.k8sClient.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
 	return err
 }
 

@@ -5,7 +5,17 @@ async function request(url, options = {}) {
   const config = { ...options, headers: { ...defaultHeaders, ...options.headers } }
   try {
     const response = await fetch(`${API_BASE}${url}`, config)
-    if (!response.ok) throw new Error(`API Error: ${response.status} ${response.statusText}`)
+    if (!response.ok) {
+      // 尽量带出服务端的错误详情，而不是只显示 HTTP 状态
+      let detail = ''
+      try {
+        const body = await response.json()
+        detail = body.error || body.message || ''
+      } catch (_) {
+        /* 非 JSON 响应忽略 */
+      }
+      throw new Error(detail ? `${detail}` : `API Error: ${response.status} ${response.statusText}`)
+    }
     if (options.responseType === 'text') return await response.text()
     return await response.json()
   } catch (error) {
@@ -73,6 +83,8 @@ export const API = {
       const q = new URLSearchParams(params).toString()
       return request(`/api/v1/executor/audit${q ? '?' + q : ''}`).catch(() => [])
     },
+    approve: (id) =>
+      request(`/api/v1/executor/audit/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   },
   inspection: {
     execute: () => request('/api/v1/inspection/execute', { method: 'POST' }),

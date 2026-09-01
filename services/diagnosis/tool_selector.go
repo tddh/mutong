@@ -26,6 +26,7 @@ var DiagnosisScenes = []DiagnosisScene{
 			"ContainerStatusUnknown", "SchedulingGated",
 			"重启", "崩溃", "内存", "cpu", "退出码",
 			"pod", "不健康", "报错", "异常", "检查", "日志", "状态",
+			"修复", "自愈", "处置",
 		},
 		Tools: []string{
 			"inspect_resource", "get_pod_logs", "get_pod_logs_es",
@@ -35,6 +36,8 @@ var DiagnosisScenes = []DiagnosisScene{
 			"list_resources_from_cache", "list_k8s_resources",
 			"list_alerts", "get_active_alerts", "get_alert_detail",
 			"run_diagnosis",
+			"restart_pod_safe", "rollout_restart", "scale_deployment",
+			"update_deployment_image", "adjust_resource_limits",
 		},
 	},
 	{
@@ -84,6 +87,8 @@ var DiagnosisScenes = []DiagnosisScene{
 		Tools: []string{
 			"inspect_resource", "list_k8s_resources",
 			"get_resource_metrics", "query_topology", "get_pod_logs",
+			"rollout_restart", "scale_deployment",
+			"update_deployment_image", "adjust_resource_limits",
 		},
 	},
 	{

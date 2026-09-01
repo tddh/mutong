@@ -57,6 +57,32 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 	// Map remediation action to executor ActionType with conservative defaults
 	var action exModel.ActionType
 	switch rem.Action {
+	// 标准枚举直通（知识库与执行工具统一使用该命名）
+	case string(exModel.ActionRestartPod):
+		action = exModel.ActionRestartPod
+	case string(exModel.ActionScaleDeployment):
+		action = exModel.ActionScaleDeployment
+	case string(exModel.ActionDeletePod):
+		action = exModel.ActionDeletePod
+	case string(exModel.ActionCreateHPA):
+		action = exModel.ActionCreateHPA
+	case string(exModel.ActionUpdateHPA):
+		action = exModel.ActionUpdateHPA
+	case string(exModel.ActionUpdateConfigMap):
+		action = exModel.ActionUpdateConfigMap
+	case string(exModel.ActionUpdateSecret):
+		action = exModel.ActionUpdateSecret
+	case string(exModel.ActionUpdateResourceLimits):
+		action = exModel.ActionUpdateResourceLimits
+	case string(exModel.ActionUpdateDeploymentImage):
+		action = exModel.ActionUpdateDeploymentImage
+	case string(exModel.ActionUpdateAnnotations):
+		action = exModel.ActionUpdateAnnotations
+	case string(exModel.ActionUpdateLabels):
+		action = exModel.ActionUpdateLabels
+	case string(exModel.ActionRolloutRestart):
+		action = exModel.ActionRolloutRestart
+	// 兼容 LLM 诊断输出的旧命名
 	case "Restart":
 		action = exModel.ActionRestartPod
 	case "Scale":
@@ -86,7 +112,8 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 		case "Deployment":
 			action = exModel.ActionScaleDeployment
 		default:
-			action = exModel.ActionRestartPod
+			// Node 等类型没有安全的自动执行动作，不生成计划（仅保留诊断结果供人工处理）
+			return nil, false
 		}
 	}
 

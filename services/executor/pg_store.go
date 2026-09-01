@@ -1,8 +1,10 @@
 package executor
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	ex "gitee.com/tddh/mutong/models/executor"
@@ -71,6 +73,8 @@ type auditLogModel struct {
 	AutoExecuted bool
 	ApprovedBy   string
 	Timestamp    time.Time `gorm:"index"`
+	// Details 存放完整计划 JSON（镜像、容器、资源值、副本数等），审批执行时还原
+	Details string `gorm:"type:text"`
 }
 
 // TableName returns the target PostgreSQL table name for audit logs
@@ -96,6 +100,7 @@ func NewPostgresAuditStore(db *gorm.DB, table string) (AuditLogStore, error) {
 
 func (s *PostgresAuditStore) Save(log ex.AuditLog) error {
 	// Translate the in-memory AuditLog into a DB row
+	details, _ := json.Marshal(log.Plan)
 	m := auditLogModel{
 		PlanID:       log.Plan.ID,
 		Action:       string(log.Plan.Action),
@@ -109,8 +114,45 @@ func (s *PostgresAuditStore) Save(log ex.AuditLog) error {
 		AutoExecuted: log.AutoExecuted,
 		ApprovedBy:   log.ApprovedBy,
 		Timestamp:    log.Timestamp,
+		Details:      string(details),
 	}
 	return s.db.Create(&m).Error
+}
+
+// planFromRow 从审计行还原执行计划：优先用 Details 里的完整计划，旧数据回退到列字段拼装
+func planFromRow(r auditLogModel) ex.ExecutionPlan {
+	if r.Details != "" {
+		var p ex.ExecutionPlan
+		if err := json.Unmarshal([]byte(r.Details), &p); err == nil {
+			if p.ID == "" {
+				p.ID = r.PlanID
+			}
+			if p.Action == "" {
+				p.Action = ex.ActionType(r.Action)
+			}
+			if p.Namespace == "" {
+				p.Namespace = r.Namespace
+			}
+			if p.ResourceName == "" {
+				p.ResourceName = r.Resource
+			}
+			if p.Fingerprint == "" {
+				p.Fingerprint = r.Fingerprint
+			}
+			return p
+		}
+	}
+	return ex.ExecutionPlan{
+		ID:           r.PlanID,
+		Action:       ex.ActionType(r.Action),
+		Target:       r.Target,
+		Namespace:    r.Namespace,
+		ResourceName: r.Resource,
+		Reason:       r.Reason,
+		Risk:         ex.RiskLevel(r.Risk),
+		Fingerprint:  r.Fingerprint,
+		CreatedAt:    r.Timestamp,
+	}
 }
 
 func (s *PostgresAuditStore) List(filters map[string]string) ([]ex.AuditLog, error) {
@@ -132,17 +174,7 @@ func (s *PostgresAuditStore) List(filters map[string]string) ([]ex.AuditLog, err
 	// Convert DB rows back to ex.AuditLog objects
 	out := make([]ex.AuditLog, 0, len(rows))
 	for _, r := range rows {
-		plan := ex.ExecutionPlan{
-			ID:           r.PlanID,
-			Action:       ex.ActionType(r.Action),
-			Target:       r.Target,
-			Namespace:    r.Namespace,
-			ResourceName: r.Resource,
-			Reason:       r.Reason,
-			Risk:         ex.RiskLevel(r.Risk),
-			Fingerprint:  r.Fingerprint,
-			CreatedAt:    r.Timestamp,
-		}
+		plan := planFromRow(r)
 		res := ex.ExecutionResult{Message: r.Result, Timestamp: r.Timestamp}
 		a := ex.AuditLog{
 			ID:           fmt.Sprintf("audit-%d", r.ID),
@@ -158,21 +190,15 @@ func (s *PostgresAuditStore) List(filters map[string]string) ([]ex.AuditLog, err
 }
 
 func (s *PostgresAuditStore) GetByID(id string) (*ex.AuditLog, error) {
+	numID, err := strconv.Atoi(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid audit id: %s", id)
+	}
 	var r auditLogModel
-	if err := s.db.First(&r, "id = ?", id).Error; err != nil {
+	if err := s.db.First(&r, numID).Error; err != nil {
 		return nil, err
 	}
-	plan := ex.ExecutionPlan{
-		ID:           r.PlanID,
-		Action:       ex.ActionType(r.Action),
-		Target:       r.Target,
-		Namespace:    r.Namespace,
-		ResourceName: r.Resource,
-		Reason:       r.Reason,
-		Risk:         ex.RiskLevel(r.Risk),
-		Fingerprint:  r.Fingerprint,
-		CreatedAt:    r.Timestamp,
-	}
+	plan := planFromRow(r)
 	res := ex.ExecutionResult{Message: r.Result, Timestamp: r.Timestamp}
 	a := ex.AuditLog{ID: fmt.Sprintf("audit-%d", r.ID), Plan: plan, Result: res, AutoExecuted: r.AutoExecuted, ApprovedBy: r.ApprovedBy, Timestamp: r.Timestamp}
 	return &a, nil

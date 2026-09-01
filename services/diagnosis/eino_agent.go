@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/cloudwego/eino/adk"
@@ -49,94 +50,22 @@ func NewDiagnosisAgent(chatModel model.BaseChatModel, tools []tool.InvokableTool
 }
 
 func (a *DiagnosisAgent) Run(ctx context.Context, userMessage string, systemPrompt string) (*AgentResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, a.timeout)
-	defer cancel()
-
-	a.logger.Info(
-		"DiagnosisAgent Run started",
-		zap.Int("tools", len(a.tools)),
-		zap.Int("max_steps", a.maxSteps),
-	)
-
-	var baseTools []tool.BaseTool
-	for _, t := range a.tools {
-		baseTools = append(baseTools, t)
-	}
-
-	agent, err := adk.NewChatModelAgent(ctx, &adk.ChatModelAgentConfig{
-		Name:          "diagnosis_agent",
-		Description:   "Kubernetes AI diagnosis agent",
-		Instruction:   systemPrompt,
-		Model:         a.chatModel,
-		MaxIterations: a.maxSteps,
-		ToolsConfig: adk.ToolsConfig{
-			ToolsNodeConfig: compose.ToolsNodeConfig{
-				Tools: baseTools,
-			},
-		},
-	})
+	var finalContent strings.Builder
+	err := a.RunStreamWithMessages(ctx, []*schema.Message{schema.UserMessage(userMessage)}, systemPrompt,
+		func(chunk string, toolCall *ToolCallInfo) error {
+			if chunk != "" {
+				finalContent.WriteString(chunk)
+			}
+			return nil
+		})
 	if err != nil {
-		a.logger.Error("Failed to create diagnosis agent", zap.Error(err))
-		return nil, fmt.Errorf("create diagnosis agent: %w", err)
+		return nil, err
 	}
-
-	input := &adk.AgentInput{
-		Messages: []*schema.Message{
-			schema.UserMessage(userMessage),
-		},
-	}
-
-	startTime := time.Now()
-	iter := agent.Run(ctx, input)
-
-	var finalContent string
-	stepCount := 0
-	for {
-		event, ok := iter.Next()
-		if !ok {
-			break
-		}
-		stepCount++
-		if event.Output != nil && event.Output.MessageOutput != nil {
-			msg := event.Output.MessageOutput.Message
-			if msg != nil && msg.Role == schema.Assistant && msg.Content != "" {
-				finalContent = msg.Content
-				// 记录 LLM 每轮输出长度
-				a.logger.Debug(
-					"Agent step output",
-					zap.Int("step", stepCount),
-					zap.Int("content_len", len(msg.Content)),
-				)
-			}
-			// 记录工具调用
-			if msg != nil && len(msg.ToolCalls) > 0 {
-				for _, tc := range msg.ToolCalls {
-					a.logger.Info(
-						"Agent tool call",
-						zap.Int("step", stepCount),
-						zap.String("tool", tc.Function.Name),
-					)
-				}
-			}
-		}
-	}
-
-	if finalContent == "" {
-		a.logger.Error(
-			"Agent returned no content",
-			zap.Int("steps", stepCount),
-			zap.Duration("duration", time.Since(startTime)),
-		)
+	content := finalContent.String()
+	if strings.TrimSpace(content) == "" {
 		return nil, fmt.Errorf("agent returned no content")
 	}
-
-	a.logger.Info(
-		"DiagnosisAgent Run completed",
-		zap.Int("steps", stepCount),
-		zap.Int("content_len", len(finalContent)),
-		zap.Duration("duration", time.Since(startTime)),
-	)
-	return &AgentResult{Content: finalContent}, nil
+	return &AgentResult{Content: content}, nil
 }
 
 func (a *DiagnosisAgent) RunStream(ctx context.Context, userMessage string, systemPrompt string, callback func(chunk string, toolCall *ToolCallInfo) error) error {

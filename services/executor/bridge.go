@@ -23,10 +23,17 @@ func NewRemediationBridge() *RemediationBridge {
 // ShouldExecute decides whether to auto-execute a remediation based on
 // remediation risk and autoMode. This implementation follows a conservative rule:
 // - AutoFixable must be true
+// - 危险动作（改镜像、删除、改配置/Secret、改资源限制）永远不可自动执行，无论风险标注如何
 // - If RiskLevel == "low" or "medium" and autoMode is ON, allow auto-execution
 // - If RiskLevel == "high" or unknown, do not auto-execute
 func (b *RemediationBridge) ShouldExecute(remediation diagModel.RemediationSuggestion, autoMode bool) bool {
 	if !remediation.AutoFixable {
+		return false
+	}
+	switch remediation.Action {
+	case "update_deployment_image", "delete_pod", "update_configmap", "update_secret",
+		"update_resource_limits", "Rollback", "Delete", "UpdateConfig", "UpdateSecret", "AdjustLimits":
+		// 危险动作：只能走人工审批
 		return false
 	}
 	switch remediation.RiskLevel {

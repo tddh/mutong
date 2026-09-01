@@ -850,6 +850,10 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			if autoDiag != nil {
 				aSvc.SetAutoDiagnosisPipeline(autoDiag)
 				autoDiag.SetDiagnosisResultStore(chatManager.GetRedisStorage(), chatManager.GetPostgresStorage(), cacheTTL)
+				if deepFn := diagCtrl.NewDeepDiagnoseFunc(); deepFn != nil {
+					autoDiag.SetDeepDiagnoser(deepFn)
+					logger.Info("Deep tool-based diagnosis enabled for auto-diagnosis pipeline")
+				}
 				go autoDiag.Start(context.Background())
 			}
 		}

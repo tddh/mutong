@@ -31,6 +31,16 @@ type AutoDiagnosisPipeline struct {
 	redisStorage *diagEngine.RedisStorage
 	pgStorage    *diagEngine.PostgresStorage
 	cacheTTL     time.Duration
+	deepDiagnoser DeepDiagnoseFunc
+}
+
+// DeepDiagnoseFunc 调工具 Agent 对告警做深度排查，返回更完整的诊断结果；
+// 返回 nil 表示沿用基础诊断结果。
+type DeepDiagnoseFunc func(ctx context.Context, alert *alert_models.ProcessedAlert, base *diagnosisPkg.DiagnosisResult) (*diagnosisPkg.DiagnosisResult, error)
+
+// SetDeepDiagnoser 注入深度排查能力（置信度不足时自动触发）
+func (p *AutoDiagnosisPipeline) SetDeepDiagnoser(fn DeepDiagnoseFunc) {
+	p.deepDiagnoser = fn
 }
 
 // NewAutoDiagnosisPipeline creates a new auto-diagnosis pipeline instance
@@ -174,6 +184,27 @@ func (p *AutoDiagnosisPipeline) processAlert(ctx context.Context, alert *alert_m
 			return
 		}
 
+		// 置信度不足时调用工具 Agent 深度排查（自己调工具找根因，而不是只基于静态上下文）
+		if p.deepDiagnoser != nil && maxRootCauseConfidence(res) < 0.8 {
+			if p.logger != nil {
+				p.logger.Info("Auto-diagnosis confidence low, running deep tool-based diagnosis",
+					zap.String("fingerprint", alert.Fingerprint),
+					zap.Float64("confidence", maxRootCauseConfidence(res)))
+			}
+			if deep, derr := p.deepDiagnoser(ctx, alert, res); derr != nil {
+				if p.logger != nil {
+					p.logger.Warn("Deep diagnosis failed, using base result", zap.String("fingerprint", alert.Fingerprint), zap.Error(derr))
+				}
+			} else if deep != nil {
+				res = deep
+				if p.logger != nil {
+					p.logger.Info("Deep diagnosis completed",
+						zap.String("fingerprint", alert.Fingerprint),
+						zap.Float64("confidence", maxRootCauseConfidence(res)))
+				}
+			}
+		}
+
 		if p.redisStorage != nil {
 			if err := p.redisStorage.CacheDiagnosisResult(ctx, alert.Fingerprint, res, p.cacheTTL); err != nil && p.logger != nil {
 				p.logger.Warn("Auto-diagnosis failed to cache diagnosis result", zap.String("fingerprint", alert.Fingerprint), zap.Error(err))
@@ -229,4 +260,16 @@ func (p *AutoDiagnosisPipeline) processAlert(ctx context.Context, alert *alert_m
 	}()
 }
 
-// No-op: keep file self-contained without forcing additional dependencies
+// maxRootCauseConfidence 返回诊断结果中最高的根因置信度
+func maxRootCauseConfidence(res *diagnosisPkg.DiagnosisResult) float64 {
+	if res == nil {
+		return 0
+	}
+	var m float64
+	for _, rc := range res.RootCauses {
+		if rc.Confidence > m {
+			m = rc.Confidence
+		}
+	}
+	return m
+}

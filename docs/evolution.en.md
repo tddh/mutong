@@ -41,6 +41,17 @@ It turns a frontend weakness into a modern, "AI-Native" architectural advantage.
 * **Knowledge Retention**: Introduced pgvector + NebulaGraph hybrid retrieval to vectorize incident retrospectives for future search.
 * **Outcome**: Enhanced troubleshooting efficiency using AI while keeping rule-based fallbacks.
 
+## Phase 4: Self-Healing Closed Loop (2026)
+**Core Problem**: AI could pinpoint root causes and propose fixes, but the "fix" itself still required manual commands — the loop was broken between diagnosis and execution. Yet handing execution directly to an LLM carries unacceptable risk.
+**Solution**: Add **execution tools** to the MCP tool server, gated by a propose-and-approve mechanism.
+* **Two tool groups**:
+    * **Safe group** (Pod restart, Deployment rollout restart, scaling): invocations pass through the existing gate — auto mode + diagnosis-confidence threshold — with full audit trails;
+    * **Proposal group** (image change, resource limits adjustment): the LLM can only create pending-approval proposals; these are **never auto-executed** and must be approved by a human in the UI.
+* **Admission constraints**: every execution tool requires an alert fingerprint; calls without a supporting diagnosis result (no confidence score) are rejected outright, preventing the LLM from acting on nothing; duplicate pending plans for the same fingerprint are deduplicated.
+* **Auto-diagnosis persistence**: alert-triggered diagnoses are written to cache and database and automatically produce pending plans, so the UI reuses them instead of re-diagnosing on demand.
+* **Real bugs fixed along the way**: alert self-suppression (suppression rules matching the alert's own fingerprint), knowledge-base actions mismatched with executor enums, slow chat diagnoses aborted by frontend timeouts, audit table losing execution parameters, etc.
+* **Outcome**: a complete diagnosis → plan → approval → execution → audit loop. The button for dangerous actions remains in human hands, while every step before it runs automatically.
+
 ---
 **Summary**:
-Mutong did not start with AI in mind. It followed a path of **Visibility (Topology) → Automation → Intelligence (AI Diagnosis)**. Each step addressed a specific bottleneck in the operations workflow.
+Mutong did not start with AI in mind. It followed a path of **Visibility (Topology) → Automation → Intelligence (AI Diagnosis) → Self-Healing Closed Loop**. Each step addressed a specific bottleneck in the operations workflow. And on the question of "how much execution authority to grant", the answer has always been: let AI propose, let humans decide.

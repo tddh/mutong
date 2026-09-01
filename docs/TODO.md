@@ -191,7 +191,7 @@
   *参考：Datadog Watchdog Forecast / Dynatrace*
   *估时：3h*
 
-- [ ] **AI Agent 自治运维** — 参考 Dynatrace Intelligence / BigPanda L1 Agent，构建可自主执行检测 → 诊断 → 建议修复 → 审批执行的 Agent 回路
+- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批），见 `services/mcp/exec_tools.go`
   *涉及：增强现有 MCP 工具 + Agent 回路编排（Eino Agent 框架）*
   *估时：4h*
 
@@ -279,7 +279,7 @@
   *参考：Datadog Watchdog Forecast / Dynatrace*
   *估时：12h*
 
-- [ ] **AI Agent 自治运维** — 参考 Dynatrace Intelligence / BigPanda L1 Agent，构建可自主执行检测 → 诊断 → 建议修复 → 审批执行的 Agent 回路
+- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批），见 `services/mcp/exec_tools.go`
   *涉及：增强现有 MCP 工具 + Agent 回路编排（Eino Agent 框架）*
   *估时：20h*
 

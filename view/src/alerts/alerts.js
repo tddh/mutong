@@ -617,6 +617,8 @@ createApp({
       basicRows.push(infoRow('告警名称', getAlertSummary(a)))
       basicRows.push(infoRow('严重级别', getAlertSeverity(a)))
       basicRows.push(infoRow('开始时间', formatTime(getAlertStartsAt(a))))
+      basicRows.push(infoRow('状态', a.status === 'resolved' ? '✅ 已恢复' : '🔥 触发中'))
+      if (a.status === 'resolved' && a.endsAt) basicRows.push(infoRow('恢复时间', formatTime(a.endsAt)))
       if (a?.type === 'aggregated_alert') basicRows.push(infoRow('告警数量', getAlertCount(a)))
       if (a.labels && Object.keys(a.labels).length > 0)
         basicRows.push(
@@ -2268,7 +2270,21 @@ createApp({
               h(
                 'td',
                 { style: { padding: '10px 12px', fontWeight: 500, fontSize: '14px' } },
-                a.labels?.alertname || '-',
+                [
+                  a.labels?.alertname || '-',
+                  h('span', {
+                    style: {
+                      marginLeft: '8px',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      padding: '1px 8px',
+                      borderRadius: '8px',
+                      background: a.status === 'resolved' ? '#f6ffed' : '#fff1f0',
+                      color: a.status === 'resolved' ? '#52c41a' : '#ff4d4f',
+                      border: `1px solid ${a.status === 'resolved' ? '#b7eb8f' : '#ffa39e'}`,
+                    },
+                  }, a.status === 'resolved' ? '已恢复' : '触发中'),
+                ],
               ),
               h(
                 'td',
@@ -2287,7 +2303,12 @@ createApp({
                 {
                   style: { padding: '10px 12px', fontSize: '13px', color: 'var(--text-secondary)' },
                 },
-                formatTime(a.startsAt),
+                [
+                  formatTime(a.startsAt),
+                  a.status === 'resolved' && a.endsAt
+                    ? h('div', { style: { fontSize: '12px', color: '#52c41a' } }, '恢复: ' + formatTime(a.endsAt))
+                    : null,
+                ],
               ),
               h('td', { style: { padding: '10px 12px', fontSize: '13px' } }, getBusinessApp(a)),
               h(

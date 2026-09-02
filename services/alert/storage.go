@@ -51,14 +51,19 @@ func (s *AlertStorage) Save(ctx context.Context, a *alert_models.ProcessedAlert)
 func (s *AlertStorage) GetActiveAlerts(ctx context.Context, filters map[string]string) ([]*alert_models.ProcessedAlert, error) {
 	var alerts []*alert_models.ProcessedAlert
 
+	// status 过滤：缺省 firing；"all" 表示不过滤（含已恢复）
+	status := "firing"
+	if v, ok := filters["status"]; ok && v != "" {
+		status = v
+	}
+
 	s.alerts.Range(func(key, value interface{}) bool {
 		alert, ok := value.(*alert_models.ProcessedAlert)
 		if !ok {
 			return true
 		}
 
-		// 只返回 firing 状态的告警
-		if alert.Status != "firing" {
+		if status != "all" && alert.Status != status {
 			return true
 		}
 

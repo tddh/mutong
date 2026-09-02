@@ -173,6 +173,7 @@ createApp({
 
     // 业务过滤器状态
     const businessFilterApp = ref('')
+    const showResolved = ref(false)
     const businessFilterTeam = ref('')
     const businessFilterCriticality = ref('')
 
@@ -287,9 +288,10 @@ createApp({
       }
     }
 
-    onMounted(async () => {
+    const loadAlerts = async () => {
+      loading.value = true
       try {
-        const r = await API.alerts.list({ status: 'firing' })
+        const r = await API.alerts.list({ status: showResolved.value ? 'all' : 'firing' })
         alerts.value = Array.isArray(r) ? r : r.alerts || []
         filteredAlerts.value = alerts.value
       } catch (e) {
@@ -297,7 +299,9 @@ createApp({
       } finally {
         loading.value = false
       }
-    })
+    }
+
+    onMounted(loadAlerts)
 
     const filteredAlerts = ref([])
     const applyBusinessFilters = () => {
@@ -351,6 +355,8 @@ createApp({
       runDiagnosis,
       rerunDiagnosis,
       businessFilterApp,
+      showResolved,
+      loadAlerts,
       businessFilterTeam,
       businessFilterCriticality,
       filteredAlerts,
@@ -448,6 +454,17 @@ createApp({
             h('option', { value: 'low' }, '低'),
           ],
         ),
+        h('label', { style: { ...labelStyle, display: 'inline-flex', alignItems: 'center', gap: '4px', cursor: 'pointer' } }, [
+          h('input', {
+            type: 'checkbox',
+            checked: this.showResolved,
+            onChange: (e) => {
+              this.showResolved = e.target.checked
+              this.loadAlerts()
+            },
+          }),
+          '显示已恢复',
+        ]),
         this.businessFilterApp || this.businessFilterTeam || this.businessFilterCriticality
           ? h(
               'button',

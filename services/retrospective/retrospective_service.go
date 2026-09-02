@@ -1497,7 +1497,7 @@ func (s *Service) ListPostmortems(ctx context.Context, filter ListFilter, page, 
 	}
 
 	var models []retrospective.PostmortemModel
-	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&models).Error; err != nil {
+	if err := query.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&models).Error; err != nil {
 		return nil, fmt.Errorf("list postmortems: %w", err)
 	}
 

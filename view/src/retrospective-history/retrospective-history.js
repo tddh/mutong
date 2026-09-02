@@ -464,6 +464,12 @@ createApp({
                     `${this.formatTime(item.start_time)} ~ ${this.formatTime(item.end_time)} (${item.duration || '-'})`,
                   )
                 : null,
+              item.updated_at && item.created_at &&
+              new Date(item.updated_at).getTime() - new Date(item.created_at).getTime() > 60000
+                ? h('span', { title: '该报告被重新生成过' }, `更新于 ${this.formatTime(item.updated_at)}`)
+                : item.created_at
+                  ? h('span', null, `生成于 ${this.formatTime(item.created_at)}`)
+                  : null,
             ].filter(Boolean),
           ),
           item.root_cause_summary

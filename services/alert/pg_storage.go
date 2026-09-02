@@ -131,10 +131,20 @@ func (s *PostgresAlertStorage) Save(ctx context.Context, a *alert_models.Process
 }
 
 func (s *PostgresAlertStorage) GetActiveAlerts(ctx context.Context, filters map[string]string) ([]*alert_models.ProcessedAlert, error) {
-	query := s.db.WithContext(ctx).Where("status = ?", "firing")
+	// status 过滤：缺省 firing；"all" 表示不过滤（含已恢复）
+	status := "firing"
+	if v, ok := filters["status"]; ok && v != "" {
+		status = v
+	}
+	query := s.db.WithContext(ctx)
+	if status != "all" {
+		query = query.Where("status = ?", status)
+	}
 
 	for key, value := range filters {
 		switch key {
+		case "status":
+			// 已处理
 		case "namespace":
 			query = query.Where("namespace = ?", value)
 		case "resourceType":

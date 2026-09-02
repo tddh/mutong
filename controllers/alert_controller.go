@@ -87,6 +87,9 @@ func (c *AlertController) GetActiveAlerts(ctx *gin.Context) {
 	if nodeName := ctx.Query("nodeName"); nodeName != "" {
 		filters["nodeName"] = nodeName
 	}
+	if status := ctx.Query("status"); status != "" {
+		filters["status"] = status
+	}
 
 	alerts, err := c.processor.GetActiveAlerts(ctx.Request.Context(), filters)
 	if err != nil {

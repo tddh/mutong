@@ -263,6 +263,7 @@ body {
 }
 .kind-tag.active {
   color: #fff;
+  background: #1890ff;
   border: none;
 }
 .kind-tag .dot {
@@ -464,6 +465,19 @@ body {
   color: #333;
   word-break: break-word;
   line-height: 1.4;
+}
+/* 详情面板里多值字段（标签/关联资源/容器/镜像/端口等）每项独占一行 */
+.detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.detail-list-item {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #333;
+  word-break: break-all;
+  padding: 1px 0;
 }
 
 .no-data {

@@ -27,6 +27,7 @@
                         <h3>📂 命名空间</h3>
                         <select v-model="selectedNs" class="search-input" style="height: 40px; cursor: pointer;">
                             <option value="all">所有命名空间</option>
+                            <option v-if="viewMode === 'physical'" value="__cluster__">🌐 集群级 (Cluster-scoped)</option>
                             <option v-for="ns in namespaces" :key="ns" :value="ns">{{ ns }}</option>
                         </select>
                     </div>
@@ -185,7 +186,7 @@
                             <tr v-if="selectedNode.group"><td style="padding: 5px 0; color: #888;">API组</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.group }}</td></tr>
                             <tr v-if="selectedNode.status"><td style="padding: 5px 0; color: #888;">状态</td><td style="padding: 5px 0;"><span :class="['status-badge', 'status-' + selectedNode.status.toLowerCase()]">{{ selectedNode.status }}</span></td></tr>
                             <tr v-if="selectedNode.created"><td style="padding: 5px 0; color: #888;">创建时间</td><td style="padding: 5px 0;">{{ selectedNode.created }}</td></tr>
-                            <tr v-if="selectedNode.labels"><td style="padding: 5px 0; color: #888;">标签</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.labels }}</td></tr>
+                            <tr v-if="selectedNode.labels && selectedNode.labels.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">标签</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.labels" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
                         </table>
                     </div>
 
@@ -205,8 +206,8 @@
                         <h4 class="section-title">🧾 通用元数据</h4>
                         <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
                             <tr v-if="selectedNode.annotationsCount !== undefined"><td style="padding: 5px 0; color: #888; width: 65px;">注解数</td><td style="padding: 5px 0;">{{ selectedNode.annotationsCount }}</td></tr>
-                            <tr v-if="selectedNode.owners"><td style="padding: 5px 0; color: #888;">归属</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.owners }}</td></tr>
-                            <tr v-if="selectedNode.conditionsSummary"><td style="padding: 5px 0; color: #888;">条件</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.conditionsSummary }}</td></tr>
+                            <tr v-if="selectedNode.owners && selectedNode.owners.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">归属</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.owners" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
+                            <tr v-if="selectedNode.conditionsSummary && selectedNode.conditionsSummary.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">条件</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.conditionsSummary" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
                         </table>
                     </div>
 
@@ -216,8 +217,8 @@
                             <tr v-if="selectedNode.podIP"><td style="padding: 5px 0; color: #888; width: 65px;">Pod IP</td><td style="padding: 5px 0;">{{ selectedNode.podIP }}</td></tr>
                             <tr v-if="selectedNode.nodeName"><td style="padding: 5px 0; color: #888;">所在节点</td><td style="padding: 5px 0;">{{ selectedNode.nodeName }}</td></tr>
                             <tr v-if="selectedNode.restartCount !== undefined"><td style="padding: 5px 0; color: #888;">重启次数</td><td style="padding: 5px 0;">{{ selectedNode.restartCount }}</td></tr>
-                            <tr v-if="selectedNode.containers"><td style="padding: 5px 0; color: #888;">容器</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.containers }}</td></tr>
-                            <tr v-if="selectedNode.images"><td style="padding: 5px 0; color: #888;">镜像</td><td style="padding: 5px 0; word-break: break-word; font-size: 10px;">{{ selectedNode.images }}</td></tr>
+                            <tr v-if="selectedNode.containers && selectedNode.containers.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">容器</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.containers" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
+                            <tr v-if="selectedNode.images && selectedNode.images.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">镜像</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.images" :key="i" class="detail-list-item" style="font-size:10px;">{{ item }}</div></div></td></tr>
                         </table>
                     </div>
 
@@ -244,8 +245,8 @@
                         <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
                             <tr v-if="selectedNode.serviceType"><td style="padding: 5px 0; color: #888; width: 65px;">类型</td><td style="padding: 5px 0;">{{ selectedNode.serviceType }}</td></tr>
                             <tr v-if="selectedNode.clusterIP"><td style="padding: 5px 0; color: #888;">ClusterIP</td><td style="padding: 5px 0;">{{ selectedNode.clusterIP }}</td></tr>
-                            <tr v-if="selectedNode.ports"><td style="padding: 5px 0; color: #888;">端口</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.ports }}</td></tr>
-                            <tr v-if="selectedNode.selector"><td style="padding: 5px 0; color: #888;">选择器</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.selector }}</td></tr>
+                            <tr v-if="selectedNode.ports && selectedNode.ports.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">端口</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.ports" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
+                            <tr v-if="selectedNode.selector && selectedNode.selector.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">选择器</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.selector" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
                         </table>
                     </div>
 
@@ -271,18 +272,18 @@
                             <tr v-if="selectedNode.endpointNode"><td style="padding: 5px 0; color: #888;">所在节点</td><td style="padding: 5px 0;">{{ selectedNode.endpointNode }}</td></tr>
                             <tr v-if="selectedNode.identityId !== undefined"><td style="padding: 5px 0; color: #888;">Identity</td><td style="padding: 5px 0;">{{ selectedNode.identityId }}</td></tr>
                             <tr v-if="selectedNode.externalPodName"><td style="padding: 5px 0; color: #888;">关联Pod</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.externalPodName }}</td></tr>
-                            <tr v-if="selectedNode.namedPorts"><td style="padding: 5px 0; color: #888;">命名端口</td><td style="padding: 5px 0; word-break: break-word;">{{ selectedNode.namedPorts }}</td></tr>
+                            <tr v-if="selectedNode.namedPorts && selectedNode.namedPorts.length"><td style="padding: 5px 0; color: #888; vertical-align: top;">命名端口</td><td style="padding: 5px 0;"><div class="detail-list"><div v-for="(item, i) in selectedNode.namedPorts" :key="i" class="detail-list-item">{{ item }}</div></div></td></tr>
                         </table>
                     </div>
                     <div class="detail-section" v-if="relatedResources.upstream.length || relatedResources.downstream.length">
                         <h4 class="section-title">🔗 关联资源</h4>
                         <div v-if="relatedResources.upstream.length" class="related-group">
                             <span class="related-label">上游 ({{ relatedResources.upstream.length }})</span>
-                            <div class="related-list">{{ relatedResources.upstream.map(r => r.kind + ':' + r.label).join(', ') }}</div>
+                            <div class="related-list"><div class="detail-list"><div v-for="(r, i) in relatedResources.upstream" :key="i" class="detail-list-item">{{ r.kind }}:{{ r.label }}</div></div></div>
                         </div>
                         <div v-if="relatedResources.downstream.length" class="related-group">
                             <span class="related-label">下游 ({{ relatedResources.downstream.length }})</span>
-                            <div class="related-list">{{ relatedResources.downstream.map(r => r.kind + ':' + r.label).join(', ') }}</div>
+                            <div class="related-list"><div class="detail-list"><div v-for="(r, i) in relatedResources.downstream" :key="i" class="detail-list-item">{{ r.kind }}:{{ r.label }}</div></div></div>
                         </div>
                     </div>
                     <div class="detail-section" v-if="selectedNode.kind === 'Pod' || selectedNode.kind === 'Node' || selectedNode.kind === 'Deployment'">

@@ -160,6 +160,10 @@ func (d *K8sResoureService) countAllResources() int {
 	return int(cnt)
 }
 
+// clusterScopedNamespace 是前端"🌐 集群级"下拉项与后端约定的哨兵值。
+// 下划线在 K8s 命名空间名（DNS-1123 label）中非法，故永不与真实命名空间冲突。
+const clusterScopedNamespace = "__cluster__"
+
 func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (interface{}, error) {
 	traceID := reqCtx.TraceID
 
@@ -171,7 +175,7 @@ func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (i
 		}
 	}
 	if psize := reqCtx.Query("pageSize"); psize != "" {
-		if v, err := strconv.Atoi(psize); err == nil && v > 0 && v <= 500 {
+		if v, err := strconv.Atoi(psize); err == nil && v > 0 && v <= 5000 {
 			pageSize = v
 		}
 	}
@@ -187,59 +191,80 @@ func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (i
 		}
 	}
 
-	var nsVIDs []string
-
-	if namespace == "" || namespace == "all" {
-		// 获取所有 Namespace 的 VID，批量 GO FROM
-		allVIDs, err := d.getAllNamespaceVIDs(traceID)
-		if err != nil {
-			d.logger.Warn("GetAllResources: failed to get all namespace VIDs", zap.Error(err))
-			return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
-		}
-		nsVIDs = allVIDs
-	} else {
-		nsVID, err := d.getNamespaceVID(namespace, traceID)
-		if err != nil || nsVID == "" {
-			d.logger.Warn("GetAllResources: namespace VID not found", zap.String("ns", namespace), zap.Error(err))
-			return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
-		}
-		nsVIDs = []string{nsVID}
-	}
-
-	if len(nsVIDs) == 0 {
-		return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
-	}
-
-	vidListJSON := listToJSON(nsVIDs)
-	vidList := strings.Trim(vidListJSON, "[]")
-
 	var allRows []*nebula.Row
 
-	if kind == "Node" {
-		nodeQuery := `MATCH (v:K8sResource{kind:"Node", is_deleted:false}) RETURN v.K8sResource.name AS name, v.K8sResource.kind AS kind, v.K8sResource.api_version AS api_version, v.K8sResource.api_group AS group, id(v) AS uid, v.K8sResource.name_space AS name_space`
-		d.logger.Debug("GetAllResources MATCH Node", zap.String("X-Trace-ID", traceID), zap.String("query", nodeQuery))
-		resultSet, err := d.graphDB.ExecuteAndCheck(nodeQuery)
+	if namespace == clusterScopedNamespace {
+		// 集群级资源（Node/Namespace/PersistentVolume/ClusterRole/CRD/CiliumIdentity 等）：
+		// name_space 为空串、没有 BelongsTo 边，无法通过命名空间遍历得到，走独立 MATCH。
+		rows, err := d.queryClusterScopedResources(traceID)
 		if err != nil {
-			d.logger.Warn("GetAllResources MATCH Node failed", zap.Error(err))
+			d.logger.Warn("GetAllResources: cluster-scoped query failed", zap.String("X-Trace-ID", traceID), zap.Error(err))
 			return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
 		}
-		allRows = resultSet.GetRows()
+		allRows = rows
 	} else {
-		nodeQuery := fmt.Sprintf(
-			`GO FROM %s OVER BelongsTo REVERSELY
+		var nsVIDs []string
+
+		if namespace == "" || namespace == "all" {
+			// 获取所有 Namespace 的 VID，批量 GO FROM
+			allVIDs, err := d.getAllNamespaceVIDs(traceID)
+			if err != nil {
+				d.logger.Warn("GetAllResources: failed to get all namespace VIDs", zap.Error(err))
+				return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+			}
+			nsVIDs = allVIDs
+		} else {
+			nsVID, err := d.getNamespaceVID(namespace, traceID)
+			if err != nil || nsVID == "" {
+				d.logger.Warn("GetAllResources: namespace VID not found", zap.String("ns", namespace), zap.Error(err))
+				return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+			}
+			nsVIDs = []string{nsVID}
+		}
+
+		if len(nsVIDs) == 0 {
+			return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+		}
+
+		vidListJSON := listToJSON(nsVIDs)
+		vidList := strings.Trim(vidListJSON, "[]")
+
+		if kind == "Node" {
+			nodeQuery := `MATCH (v:K8sResource{kind:"Node", is_deleted:false}) RETURN v.K8sResource.name AS name, v.K8sResource.kind AS kind, v.K8sResource.api_version AS api_version, v.K8sResource.api_group AS group, id(v) AS uid, v.K8sResource.name_space AS name_space`
+			d.logger.Debug("GetAllResources MATCH Node", zap.String("X-Trace-ID", traceID), zap.String("query", nodeQuery))
+			resultSet, err := d.graphDB.ExecuteAndCheck(nodeQuery)
+			if err != nil {
+				d.logger.Warn("GetAllResources MATCH Node failed", zap.Error(err))
+				return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+			}
+			allRows = resultSet.GetRows()
+		} else {
+			nodeQuery := fmt.Sprintf(
+				`GO FROM %s OVER BelongsTo REVERSELY
 		 WHERE $$.K8sResource.is_deleted == false
 		 YIELD $$.K8sResource.name AS name, $$.K8sResource.kind AS kind,
 		       $$.K8sResource.api_version AS api_version, $$.K8sResource.api_group AS group,
 		       id($$) AS uid, $$.K8sResource.name_space AS name_space`,
-			vidList,
-		)
-		d.logger.Debug("GetAllResources GO FROM REVERSELY", zap.String("X-Trace-ID", traceID), zap.String("query", nodeQuery))
-		resultSet, err := d.graphDB.ExecuteAndCheck(nodeQuery)
-		if err != nil {
-			d.logger.Warn("GetAllResources GO failed, returning empty", zap.String("X-Trace-ID", traceID), zap.Error(err))
-			return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+				vidList,
+			)
+			d.logger.Debug("GetAllResources GO FROM REVERSELY", zap.String("X-Trace-ID", traceID), zap.String("query", nodeQuery))
+			resultSet, err := d.graphDB.ExecuteAndCheck(nodeQuery)
+			if err != nil {
+				d.logger.Warn("GetAllResources GO failed, returning empty", zap.String("X-Trace-ID", traceID), zap.Error(err))
+				return map[string]interface{}{"nodes": []map[string]interface{}{}, "edges": []map[string]interface{}{}, "totalCount": 0}, nil
+			}
+			allRows = resultSet.GetRows()
+
+			// "所有命名空间" 时并入集群级资源，使 all 名副其实；失败仅告警，不影响命名空间资源返回
+			if namespace == "" || namespace == "all" {
+				csRows, csErr := d.queryClusterScopedResources(traceID)
+				if csErr != nil {
+					d.logger.Warn("GetAllResources: cluster-scoped union failed", zap.String("X-Trace-ID", traceID), zap.Error(csErr))
+				} else {
+					allRows = append(allRows, csRows...)
+				}
+			}
 		}
-		allRows = resultSet.GetRows()
 	}
 
 	var matchedRows []*nebula.Row
@@ -252,10 +277,16 @@ func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (i
 		matchedRows = append(matchedRows, row)
 	}
 
-	totalCount := d.countResourcesByKind(kind)
-	if totalCount <= 0 {
-		totalCount = len(matchedRows)
+	// totalCount 必须是本次查询范围（命名空间 + kind 过滤后）去重后的真实资源数。
+	// 不能用 countResourcesByKind(kind)：那是全集群按 kind 计数、与命名空间无关，
+	// 会让 totalCount 虚高（如 k8s-gpt 实际 124 个却报 2476），进而 totalPages 虚高、分页错乱。
+	uidSeen := make(map[string]bool)
+	for _, row := range matchedRows {
+		if len(row.Values) > 4 {
+			uidSeen[string(row.Values[4].GetSVal())] = true
+		}
 	}
+	totalCount := len(uidSeen)
 	skip := (page - 1) * pageSize
 	var pageRows []*nebula.Row
 	if skip < len(matchedRows) {
@@ -289,10 +320,28 @@ func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (i
 		}
 	}
 
+	// 该命名空间的完整 kind 列表（基于分页前的全量 allRows，不受当前页限制），
+	// 供前端"资源类型"面板使用——否则面板只能看到当前页 20 个节点里出现的 kind，与集群实际对不上。
+	kindSet := make(map[string]bool)
+	for _, row := range allRows {
+		if len(row.Values) < 2 {
+			continue
+		}
+		if k := string(row.Values[1].GetSVal()); k != "" && k != "Label" {
+			kindSet[k] = true
+		}
+	}
+	kindsList := make([]string, 0, len(kindSet))
+	for k := range kindSet {
+		kindsList = append(kindsList, k)
+	}
+	sort.Strings(kindsList)
+
 	result := map[string]interface{}{
 		"nodes":      nodes,
 		"edges":      []map[string]interface{}{},
 		"totalCount": totalCount,
+		"kinds":      kindsList,
 	}
 
 	if d.resourceCache != nil {
@@ -442,6 +491,22 @@ func (d *K8sResoureService) getAllNamespaceVIDs(traceID string) ([]string, error
 		}
 	}
 	return vids, nil
+}
+
+// queryClusterScopedResources 返回集群级资源（name_space 为空串）：Node、Namespace、PersistentVolume、
+// ClusterRole、CRD、CiliumIdentity 等。这类资源不属于任何命名空间、没有 BelongsTo 边，
+// 无法通过 "GO FROM <nsVID> OVER BelongsTo" 遍历得到，需独立 MATCH。
+// 返回列顺序与 GetAllResources 其它分支严格一致：name, kind, api_version, group, uid, name_space。
+// name_space 上有 tag 索引（scripts/schema.ngql:27），空串等值查询走索引；
+// 若本集群 Nebula 版本对空串 MATCH 不走索引，可改用 LOOKUP ON K8sResource WHERE name_space=="" AND is_deleted==false。
+func (d *K8sResoureService) queryClusterScopedResources(traceID string) ([]*nebula.Row, error) {
+	query := `MATCH (v:K8sResource{name_space:"", is_deleted:false}) RETURN v.K8sResource.name AS name, v.K8sResource.kind AS kind, v.K8sResource.api_version AS api_version, v.K8sResource.api_group AS group, id(v) AS uid, v.K8sResource.name_space AS name_space`
+	d.logger.Debug("queryClusterScopedResources", zap.String("X-Trace-ID", traceID), zap.String("query", query))
+	resultSet, err := d.graphDB.ExecuteAndCheck(query)
+	if err != nil {
+		return nil, err
+	}
+	return resultSet.GetRows(), nil
 }
 
 // GetAllRelationships 获取所有资源之间的关系

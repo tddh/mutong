@@ -96,6 +96,12 @@ createApp({
     const graphEdgeCount = ref(0)
     const currentPage = ref(1)
     const totalPages = ref(1)
+    // 资源列表每页条数：取足够大以"一次加载选中命名空间的全部资源"，
+    // 让搜索/类型过滤跨全量生效（旧值 20 导致只显示 20 条、搜索也只在 20 条内）。
+    // 后端 pageSize 上限同为 5000；超过则分页兜底。
+    const RESOURCE_PAGE_SIZE = 5000
+    // "集群级"虚拟命名空间哨兵，需与后端 clusterScopedNamespace 一致（下划线非法于 K8s ns 名，不会撞车）
+    const CLUSTER_SCOPED_NS = '__cluster__'
     const metrics = ref(null)
     const metricsLoading = ref(false)
     const error = ref(null)
@@ -133,17 +139,6 @@ createApp({
       if (namespaceList.value.length > 0) return [...namespaceList.value].sort()
       return [...new Set(allNodes.value.map((n) => n.namespace).filter(Boolean))].sort()
     })
-    const kinds = computed(() =>
-      [...new Set(allNodes.value.map((n) => n.kind))].filter((k) => k !== 'Label'),
-    )
-
-    const visibleKinds = computed(() => {
-      const all = kinds.value
-      if (showAllKinds.value || all.length <= 10) return all
-      return all.slice(0, 10)
-    })
-    const hasHiddenKinds = computed(() => kinds.value.length > 10)
-
     const kindPriority = {
       Pod: 1,
       Deployment: 2,
@@ -159,6 +154,27 @@ createApp({
       CiliumIdentity: 31,
     }
 
+    // 资源类型面板：展示该命名空间的全部类型，不再截断。
+    // 两处历史 bug：① visibleKinds 只取前 10 个（按 Nebula 无序返回顺序），CRD 多的 ns 里
+    // Deployment 被挤到"显示全部"之后；② kinds 从 allNodes 推导，而 allNodes 只有当前页 20 个节点，
+    // 面板类型根本不是整个 ns 的。现改为优先用后端返回的完整 kinds（nsKinds），按 kindPriority 排序全部显示。
+    const nsKinds = ref([])
+    const kinds = computed(() => {
+      const base = nsKinds.value.length > 0
+        ? nsKinds.value
+        : [...new Set(allNodes.value.map((n) => n.kind))]
+      const set = [...new Set(base)].filter((k) => k && k !== 'Label')
+      return set.sort((a, b) => {
+        const pa = kindPriority[a] || 100
+        const pb = kindPriority[b] || 100
+        if (pa !== pb) return pa - pb
+        return String(a).localeCompare(String(b))
+      })
+    })
+
+    const visibleKinds = computed(() => kinds.value)
+    const hasHiddenKinds = computed(() => false)
+
     const nodesInNs = computed(() => {
       const ns = selectedNs.value
       const q = kindFilter.value.toLowerCase()
@@ -166,7 +182,15 @@ createApp({
       for (let i = 0; i < allNodes.value.length; i++) {
         const n = allNodes.value[i]
         if (n.kind === 'Label') continue
-        if (ns !== 'all' && n.namespace !== ns) continue
+        // 命名空间过滤（物理/业务一致）：
+        // - “all”：不过滤
+        // - 集群级哨兵：只保留 namespace===”” 的集群级资源
+        // - 具体 ns：精确匹配（业务应用带真实 ns，同样按此过滤）
+        if (ns !== 'all') {
+          if (ns === CLUSTER_SCOPED_NS) {
+            if (n.namespace !== '') continue
+          } else if (n.namespace !== ns) continue
+        }
         if (q && !n.label.toLowerCase().includes(q) && !n.id.toLowerCase().includes(q)) continue
         result.push(n)
       }
@@ -305,9 +329,7 @@ createApp({
           result.annotationsCount = Object.keys(metadata.annotations).length
         }
         if (Array.isArray(metadata.ownerReferences) && metadata.ownerReferences.length > 0) {
-          result.owners = metadata.ownerReferences
-            .map((o) => `${o.kind || 'Unknown'}:${o.name || '-'}`)
-            .join(', ')
+          result.owners = metadata.ownerReferences.map((o) => `${o.kind || 'Unknown'}:${o.name || '-'}`)
         }
 
         // 从 labels 提取业务上下文
@@ -321,8 +343,8 @@ createApp({
               (sum, c) => sum + (c.restartCount || 0),
               0,
             )
-            result.images = status.containerStatuses.map((c) => c.image).join(', ')
-            result.containers = status.containerStatuses.map((c) => c.name).join(', ')
+            result.images = status.containerStatuses.map((c) => c.image)
+            result.containers = status.containerStatuses.map((c) => c.name)
           }
           if (define.spec && define.spec.nodeName) result.nodeName = define.spec.nodeName
         }
@@ -355,12 +377,10 @@ createApp({
           if (spec.type) result.serviceType = spec.type
           if (spec.clusterIP) result.clusterIP = spec.clusterIP
           if (Array.isArray(spec.ports) && spec.ports.length > 0) {
-            result.ports = spec.ports.map((p) => `${p.port}/${p.protocol || 'TCP'}`).join(', ')
+            result.ports = spec.ports.map((p) => `${p.port}/${p.protocol || 'TCP'}`)
           }
           if (spec.selector) {
-            result.selector = Object.entries(spec.selector)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(', ')
+            result.selector = Object.entries(spec.selector).map(([k, v]) => `${k}=${v}`)
           }
         }
         if (['ConfigMap', 'Secret'].includes(resource.kind)) {
@@ -392,9 +412,9 @@ createApp({
             result.identityId = status.identity.id
           }
           if (Array.isArray(status['named-ports']) && status['named-ports'].length > 0) {
-            result.namedPorts = status['named-ports']
-              .map((p) => `${p.name || 'port'}:${p.port}/${p.protocol || 'TCP'}`)
-              .join(', ')
+            result.namedPorts = status['named-ports'].map(
+              (p) => `${p.name || 'port'}:${p.port}/${p.protocol || 'TCP'}`,
+            )
           }
           if (status['external-identifiers']) {
             const ext = status['external-identifiers']
@@ -403,12 +423,7 @@ createApp({
           }
         }
         if (metadata.labels && Object.keys(metadata.labels).length > 0) {
-          const labels = Object.entries(metadata.labels)
-          result.labels = labels
-            .slice(0, 5)
-            .map(([k, v]) => `${k}=${v}`)
-            .join(', ')
-          if (labels.length > 5) result.labels += ` (+${labels.length - 5})`
+          result.labels = Object.entries(metadata.labels).map(([k, v]) => `${k}=${v}`)
         }
         if (!result.status) {
           if (typeof status.phase === 'string' && status.phase) result.status = status.phase
@@ -417,10 +432,9 @@ createApp({
             result.status = status.currentStatus
         }
         if (Array.isArray(status.conditions) && status.conditions.length > 0) {
-          result.conditionsSummary = status.conditions
-            .slice(0, 3)
-            .map((c) => `${c.type || 'Condition'}:${c.status || 'Unknown'}`)
-            .join(', ')
+          result.conditionsSummary = status.conditions.map(
+            (c) => `${c.type || 'Condition'}:${c.status || 'Unknown'}`,
+          )
           if (!result.status) {
             const healthy = status.conditions.find(
               (c) =>
@@ -1019,7 +1033,7 @@ createApp({
     const fetchResourceList = async () => {
       loading.value = true
       try {
-        const params = new URLSearchParams({ page: currentPage.value, pageSize: 20 })
+        const params = new URLSearchParams({ page: currentPage.value, pageSize: RESOURCE_PAGE_SIZE })
         if (selectedNs.value !== 'all') params.set('namespace', selectedNs.value)
         const res = await fetch('/k8s/resources/graph/nodes?' + params.toString())
         if (!res.ok) throw new Error(`获取资源列表失败 (${res.status})`)
@@ -1039,12 +1053,14 @@ createApp({
           source: n.source || '',
         }))
         allEdges.value = []
+        nsKinds.value = data.kinds || []
         const tc = data.totalCount || allNodes.value.length
-        totalPages.value = Math.max(1, Math.ceil(tc / 20))
+        totalPages.value = Math.max(1, Math.ceil(tc / RESOURCE_PAGE_SIZE))
       } catch (err) {
         console.error('Fetch resource list error:', err)
         error.value = err.message || '加载资源列表失败'
         allNodes.value = []
+        nsKinds.value = []
         totalPages.value = 1
       } finally {
         loading.value = false
@@ -1100,6 +1116,12 @@ createApp({
 
     const fetchBusinessTopology = async () => {
       loading.value = true
+      // 先同步清空，避免业务数据请求期间资源列表短暂显示上一模式的物理节点（切换“没生效”的错觉）。
+      // watch 为 pre-flush，此清空发生在组件重渲染前，故中间态不会被渲染出来。
+      // nsKinds 一并清空，避免“资源类型”面板残留上一次物理命名空间的类型。
+      allNodes.value = []
+      allEdges.value = []
+      nsKinds.value = []
       try {
         const res = await fetch('/api/v1/business-topology/graph')
         if (!res.ok) throw new Error(`获取业务拓扑数据失败 (${res.status})`)
@@ -1158,7 +1180,9 @@ createApp({
       currentPage.value = 1
       suggestions.value = []
       suggestVisible.value = false
-      fetchResourceList()
+      // 业务拓扑与命名空间无关；仅物理模式下重新拉取资源列表，
+      // 否则会用物理数据冲掉业务视图（同类“切换后需手动刷新/视图错乱”问题）。
+      if (viewMode.value === 'physical') fetchResourceList()
     })
 
     watch(selectedResourceUid, (newVal) => {
@@ -1183,6 +1207,8 @@ createApp({
 
     watch(viewMode, (newMode) => {
       if (newMode === 'business') {
+        // "集群级"是物理拓扑概念，业务模式无此项；若从集群级切来则回到"所有命名空间"
+        if (selectedNs.value === CLUSTER_SCOPED_NS) selectedNs.value = 'all'
         fetchBusinessTopology()
       } else {
         if (selectedResourceUid.value) {
@@ -1224,6 +1250,12 @@ createApp({
     watch(kindFilter, (val) => {
       clearTimeout(suggestTimer)
       if (!val || !val.trim()) {
+        suggestions.value = []
+        suggestVisible.value = false
+        return
+      }
+      // 业务模式下联想查的是物理资源，选中会清空业务图；改为仅靠 nodesInNs 客户端按名称过滤业务应用
+      if (viewMode.value === 'business') {
         suggestions.value = []
         suggestVisible.value = false
         return

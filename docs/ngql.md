@@ -22,7 +22,7 @@
 |-----|------|------|
 | **K8sResource** | K8s 资源实体 | uid, name, kind, api_version, api_group, name_space, labels, resource_define, cluster, is_deleted, deleted_at |
 | **Label** | K8s 标签 | uid, key, value |
-| **BusinessApp** | 业务应用实体 | uid, app_name, namespace, criticality, environment, team, business_unit |
+| **BusinessApp** | 业务应用实体 | uid, app_name, namespace, criticality, environment, team, business_unit, owner_name, owner_kind |
 
 ### 1.3 EDGE（按类别）
 
@@ -47,7 +47,7 @@
 | **Ingress** | BelongsToIngressClass | Ingress → IngressClass | IngressClass 绑定 |
 | | RoutesToSvc | Ingress → Service | 路由目标 |
 | | UsesTLS | Ingress → Secret | TLS 证书 |
-| | Uses | Ingress → Service | 通用引用 |
+| | Uses | APIService → Service | 聚合型 APIService 的后端 Service |
 | **RBAC** | ServiceAccount | Pod → ServiceAccount | SA 挂载 |
 | | BelongsToClusterRole | ClusterRoleBinding → ClusterRole | 集群角色绑定 |
 | | BelongsToRole | RoleBinding → Role | 角色绑定 |
@@ -65,6 +65,15 @@
 | **业务** | BelongsToApp | K8sResource → BusinessApp | 资源归属业务 |
 | | CallsApp | BusinessApp → BusinessApp | 应用间调用 |
 | | AutoScales | HPA → ScaleTarget | HPA 扩缩容（含 min/max/current replicas） |
+| **元数据/APF/CNI** | ReferencesPriorityLevel | FlowSchema → PriorityLevelConfiguration | APF：FlowSchema 引用的优先级（FlowSchema→SA/User/Group 复用上面 RBAC 的 BelongsTo*）|
+| | CiliumEpToPod | CiliumEndpoint → Pod | Cilium 端点对应 Pod（同名同 ns）|
+| | CiliumEpHasIdentity | CiliumEndpoint → CiliumIdentity | Cilium 端点使用的安全身份（status.identity.id）|
+| | DefinesResource | CustomResourceDefinition → K8sResource | CRD 定义的 CR 实例（按 group+kind 匹配）|
+| | ServesCRD | APIService → CustomResourceDefinition | CRD 支撑型 APIService 服务的 API group 下的 CRD（同 spec.group）|
+
+> **集群级资源的拓扑连通**：CRD / APIService / FlowSchema / PriorityLevelConfiguration / Cilium* 等集群级资源既无 ownerReferences 也无 namespace，通用的 OwnedBy/BelongsTo 边对它们落空，此前在拓扑图里表现为孤立点（点进去只有自己）。上面「元数据/APF/CNI」类边（外加 FlowSchema→subjects 复用 RBAC 的 BelongsTo*）按各自 `resource_define` 里的真实引用把它们接入关系图。
+> **仍天然孤立**（无关系可建，属正常）：Local 型 APIService（内置 group，`spec.service` 为 null 且无对应 CRD）、未被任何 Binding 引用的 ClusterRole、既无存活 CR 实例又无同 group APIService 的 CRD。
+> **存量回填**：`POST /api/v1/stats/backfill-relationships` 对 FlowSchema/CiliumEndpoint/CustomResourceDefinition/APIService 重跑 `Relationship`（幂等）；新部署重启时 informer relist 也会对这些资源重新建边。
 
 ### 1.4 索引
 
@@ -81,6 +90,7 @@
 | | `label_key_value` | key(128), value(128) |
 | BusinessApp | `bizapp_name` | app_name(128) |
 | | `bizapp_ns` | namespace(128) |
+| | `bizapp_owner_name` | owner_name(128) |
 | OwnedBy | `owner_id` | owner_uid(128) |
 | | `owner_kind` | owner_kind(128) |
 | | `owner_name` | owner_name(128) |

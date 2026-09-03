@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -12,7 +11,6 @@ import (
 
 	"gitee.com/tddh/mutong/interfaces"
 	"gitee.com/tddh/mutong/models"
-	"github.com/allegro/bigcache/v3"
 	"go.uber.org/zap"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -417,72 +415,4 @@ func (d *K8sResoureService) processKafkaMessage(unstructuredObj *unstructured.Un
 
 	d.invalidateMetadataCache()
 	return true
-}
-
-func (d *K8sResoureService) UpdateDeletedResource() {
-	query := `MATCH (v:K8sResource{is_deleted: false}) RETURN v.K8sResource.uid as uid,v.K8sResource.name as name`
-
-	d.logger.Debug("UpdateDeletedResource query", zap.String("query", query))
-
-	resultSet, err := d.graphDB.ExecuteAndCheck(query)
-	if err != nil {
-		d.logger.Error("Failed to execute query", zap.String("query", query), zap.Error(err))
-		return
-	}
-
-	if resultSet == nil {
-		d.logger.Debug("No result set returned")
-		return
-	}
-
-	rows := resultSet.GetRows()
-	if len(rows) == 0 {
-		d.logger.Debug("No resource found with the given name")
-		return
-	}
-
-	for _, row := range rows {
-		uid := string(row.Values[0].GetSVal())
-		name := string(row.Values[1].GetSVal())
-
-		_, err := d.cache.Get(uid)
-		if errors.Is(err, bigcache.ErrEntryNotFound) {
-
-			ngql := fmt.Sprintf("UPDATE VERTEX ON K8sResource %s SET is_deleted = true;", strconv.Quote(uid))
-			d.logger.Debug("Resource not found in BigCache, marking as deleted",
-
-				zap.String("uid", uid),
-				zap.String("name", name),
-				zap.String("nGQL", ngql))
-
-			_, err := d.graphDB.ExecuteAndCheck(ngql)
-			if err != nil {
-				d.logger.Error("Failed to mark resource as deleted",
-
-					zap.String("uid", uid),
-					zap.String("name", name),
-					zap.String("nGQL", ngql),
-					zap.Error(err))
-			} else {
-				d.logger.Debug("Successfully marked resource as deleted",
-
-					zap.String("name", name),
-					zap.String("uid", uid))
-			}
-		}
-
-	}
-
-	d.invalidateMetadataCache()
-
-	stats := d.cache.Stats()
-	d.logger.Debug(
-		"BigCache stats",
-
-		zap.Any("Hits", stats.Hits),
-		zap.Any("Misses", stats.Misses),
-		zap.Any("DelHits", stats.DelHits),
-		zap.Any("DelMisses", stats.DelMisses),
-		zap.Any("Collisions", stats.Collisions),
-	)
 }

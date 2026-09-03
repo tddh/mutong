@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"gitee.com/tddh/mutong/config"
-	"github.com/allegro/bigcache/v3"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
 
 	"gitee.com/tddh/mutong/interfaces"
@@ -117,40 +116,6 @@ func TestSeedToKafka_ValidMessage(t *testing.T) {
 	if msg.EventType != "Added" {
 		t.Errorf("Expected event type 'Added', got %q", msg.EventType)
 	}
-}
-
-// --- Tests for UpdateDeletedResource ---
-
-func TestUpdateDeletedResource_CacheHitNoAction(t *testing.T) {
-	mockDB := &mockNebulaGraphDB{
-		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
-			return nil, nil
-		},
-	}
-	mockCache := &mockNebulaCache{
-		getFn: func(key string) ([]byte, error) {
-			return []byte("v123"), nil
-		},
-	}
-	svc := newTestCollectorService(mockDB, mockCache, nil)
-
-	svc.UpdateDeletedResource()
-}
-
-func TestUpdateDeletedResource_CacheMiss(t *testing.T) {
-	mockDB := &mockNebulaGraphDB{
-		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
-			return nil, nil
-		},
-	}
-	mockCache := &mockNebulaCache{
-		getFn: func(key string) ([]byte, error) {
-			return nil, bigcache.ErrEntryNotFound
-		},
-	}
-	svc := newTestCollectorService(mockDB, mockCache, nil)
-
-	svc.UpdateDeletedResource()
 }
 
 // --- Tests for Kafka message marshaling ---

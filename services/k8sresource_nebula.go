@@ -401,10 +401,12 @@ func (d *K8sResoureService) ForceSyncResources() {
 
 	// 3. Compare and mark as deleted in Nebula
 	deletedCount := 0
+	now := time.Now().Unix()
 	for uid := range nebulaUIDs {
 		if !k8sUIDs[uid] {
 			d.logger.Debug("Marking resource as deleted", zap.String("uid", uid))
-			cleanupQuery := fmt.Sprintf(`UPDATE VERTEX ON K8sResource "%s" SET is_deleted = true`, uid)
+			// 补写 deleted_at：让保留期从"标记删除时刻"起算；否则 deleted_at=0 会被清理任务立即回收、失去保留期
+			cleanupQuery := fmt.Sprintf(`UPDATE VERTEX ON K8sResource "%s" SET is_deleted = true, deleted_at = %d`, uid, now)
 			_, _ = d.graphDB.Execute(cleanupQuery)
 			d.CleanupAllOutgoingEdges(uid)
 			deletedCount++
@@ -448,6 +450,9 @@ func (d *K8sResoureService) StartPeriodicCleanup(interval time.Duration, retenti
 				d.logger.Info("Periodic cleanup stopped")
 				return
 			case <-ticker.C:
+				// 先对账活集群、把幽灵(图里有但集群已无)标记 is_deleted=true+deleted_at，
+				// 再抽干超过保留期的软删顶点及其悬挂边
+				d.ForceSyncResources()
 				d.cleanupExpiredDeletedVertices(retentionDays, batchSize)
 			}
 		}
@@ -461,37 +466,77 @@ func (d *K8sResoureService) cleanupExpiredDeletedVertices(retentionDays int, bat
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
 	query := fmt.Sprintf(`
 		MATCH (v:K8sResource) 
-		WHERE v.is_deleted == true AND v.K8sResource.deleted_at < %d 
+		WHERE v.K8sResource.is_deleted == true AND v.K8sResource.deleted_at < %d 
 		RETURN v.K8sResource.uid as uid 
 		LIMIT %d`, cutoff, batchSize)
 
-	resultSet, err := d.graphDB.Execute(query)
-	if err != nil || resultSet == nil {
-		d.logger.Error("Cleanup query failed", zap.Error(err))
-		return
-	}
+	const deleteChunk = 200         // 单条 DELETE VERTEX 携带的最大 vid 数，避免语句过长
+	const maxDeletesPerRun = 100000 // 单次运行安全上限，防跑飞；超出留待下次 tick
 
-	rows := resultSet.GetRows()
-	if len(rows) == 0 {
-		d.logger.Debug("No expired deleted vertices found")
-		return
-	}
-
-	deletedCount := 0
-	for _, row := range rows {
-		uid := string(row.Values[0].GetSVal())
-		delQuery := fmt.Sprintf(`DELETE VERTEX "%s";`, uid)
-		_, err := d.graphDB.Execute(delQuery)
-		if err != nil {
-			d.logger.Error("Failed to delete vertex", zap.String("uid", uid), zap.Error(err))
-			continue
+	totalDeleted := 0
+	for {
+		resultSet, err := d.graphDB.Execute(query)
+		if err != nil || resultSet == nil {
+			d.logger.Error("Cleanup query failed", zap.Error(err))
+			break
 		}
-		deletedCount++
+		rows := resultSet.GetRows()
+		if len(rows) == 0 {
+			break // 已抽干
+		}
+
+		uids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			if uid := string(row.Values[0].GetSVal()); uid != "" {
+				uids = append(uids, strconv.Quote(uid))
+			}
+		}
+
+		batchDeleted := 0
+		// 分块批量删除，WITH EDGE 连带清理悬挂边（只删点会残留边）
+		for start := 0; start < len(uids); start += deleteChunk {
+			end := start + deleteChunk
+			if end > len(uids) {
+				end = len(uids)
+			}
+			chunk := uids[start:end]
+			delQuery := fmt.Sprintf("DELETE VERTEX %s WITH EDGE;", strings.Join(chunk, ","))
+			if _, err := d.graphDB.Execute(delQuery); err != nil {
+				d.logger.Error("Batch delete failed, falling back to per-vertex",
+					zap.Int("chunk", len(chunk)), zap.Error(err))
+				for _, vid := range chunk {
+					if _, e := d.graphDB.Execute(fmt.Sprintf("DELETE VERTEX %s WITH EDGE;", vid)); e != nil {
+						d.logger.Error("Failed to delete vertex", zap.String("vid", vid), zap.Error(e))
+						continue
+					}
+					batchDeleted++
+				}
+			} else {
+				batchDeleted += len(chunk)
+			}
+		}
+		totalDeleted += batchDeleted
+
+		if batchDeleted == 0 {
+			// 整批一个都没删掉（权限/语法等），停止以免用同一批 uid 死循环
+			d.logger.Error("Cleanup batch made no progress, stopping to avoid infinite loop",
+				zap.Int("found", len(rows)))
+			break
+		}
+		if totalDeleted >= maxDeletesPerRun {
+			d.logger.Warn("Cleanup reached per-run safety cap, will continue next run",
+				zap.Int("deleted", totalDeleted), zap.Int("cap", maxDeletesPerRun))
+			break
+		}
+		if len(rows) < batchSize {
+			break // 本批不足 batchSize，说明已抽干
+		}
 	}
 
-	d.logger.Debug("Cleanup completed",
-		zap.Int("deletedCount", deletedCount),
-		zap.Int("totalFound", len(rows)))
+	d.logger.Info("Cleanup of expired deleted vertices completed",
+		zap.Int("retentionDays", retentionDays),
+		zap.Int("batchSize", batchSize),
+		zap.Int("deletedCount", totalDeleted))
 }
 
 func contains(slice []string, item string) bool {

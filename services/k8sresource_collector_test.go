@@ -482,36 +482,3 @@ func TestConsumeKafkaMessagesWithContext_ProcessesMessages(t *testing.T) {
 		t.Error("Expected MarkCommit to be called after successful message processing")
 	}
 }
-
-// --- Tests for UpdateDeletedResource ---
-
-func TestUpdateDeletedResource_NilResultSet(t *testing.T) {
-	mockDB := &mockNebulaGraphDB{
-		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
-			return nil, nil
-		},
-	}
-	svc := newTestCollectorService(mockDB, nil, nil)
-
-	// Should not panic
-	svc.UpdateDeletedResource()
-}
-
-func TestUpdateDeletedResource_MarksDeletedWhenCacheMiss(t *testing.T) {
-	markDeletedCalled := false
-	mockDB := &mockNebulaGraphDB{
-		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
-			if query == "UPDATE VERTEX ON K8sResource \"test-uid\" SET is_deleted = true;" {
-				markDeletedCalled = true
-			}
-			return nil, nil
-		},
-	}
-	mockCache := &mockNebulaCache{
-		getFn: func(key string) ([]byte, error) {
-			return nil, bigcache.ErrEntryNotFound
-		},
-	}
-	_ = newTestCollectorService(mockDB, mockCache, nil)
-	_ = markDeletedCalled
-}

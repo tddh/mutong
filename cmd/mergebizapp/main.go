@@ -65,6 +65,7 @@ func main() {
 
 		if *dryRun {
 			fmt.Printf("would merge: %s -> %s (owner=%s, ns=%s)\n", dupUID, uid, owner, ns)
+			merged++
 			continue
 		}
 

@@ -41,9 +41,11 @@ const (
 )
 
 type blsVertexBatchItem struct {
-	app  models.BusinessApp
-	msg  *interfaces.Message
-	hash string
+	app        models.BusinessApp
+	msg        *interfaces.Message
+	baseHash   string // 基础属性去重
+	ownerHash  string // owner 去重（仅 writeOwner 时有效）
+	writeOwner bool   // 仅控制器级资源(Deployment/StatefulSet/DaemonSet/CronJob)为 true
 }
 
 type blsEdgeBatchItem struct {
@@ -272,6 +274,15 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 
 	_ = s.cache.Delete("bls-orphan:" + bizUID)
 
+	kind := unstructuredObj.GetKind()
+	resName := unstructuredObj.GetName()
+	// owner 仅由控制器级工作负载写入，避免 Pod/ReplicaSet/Job 覆盖导致归属漂移
+	writeOwner := isPrimaryControllerKind(kind)
+	ownerName, ownerKind := "", ""
+	if writeOwner {
+		ownerName, ownerKind = resName, kind
+	}
+
 	app := models.BusinessApp{
 		UID:          bizUID,
 		AppName:      appName,
@@ -280,18 +291,32 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 		Environment:  bizAttrs.Environment,
 		Team:         bizAttrs.Team,
 		BusinessUnit: bizAttrs.BusinessUnit,
-		OwnerName:    unstructuredObj.GetName(),
-		OwnerKind:    unstructuredObj.GetKind(),
+		OwnerName:    ownerName,
+		OwnerKind:    ownerKind,
 	}
 
-	attrsHash := s.hashBusinessAttrs(appName, namespace, unstructuredObj.GetName(), unstructuredObj.GetKind(), bizAttrs)
-	hashKey := "bls-hash:" + namespace + ":" + appName
+	baseHash := s.hashBaseAttrs(appName, namespace, bizAttrs)
+	baseKey := "bls-hash:" + namespace + ":" + appName
 	eKey := cacheKeyPrefixE + uid + "->" + bizUID
 
-	var cachedHash []byte
+	var cachedBase []byte
 	if s.relationCache != nil {
-		cachedHash, _ = s.relationCache.Get(hashKey)
+		cachedBase, _ = s.relationCache.Get(baseKey)
 	}
+	needBase := cachedBase == nil || string(cachedBase) != baseHash
+
+	ownerHash := ""
+	needOwner := false
+	if writeOwner {
+		ownerHash = s.hashOwnerAttrs(ownerName, ownerKind)
+		ownerKey := "bls-owner:" + namespace + ":" + appName
+		var cachedOwner []byte
+		if s.relationCache != nil {
+			cachedOwner, _ = s.relationCache.Get(ownerKey)
+		}
+		needOwner = cachedOwner == nil || string(cachedOwner) != ownerHash
+	}
+
 	cachedEdge, _ := s.cache.Get(eKey)
 
 	s.bufferMu.Lock()
@@ -301,8 +326,10 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 		_ = s.cache.Set(eKey, []byte("1"))
 	}
 
-	if cachedHash == nil || string(cachedHash) != attrsHash {
-		s.vertexBuffer = append(s.vertexBuffer, blsVertexBatchItem{app: app, msg: msg, hash: attrsHash})
+	if needBase || needOwner {
+		s.vertexBuffer = append(s.vertexBuffer, blsVertexBatchItem{
+			app: app, msg: msg, baseHash: baseHash, ownerHash: ownerHash, writeOwner: writeOwner,
+		})
 	}
 
 	shouldFlush := len(s.vertexBuffer) >= blsFlushThreshold || len(s.edgeBuffer) >= blsFlushThreshold
@@ -315,11 +342,27 @@ func (s *BusinessLabelSyncer) syncApp(obj interface{}, clusterName string, resou
 	_ = s.cache.Set(cacheKey, []byte(resourceVersion))
 }
 
-func (s *BusinessLabelSyncer) hashBusinessAttrs(appName, namespace, ownerName, ownerKind string, bizAttrs config.NamespaceMappingEntry) string {
+// isPrimaryControllerKind 判定是否为顶层工作负载控制器——只有它们才写 BusinessApp 的 owner_name/owner_kind。
+// 不含 Job(常为 CronJob 子任务或临时任务)、ReplicaSet(Deployment 派生)、Pod(副本)，避免归属漂移到非主体资源。
+func isPrimaryControllerKind(kind string) bool {
+	switch kind {
+	case "Deployment", "StatefulSet", "DaemonSet", "CronJob":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *BusinessLabelSyncer) hashBaseAttrs(appName, namespace string, bizAttrs config.NamespaceMappingEntry) string {
 	h := sha256.Sum256([]byte(strings.Join([]string{
-		appName, namespace, ownerName, ownerKind,
+		appName, namespace,
 		bizAttrs.Criticality, bizAttrs.Environment, bizAttrs.Team, bizAttrs.BusinessUnit,
 	}, "|")))
+	return string(h[:])
+}
+
+func (s *BusinessLabelSyncer) hashOwnerAttrs(ownerName, ownerKind string) string {
+	h := sha256.Sum256([]byte(ownerName + "|" + ownerKind))
 	return string(h[:])
 }
 
@@ -477,9 +520,16 @@ func (s *BusinessLabelSyncer) flushBuffers() {
 }
 
 func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem) bool {
-	values := make([]string, 0, len(items))
+	// 同一 bizUID 本批次去重：控制器项优先(写 owner)，并跳过与之重复的非控制器项。
+	controllerUIDs := make(map[string]bool)
 	for _, item := range items {
-		values = append(values, fmt.Sprintf(
+		if item.writeOwner {
+			controllerUIDs[item.app.UID] = true
+		}
+	}
+
+	buildRow := func(item blsVertexBatchItem) string {
+		return fmt.Sprintf(
 			`%s:(%s, %s, %s, %s, %s, %s, %s, %s, %s)`,
 			strconv.Quote(item.app.UID),
 			strconv.Quote(item.app.UID),
@@ -491,24 +541,73 @@ func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem)
 			strconv.Quote(item.app.BusinessUnit),
 			strconv.Quote(item.app.OwnerName),
 			strconv.Quote(item.app.OwnerKind),
-		))
+		)
 	}
-	query := fmt.Sprintf(`INSERT VERTEX BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit, owner_name, owner_kind) VALUES %s;`,
-		strings.Join(values, ", "))
-	if _, err := s.graphDB.ExecuteAndCheck(query); err != nil {
-		s.logger.Error("Failed to batch upsert BusinessApp vertices",
-			zap.Int("count", len(items)),
-			zap.String("query_preview", query[:min(len(query), 500)]),
-			zap.Error(err))
-		return false
-	}
+
+	ctrlValues := make([]string, 0, len(items))
+	nonCtrlValues := make([]string, 0, len(items))
+	ctrlSeen := make(map[string]bool)
+	nonCtrlSeen := make(map[string]bool)
 	for _, item := range items {
-		if item.hash != "" && s.relationCache != nil {
-			hashKey := "bls-hash:" + item.app.Namespace + ":" + item.app.AppName
-			_ = s.relationCache.Set(hashKey, []byte(item.hash))
+		if item.writeOwner {
+			if ctrlSeen[item.app.UID] {
+				continue
+			}
+			ctrlSeen[item.app.UID] = true
+			ctrlValues = append(ctrlValues, buildRow(item))
+		} else {
+			if controllerUIDs[item.app.UID] || nonCtrlSeen[item.app.UID] {
+				continue
+			}
+			nonCtrlSeen[item.app.UID] = true
+			nonCtrlValues = append(nonCtrlValues, buildRow(item))
 		}
 	}
-	s.logger.Debug("Batch upserted BusinessApp vertices", zap.Int("count", len(items)))
+
+	ok := true
+	// 控制器级：普通 INSERT（整点覆盖，写入 owner）
+	if len(ctrlValues) > 0 {
+		query := fmt.Sprintf(`INSERT VERTEX BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit, owner_name, owner_kind) VALUES %s;`,
+			strings.Join(ctrlValues, ", "))
+		if _, err := s.graphDB.ExecuteAndCheck(query); err != nil {
+			s.logger.Error("Failed to insert controller BusinessApp vertices",
+				zap.Int("count", len(ctrlValues)),
+				zap.String("query_preview", query[:min(len(query), 500)]),
+				zap.Error(err))
+			ok = false
+		}
+	}
+	// 非控制器级：IF NOT EXISTS（仅在顶点缺失时创建，绝不覆盖已有 owner）
+	if len(nonCtrlValues) > 0 {
+		query := fmt.Sprintf(`INSERT VERTEX IF NOT EXISTS BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit, owner_name, owner_kind) VALUES %s;`,
+			strings.Join(nonCtrlValues, ", "))
+		if _, err := s.graphDB.ExecuteAndCheck(query); err != nil {
+			s.logger.Error("Failed to insert non-controller BusinessApp vertices",
+				zap.Int("count", len(nonCtrlValues)),
+				zap.String("query_preview", query[:min(len(query), 500)]),
+				zap.Error(err))
+			ok = false
+		}
+	}
+	if !ok {
+		return false
+	}
+
+	if s.relationCache != nil {
+		for _, item := range items {
+			if item.baseHash != "" {
+				baseKey := "bls-hash:" + item.app.Namespace + ":" + item.app.AppName
+				_ = s.relationCache.Set(baseKey, []byte(item.baseHash))
+			}
+			if item.writeOwner && item.ownerHash != "" {
+				ownerKey := "bls-owner:" + item.app.Namespace + ":" + item.app.AppName
+				_ = s.relationCache.Set(ownerKey, []byte(item.ownerHash))
+			}
+		}
+	}
+	s.logger.Debug("Batch upserted BusinessApp vertices",
+		zap.Int("controllers", len(ctrlValues)),
+		zap.Int("non_controllers", len(nonCtrlValues)))
 	return true
 }
 

@@ -217,6 +217,72 @@ func TestSyncApp_UsesNormalizationWhenNoLabel(t *testing.T) {
 	t.Fatalf("syncApp should create bizUID with normalized name 'redis', got calls: %v", calls)
 }
 
+func TestSyncApp_ControllerWritesOwner(t *testing.T) {
+	calls := make([]string, 0)
+	db := &mockNebulaGraphDB{
+		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
+			calls = append(calls, query)
+			return nil, nil
+		},
+	}
+	s := newTestBlsSyncer(db, config.AppNameNormalizationConf{Enabled: false})
+
+	obj := makeTestUnstructured("Deployment", "myapp", "default", "ctrl-uid")
+	obj.SetLabels(map[string]string{"app.kubernetes.io/name": "myapp"})
+
+	s.syncApp(obj, "test-cluster", "", "bls:ctrl-uid", nil)
+	s.flushBuffers()
+
+	vertexCall := ""
+	for _, c := range calls {
+		if strHas(c, "BusinessApp(") {
+			vertexCall = c
+		}
+	}
+	if vertexCall == "" {
+		t.Fatalf("no BusinessApp vertex insert, calls: %v", calls)
+	}
+	if strHas(vertexCall, "IF NOT EXISTS") {
+		t.Errorf("controller should use plain INSERT to overwrite owner, got: %s", vertexCall)
+	}
+	if !strHas(vertexCall, `"Deployment"`) {
+		t.Errorf("controller insert should carry owner_kind Deployment, got: %s", vertexCall)
+	}
+}
+
+func TestSyncApp_NonControllerPreservesOwner(t *testing.T) {
+	calls := make([]string, 0)
+	db := &mockNebulaGraphDB{
+		executeAndCheck: func(query string) (*nebula.ResultSet, error) {
+			calls = append(calls, query)
+			return nil, nil
+		},
+	}
+	s := newTestBlsSyncer(db, config.AppNameNormalizationConf{Enabled: false})
+
+	obj := makeTestUnstructured("Pod", "myapp-6f9d7c", "default", "pod-uid")
+	obj.SetLabels(map[string]string{"app.kubernetes.io/name": "myapp"})
+
+	s.syncApp(obj, "test-cluster", "", "bls:pod-uid", nil)
+	s.flushBuffers()
+
+	vertexCall := ""
+	for _, c := range calls {
+		if strHas(c, "BusinessApp(") {
+			vertexCall = c
+		}
+	}
+	if vertexCall == "" {
+		t.Fatalf("no BusinessApp vertex insert, calls: %v", calls)
+	}
+	if !strHas(vertexCall, "IF NOT EXISTS") {
+		t.Errorf("non-controller should use INSERT VERTEX IF NOT EXISTS to preserve owner, got: %s", vertexCall)
+	}
+	if strHas(vertexCall, `"myapp-6f9d7c"`) {
+		t.Errorf("non-controller must NOT write pod name as owner, got: %s", vertexCall)
+	}
+}
+
 func TestRemoveApp_DeletesEdgeAndVertexWhenLastRef(t *testing.T) {
 	calls := make([]string, 0)
 	db := &mockNebulaGraphDB{

@@ -982,3 +982,31 @@ git commit -m "feat(topology): FlowTopologySyncer 消费 Beyla L4 flow 指标补
 - Task 8 上线前需先确认线上 Beyla 版本（v2 用 `network.enable`、v3 用 `metrics.features`），并抓一个真实 flow 数据点确认 src/dst 属性名；`otel_metrics_export` 与 metrics pipeline 属基础设施变更，需在测试环境先行验证。
 
 **每个 Task 独立可交付**：Task 1-8 各自 build+test 通过即可 commit，不依赖后续 Task 才能跑起来（Task 8 依赖 Task 3 已合入）。
+
+---
+
+## 增量：业务顶点来源可追溯（2026-09-03 已实现并部署）
+
+**动机**：业务拓扑里点开一个 `BusinessApp` 顶点，只看得到 appName/团队/业务单元/关键等级/环境，**看不出它到底由哪个 K8s 资源创建**，也分不清是「真实资源建模」还是「链路推断出来的幽灵身份」。生产实测：145 个业务顶点中，仅 59 个有真实资源经 `BelongsToApp` 指向（资源建模），其余 **86 个（60%）是 trace 自动建出的幽灵点**（`owner_name` 为 NULL、无任何成员），如 `ingress-nginx-controller`、`bizapp-cluster1--:`、`juicefs-worker-02-…`、typo 的 `dingofgofs`。
+
+**关键设计取舍**：`owner_name/owner_kind` 是「最后写入者胜出」的单值，不可靠（实测 percona-postgresql 的 owner 被临时备份 `Job` 抢占、nebula-graph 的 owner 是 `metad` 而非主体）。因此**权威的「创建来源」= `BelongsToApp` 入边反查的成员集合**，归属工作负载从成员里推导（优先未删除的控制器级），`owner_name` 仅作快速提示。
+
+**实现要点**：
+- **A 详情端点**：`BusinessTopologyService.GetAppDetail(uid)` + `GET /api/v1/business-topology/app?uid=`。返回顶点属性 + `BelongsToApp` 反查的成员资源（kind/name/ns/uid/is_deleted/isController）+ 从成员推导的 `primaryWorkload` + `provenance`（有成员=`label` / 无=`trace`）。前端点击业务顶点懒加载，详情面板新增「🏢 业务应用」区块：来源徽标、归属负载、可点击跳转物理拓扑并选中的成员清单。
+- **A3 图面区分**：`GetApps/GetGraph` 节点增加 `ownerName/ownerKind/provenance`（一次性查出有成员的顶点集合判定，不逐点查）；force-graph 对 trace 幽灵点用**灰色虚线**绘制、子标签显示归属工作负载类型（如 Deployment）或「链路推断」，不点开即可分辨真假。
+- **B owner 控制器优先**：`business_label_syncer.syncApp` 仅当资源是 `Deployment/StatefulSet/DaemonSet/CronJob` 时才写 `owner_name/owner_kind`；`batchUpsertBusinessApp` 分区写入——控制器级用 `INSERT VERTEX`（覆盖、写 owner），非控制器级用 `INSERT VERTEX IF NOT EXISTS`（仅在顶点缺失时创建，**绝不覆盖已有 owner**，规避 Nebula INSERT 整点覆盖会清空 owner 的坑）；去重拆为 baseHash/ownerHash 双键，避免 Pod 等非控制器资源反复触发写。
+- **C 计数修复**：`cmd/mergebizapp` 的 dry-run 分支此前不自增计数器，结尾恒显示「0 merges」，与实际列出的待合并条目不符；已修复。
+
+**验证（tf001 生产实例，经真实 HTTP 面）**：
+- `coredns` → `provenance=label`、`primary=Deployment/coredns`、成员 1 条且 `isController=true`
+- 幽灵点 `ingress-nginx-controller` → `provenance=trace`、`memberCount=0`、owner 空
+- `percona-postgresql` → 诚实反映成员就是 `Job/pg-c1-pg-db-backup-7mxt`
+- `/graph` → 145 节点，**59 label / 86 trace**，与图库 `LOOKUP`/`MATCH` 实测一致
+- 探针：空 uid→500 干净错误不 panic；不存在/异类 uid→200 优雅空；注入 `uid=x") DELETE VERTEX "…"` 被 `strconv.Quote` 中和、复核 coredns 顶点未被误删
+- B 的 `INSERT VERTEX IF NOT EXISTS` 语法经真实 Nebula 验证有效，启动后 BLS 无插入错误
+
+**遗留（诚实记录，未在本次处理）**：
+- 86 个幽灵点中，`cmd/mergebizapp -dry-run` 仅识别出 **4 个身份明确、可安全合并**的重复对（metallb-speaker→metallb、vm-…-vmselect→victoria-metrics-cluster、radpanda-connect-…→redpanda-connect、nebula-operator-scheduler-deployment→nebula-operator）。该合并是破坏性操作（迁边 + DELETE VERTEX），**已 dry-run 就绪但暂未执行**，需人工确认。
+- 其余 ~82 个幽灵点**不能一刀切删**：含真实外部依赖（`googleapis-storage`/`gravatar-secure`/`com-grafana`，是真实出向流量）与合法链路-only 组件。其根因是 **trace 解析器**——ns 未解析（22 个 `bizapp-cluster1--*`）、Pod 序号未上卷（`redpanda-0/1/2`、`vmagent-0/1/2`、`nebula-storaged-0/1/2` 本应上卷到 workload）、FQDN 字符损坏（`dingofs` 的 ~15 个变体）——属 Task 4/5 范畴，需单独评估，不在「丰富顶点信息」内。
+
+**相关 commit**：`457fd2f`（A/A3）、`86f6348`（B）、`de4e47d`（C 计数修复）。

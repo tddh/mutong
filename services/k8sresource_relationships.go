@@ -478,6 +478,209 @@ func (d *K8sResoureService) processRoleBindingRelationship(unstructuredObj *unst
 	}
 }
 
+// nestedIDString 从嵌套字段取出数值型 id 并转为字符串，兼容 float64/int64/json.Number/string
+// （unmarshalResourceDefine 用标准 json.Unmarshal，数值会是 float64）。
+func nestedIDString(obj map[string]interface{}, fields ...string) string {
+	v, found, err := unstructured.NestedFieldNoCopy(obj, fields...)
+	if err != nil || !found || v == nil {
+		return ""
+	}
+	switch n := v.(type) {
+	case string:
+		return n
+	case int64:
+		return strconv.FormatInt(n, 10)
+	case float64:
+		return strconv.FormatInt(int64(n), 10)
+	case json.Number:
+		return n.String()
+	}
+	return ""
+}
+
+// processFlowSchemaRelationship 建 FlowSchema 的关系边：
+//   - FlowSchema → PriorityLevelConfiguration（spec.priorityLevelConfiguration.name）
+//   - FlowSchema → ServiceAccount/User/Group（spec.rules[].subjects[]，跳过通配 "*"）
+func (d *K8sResoureService) processFlowSchemaRelationship(obj *unstructured.Unstructured) {
+	uid := string(obj.GetUID())
+
+	plName, found, err := unstructured.NestedString(obj.Object, "spec", "priorityLevelConfiguration", "name")
+	if err == nil && found && plName != "" {
+		d.CleanupOutgoingEdgesByType(uid, "ReferencesPriorityLevel")
+		if plUID, ok := d.lookupUID("PriorityLevelConfiguration", "", plName); ok {
+			_ = d.insertEdge("ReferencesPriorityLevel", uid, plUID)
+		}
+	}
+
+	rules, found, err := unstructured.NestedSlice(obj.Object, "spec", "rules")
+	if err != nil || !found {
+		return
+	}
+	d.CleanupOutgoingEdgesByType(uid, "BelongsToServiceAccount")
+	d.CleanupOutgoingEdgesByType(uid, "BelongsToUser")
+	d.CleanupOutgoingEdgesByType(uid, "BelongsToGroup")
+	for _, r := range rules {
+		rule, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		subjects, _, _ := unstructured.NestedSlice(rule, "subjects")
+		for _, s := range subjects {
+			sub, ok := s.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			kind, _, _ := unstructured.NestedString(sub, "kind")
+			switch kind {
+			case "ServiceAccount":
+				name, _, _ := unstructured.NestedString(sub, "serviceAccount", "name")
+				ns, _, _ := unstructured.NestedString(sub, "serviceAccount", "namespace")
+				if name == "" || name == "*" {
+					continue
+				}
+				if u, ok := d.lookupUID("ServiceAccount", ns, name); ok {
+					_ = d.insertEdge("BelongsToServiceAccount", uid, u)
+				}
+			case "User":
+				name, _, _ := unstructured.NestedString(sub, "user", "name")
+				if name == "" || name == "*" {
+					continue
+				}
+				if u, ok := d.lookupUID("User", "", name); ok {
+					_ = d.insertEdge("BelongsToUser", uid, u)
+				}
+			case "Group":
+				name, _, _ := unstructured.NestedString(sub, "group", "name")
+				if name == "" || name == "*" {
+					continue
+				}
+				if u, ok := d.lookupUID("Group", "", name); ok {
+					_ = d.insertEdge("BelongsToGroup", uid, u)
+				}
+			}
+		}
+	}
+}
+
+// processCiliumEndpointRelationship 建 CiliumEndpoint 的关系边：
+//   - CiliumEndpoint → Pod（metadata.name/namespace 与 Pod 同名同 ns）
+//   - CiliumEndpoint → CiliumIdentity（status.identity.id == CiliumIdentity 名）
+func (d *K8sResoureService) processCiliumEndpointRelationship(obj *unstructured.Unstructured) {
+	uid := string(obj.GetUID())
+
+	d.CleanupOutgoingEdgesByType(uid, "CiliumEpToPod")
+	if podUID, ok := d.lookupUID("Pod", obj.GetNamespace(), obj.GetName()); ok {
+		_ = d.insertEdge("CiliumEpToPod", uid, podUID)
+	}
+
+	idStr := nestedIDString(obj.Object, "status", "identity", "id")
+	if idStr != "" {
+		d.CleanupOutgoingEdgesByType(uid, "CiliumEpHasIdentity")
+		if idUID, ok := d.lookupUID("CiliumIdentity", "", idStr); ok {
+			_ = d.insertEdge("CiliumEpHasIdentity", uid, idUID)
+		}
+	}
+}
+
+// processCustomResourceDefinitionRelationship 建 CRD → 其定义的 CR 实例 的边（DefinesResource）。
+// 按 spec.group + spec.names.kind 匹配存活的 K8sResource(api_group==group && kind==kind)。
+func (d *K8sResoureService) processCustomResourceDefinitionRelationship(obj *unstructured.Unstructured) {
+	uid := string(obj.GetUID())
+	group, _, _ := unstructured.NestedString(obj.Object, "spec", "group")
+	kind, _, _ := unstructured.NestedString(obj.Object, "spec", "names", "kind")
+	if kind == "" {
+		return
+	}
+
+	d.CleanupOutgoingEdgesByType(uid, "DefinesResource")
+
+	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == " + strconv.Quote(kind) +
+		" AND K8sResource.is_deleted == false YIELD id(vertex) AS uid, K8sResource.api_group AS grp;"
+	rows, err := d.executenGQL(query)
+	if err != nil {
+		return
+	}
+
+	values := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if len(row.Values) < 2 {
+			continue
+		}
+		crUID := string(row.Values[0].GetSVal())
+		crGroup := string(row.Values[1].GetSVal())
+		if crUID == "" || crUID == uid || crGroup != group {
+			continue
+		}
+		values = append(values, fmt.Sprintf("%s -> %s:()", strconv.Quote(uid), strconv.Quote(crUID)))
+	}
+
+	const batchSize = 500
+	for i := 0; i < len(values); i += batchSize {
+		end := i + batchSize
+		if end > len(values) {
+			end = len(values)
+		}
+		q := fmt.Sprintf("INSERT EDGE DefinesResource () VALUES %s;", strings.Join(values[i:end], ", "))
+		if _, err := d.graphDB.Execute(q); err != nil {
+			d.logger.Error("Failed to insert DefinesResource edges",
+				zap.String("crd", obj.GetName()), zap.Int("batch", end-i), zap.Error(err))
+		}
+	}
+}
+
+// processAPIServiceRelationship 建 APIService 的关系边：
+//   - 聚合型：spec.service → 后端 Service（复用通用的 Uses 边）
+//   - CRD 支撑型：spec.group → 同 group 的 CRD（ServesCRD 边）
+//
+// Local 型（内置 group，如 v1.apps）既无 spec.service 也无对应 CRD，跳过（天然孤立）。
+func (d *K8sResoureService) processAPIServiceRelationship(obj *unstructured.Unstructured) {
+	uid := string(obj.GetUID())
+
+	// 聚合型 → Service
+	if svcName, found, err := unstructured.NestedString(obj.Object, "spec", "service", "name"); err == nil && found && svcName != "" {
+		svcNs, _, _ := unstructured.NestedString(obj.Object, "spec", "service", "namespace")
+		d.CleanupOutgoingEdgesByType(uid, "Uses")
+		if svcUID, ok := d.lookupUID("Service", svcNs, svcName); ok {
+			_ = d.insertEdge("Uses", uid, svcUID)
+		}
+	}
+
+	// CRD 支撑型 → 同 group 的 CRD
+	group, _, _ := unstructured.NestedString(obj.Object, "spec", "group")
+	if group == "" {
+		return
+	}
+	d.CleanupOutgoingEdgesByType(uid, "ServesCRD")
+	rows, err := d.executenGQL(`LOOKUP ON K8sResource WHERE K8sResource.kind == "CustomResourceDefinition" AND K8sResource.is_deleted == false YIELD id(vertex) AS uid, K8sResource.name AS name;`)
+	if err != nil {
+		return
+	}
+	values := make([]string, 0, 4)
+	for _, row := range rows {
+		if len(row.Values) < 2 {
+			continue
+		}
+		crdUID := string(row.Values[0].GetSVal())
+		crdName := string(row.Values[1].GetSVal())
+		if crdUID == "" {
+			continue
+		}
+		// CRD 名 = <plural>.<group>，取第一个点之后为 group（精确匹配，避免子组误配）
+		i := strings.IndexByte(crdName, '.')
+		if i < 0 || i+1 >= len(crdName) || crdName[i+1:] != group {
+			continue
+		}
+		values = append(values, fmt.Sprintf("%s -> %s:()", strconv.Quote(uid), strconv.Quote(crdUID)))
+	}
+	if len(values) > 0 {
+		q := fmt.Sprintf("INSERT EDGE ServesCRD () VALUES %s;", strings.Join(values, ", "))
+		if _, err := d.graphDB.Execute(q); err != nil {
+			d.logger.Error("Failed to insert ServesCRD edges",
+				zap.String("apiservice", obj.GetName()), zap.Int("count", len(values)), zap.Error(err))
+		}
+	}
+}
+
 func (d *K8sResoureService) processEventV1Relationship(unstructuredObj *unstructured.Unstructured) {
 	var obj corev1.Event
 

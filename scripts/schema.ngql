@@ -197,3 +197,15 @@ CREATE EDGE IF NOT EXISTS AutoScales (
     max_replicas int,
     current_replicas int
 ) COMMENT = 'HPA 自动扩缩容目标';
+
+-- =====================================================
+-- EDGE: 集群级元数据 / APF / CNI 资源关系
+-- (消除 CRD/FlowSchema/PriorityLevelConfiguration/Cilium* 的拓扑孤立)
+-- FlowSchema → subjects(ServiceAccount/User/Group) 复用上面的 BelongsToServiceAccount/BelongsToUser/BelongsToGroup
+-- =====================================================
+
+CREATE EDGE IF NOT EXISTS ReferencesPriorityLevel () COMMENT = 'FlowSchema 引用 PriorityLevelConfiguration';
+CREATE EDGE IF NOT EXISTS CiliumEpToPod () COMMENT = 'CiliumEndpoint 对应 Pod';
+CREATE EDGE IF NOT EXISTS CiliumEpHasIdentity () COMMENT = 'CiliumEndpoint 使用 CiliumIdentity';
+CREATE EDGE IF NOT EXISTS DefinesResource () COMMENT = 'CRD 定义的自定义资源实例';
+CREATE EDGE IF NOT EXISTS ServesCRD () COMMENT = 'APIService 服务的 API group 下的 CRD（同 spec.group）';

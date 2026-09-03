@@ -92,6 +92,16 @@ func (c *StatsController) SyncResources(ctx *gin.Context) {
 	}
 }
 
+func (c *StatsController) BackfillRelationships(ctx *gin.Context) {
+	c.logger.Info("Manual relationship backfill triggered")
+	if c.svc != nil {
+		go c.svc.BackfillRelationshipsByKinds([]string{"FlowSchema", "CiliumEndpoint", "CustomResourceDefinition", "APIService"})
+		ctx.JSON(http.StatusOK, map[string]string{"status": "backfill started"})
+	} else {
+		ctx.JSON(http.StatusOK, map[string]string{"status": "error"})
+	}
+}
+
 func (c *StatsController) GetResourceTotal(ctx *gin.Context) {
 	query := "LOOKUP ON K8sResource WHERE K8sResource.is_deleted == false YIELD id(vertex) AS vid"
 	res, err := c.graphDB.Execute(query)
@@ -108,4 +118,5 @@ func (c *StatsController) RegisterRoutes(app *gin.Engine) {
 	stats.GET("/overview", c.GetOverview)
 	stats.GET("/resource-total", c.GetResourceTotal)
 	stats.POST("/sync", c.SyncResources)
+	stats.POST("/backfill-relationships", c.BackfillRelationships)
 }

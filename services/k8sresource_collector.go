@@ -157,6 +157,18 @@ func (d *K8sResoureService) Relationship(uid string) {
 		if k8sResource.Kind == "VolumeAttachment" {
 			d.processVolumeAttachmentRelationship(unstructuredObj)
 		}
+		if k8sResource.Kind == "FlowSchema" {
+			d.processFlowSchemaRelationship(unstructuredObj)
+		}
+		if k8sResource.Kind == "CiliumEndpoint" {
+			d.processCiliumEndpointRelationship(unstructuredObj)
+		}
+		if k8sResource.Kind == "CustomResourceDefinition" {
+			d.processCustomResourceDefinitionRelationship(unstructuredObj)
+		}
+		if k8sResource.Kind == "APIService" {
+			d.processAPIServiceRelationship(unstructuredObj)
+		}
 	}
 
 	if len(k8sResources) > 0 {
@@ -167,6 +179,33 @@ func (d *K8sResoureService) Relationship(uid string) {
 	} else {
 		d.logger.Debug("Relationship - Completed (no resources)",
 			zap.String("uid", uid))
+	}
+}
+
+// BackfillRelationshipsByKinds 对指定 kind 的所有存活顶点重跑 Relationship，
+// 用于一次性回填新增的关系边（如 FlowSchema/CiliumEndpoint/CRD）。
+// 幂等：各 process 函数重建前先清理同类型出边。
+func (d *K8sResoureService) BackfillRelationshipsByKinds(kinds []string) {
+	for _, kind := range kinds {
+		query := "LOOKUP ON K8sResource WHERE K8sResource.kind == " + strconv.Quote(kind) +
+			" AND K8sResource.is_deleted == false YIELD id(vertex) AS uid;"
+		rows, err := d.executenGQL(query)
+		if err != nil {
+			d.logger.Error("BackfillRelationshipsByKinds: lookup failed",
+				zap.String("kind", kind), zap.Error(err))
+			continue
+		}
+		n := 0
+		for _, row := range rows {
+			uid := string(row.Values[0].GetSVal())
+			if uid == "" {
+				continue
+			}
+			d.Relationship(uid)
+			n++
+		}
+		d.logger.Info("BackfillRelationshipsByKinds done",
+			zap.String("kind", kind), zap.Int("count", n))
 	}
 }
 

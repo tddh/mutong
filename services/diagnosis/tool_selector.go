@@ -26,7 +26,7 @@ var DiagnosisScenes = []DiagnosisScene{
 			"ContainerStatusUnknown", "SchedulingGated",
 			"重启", "崩溃", "内存", "cpu", "退出码",
 			"pod", "不健康", "报错", "异常", "检查", "日志", "状态",
-			"修复", "自愈", "处置",
+			"修复", "自愈", "处置", "删除",
 		},
 		Tools: []string{
 			"inspect_resource", "get_pod_logs", "get_pod_logs_es",
@@ -38,6 +38,7 @@ var DiagnosisScenes = []DiagnosisScene{
 			"run_diagnosis",
 			"restart_pod_safe", "rollout_restart", "scale_deployment",
 			"update_deployment_image", "adjust_resource_limits",
+			"delete_pod", "rollout_undo",
 		},
 	},
 	{
@@ -82,13 +83,14 @@ var DiagnosisScenes = []DiagnosisScene{
 			"replicas", "mismatch", "KubeDeploymentRolloutStuck",
 			"KubeStatefulSetUpdateNotRolledOut",
 			"KubeDaemonSetNotScheduled", "FailedScheduling",
-			"FailedCreate", "副本", "滚动", "扩容", "发布", "更新",
+			"FailedCreate", "副本", "滚动", "扩容", "发布", "更新", "回滚",
 		},
 		Tools: []string{
 			"inspect_resource", "list_k8s_resources",
 			"get_resource_metrics", "query_topology", "get_pod_logs",
 			"rollout_restart", "scale_deployment",
 			"update_deployment_image", "adjust_resource_limits",
+			"rollout_undo",
 		},
 	},
 	{

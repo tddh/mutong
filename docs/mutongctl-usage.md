@@ -198,13 +198,13 @@ mutongctl search tavily -q "Pod CrashLoopBackOff 排查方法"
 mutongctl search tavily -q "Prometheus 高基数优化" -t general
 ```
 
-### 执行器（危险操作需 --confirm，支持 11 种操作类型）
+### 执行器（危险操作需 --confirm，支持 12 种操作类型）
 
 ```bash
 mutongctl exec status
 mutongctl exec audit --action restart_pod
 
-# 10 种操作类型
+# 12 种操作类型
 mutongctl exec execute --action restart_pod --target <pod> -n default --confirm
 mutongctl exec execute --action delete_pod --target <pod> -n default --confirm
 mutongctl exec execute --action scale_deployment --target <deploy> -n default --replicas 3 --confirm
@@ -214,6 +214,7 @@ mutongctl exec execute --action update_configmap --target <cm> -n default --data
 mutongctl exec execute --action update_secret --target <secret> -n default --data key=val --confirm
 mutongctl exec execute --action update_resource_limits --target <deploy> -n default --cpu-limit 500m --mem-limit 1Gi --confirm
 mutongctl exec execute --action update_deployment_image --target <deploy> -n default --image nginx:1.22 --confirm
+mutongctl exec execute --action rollout_undo --target <deploy> -n default --confirm  # 回滚到上一版本（CLI 暂不支持指定 revision）
 mutongctl exec execute --action update_annotations --target <deploy> -n default --ann key=val --confirm
 mutongctl exec execute --action update_labels --target <deploy> -n default --label key=val --confirm
 ```

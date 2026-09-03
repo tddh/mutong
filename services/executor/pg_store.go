@@ -17,6 +17,8 @@ type AuditLogStore interface {
 	Save(log ex.AuditLog) error
 	List(filters map[string]string) ([]ex.AuditLog, error)
 	GetByID(id string) (*ex.AuditLog, error)
+	// UpdateResult 按计划 ID 回写执行结果（执行后验证完成时更新消息与成功标志）
+	UpdateResult(planID string, success bool, message string) error
 }
 
 // memoryAuditLogStore wrapper to reuse existing in-memory store implementation
@@ -51,6 +53,10 @@ func (m *MemoryAuditLogStore) GetByID(id string) (*ex.AuditLog, error) {
 		}
 	}
 	return nil, errors.New("audit log not found")
+}
+
+func (m *MemoryAuditLogStore) UpdateResult(planID string, success bool, message string) error {
+	return m.inner.UpdateResult(planID, success, message)
 }
 
 // postgresAuditStore implements AuditLogStore using PostgreSQL via GORM
@@ -120,6 +126,7 @@ func backfillSuccessFlag(db *gorm.DB) {
 		"updated resource limits%",
 		"updated image for%",
 		"rollout restart triggered%",
+		"rolled back deployment%",
 		"annotations updated",
 		"labels updated",
 	}
@@ -246,4 +253,12 @@ func (s *PostgresAuditStore) GetByID(id string) (*ex.AuditLog, error) {
 	res := ex.ExecutionResult{Message: r.Result, Success: r.Success, Timestamp: r.Timestamp}
 	a := ex.AuditLog{ID: fmt.Sprintf("audit-%d", r.ID), Plan: plan, Result: res, AutoExecuted: r.AutoExecuted, ApprovedBy: r.ApprovedBy, Timestamp: r.Timestamp}
 	return &a, nil
+}
+
+func (s *PostgresAuditStore) UpdateResult(planID string, success bool, message string) error {
+	if planID == "" {
+		return fmt.Errorf("empty plan id")
+	}
+	return s.db.Model(&auditLogModel{}).Where("plan_id = ?", planID).
+		Updates(map[string]interface{}{"success": success, "result": message}).Error
 }

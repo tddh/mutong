@@ -421,11 +421,11 @@ func (c *DiagnosisController) streamLLMResponse(session *diagnosis_svc.ChatSessi
 
 ## 执行类工具（自愈提议）规则
 - 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
-- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）、delete_pod（删除 Pod 由控制器重建）、rollout_undo（回滚 Deployment 到历史版本）
 - 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
 - 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
 - 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
-- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- delete_pod 仅可用于有控制器管理（Deployment/StatefulSet/DaemonSet）的 Pod；修改 ConfigMap/Secret 等其它危险操作不可用；高风险动作只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
 - 未经用户同意或未明确根因时，不要主动调用执行类工具
 
 ## 回答要求
@@ -827,11 +827,11 @@ func (c *DiagnosisController) askChat(ginCtx *gin.Context) {
 
 ## 执行类工具（自愈提议）规则
 - 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
-- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）、delete_pod（删除 Pod 由控制器重建）、rollout_undo（回滚 Deployment 到历史版本）
 - 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
 - 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
 - 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
-- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- delete_pod 仅可用于有控制器管理（Deployment/StatefulSet/DaemonSet）的 Pod；修改 ConfigMap/Secret 等其它危险操作不可用；高风险动作只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
 - 未经用户同意或未明确根因时，不要主动调用执行类工具
 
 ## 回答要求
@@ -1034,11 +1034,11 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 
 ## 执行类工具（自愈提议）规则
 - 可选工具：restart_pod_safe（安全重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）
-- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）
+- 提案式工具（高风险，只生成待审批提议、绝不自动执行）：update_deployment_image（改镜像）、adjust_resource_limits（调 CPU/内存 requests/limits）、delete_pod（删除 Pod 由控制器重建）、rollout_undo（回滚 Deployment 到历史版本）
 - 调用它们只是"提交执行提议"，是否真正执行由系统自动模式/审批机制决定，结果会记录在执行审计中
 - 仅在已通过诊断或日志/指标确认根因、且该动作确实是合理修复手段时才调用；不要未确认根因就执行
 - 必须携带告警的 fingerprint 参数（来自 get_active_alerts / get_alert_detail / 当前上下文）
-- 删除资源、修改 ConfigMap/Secret 等危险操作不可用；改镜像、改资源限制只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
+- delete_pod 仅可用于有控制器管理（Deployment/StatefulSet/DaemonSet）的 Pod；修改 ConfigMap/Secret 等其它危险操作不可用；高风险动作只能用上述提案式工具，生成提议后提醒用户到执行记录中审批
 - 未经用户同意或未明确根因时，不要主动调用执行类工具
 
 ## 回答要求

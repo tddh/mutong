@@ -30,6 +30,8 @@ const (
 	ActionUpdateLabels ActionType = "update_labels"
 	// ActionRolloutRestart triggers a rolling restart of a Deployment via pod template annotation
 	ActionRolloutRestart ActionType = "rollout_restart"
+	// ActionRolloutUndo rolls a Deployment back to a previous ReplicaSet revision
+	ActionRolloutUndo ActionType = "rollout_undo"
 )
 
 // RiskLevel defines execution risk
@@ -64,6 +66,8 @@ type ExecutionPlan struct {
 	Labels        map[string]string `json:"labels,omitempty"`
 	Image         string            `json:"image,omitempty"`
 	ContainerName string            `json:"containerName,omitempty"`
+	Revision      int64             `json:"revision,omitempty"`      // target revision for rollout_undo, 0 = previous
+	OldTemplateJSON string          `json:"oldTemplateJson,omitempty"` // internal: pre-change pod template snapshot for auto-rollback
 }
 
 // ExecutionResult records the outcome of an execution

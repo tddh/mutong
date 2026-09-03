@@ -57,6 +57,9 @@ executor:
     delete_pod:
       risk: high
       autoThreshold: 1.0
+    rollout_undo:
+      risk: high
+      autoThreshold: 1.0
     create_hpa:
       risk: medium
       autoThreshold: 0.9

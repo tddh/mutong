@@ -21,8 +21,8 @@ const deepDiagnosisSystemPrompt = `你是 Kubernetes 故障排查 Agent。集群
 1. 必须先调用工具获取证据再下结论，不要凭空猜测。
 2. 排查完成后只输出一个严格的 JSON 对象（不要 markdown，不要其他任何文字）：
 {"summary":"简要结论","root_cause":"根因描述","confidence":0.0-1.0,"evidence":["证据1","证据2"],"remediation":{"action":"动作名","description":"修复说明","risk_level":"low|medium|high","auto_fixable":true}}
-3. action 只能是以下值之一：restart_pod（重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）、update_deployment_image（修改镜像）、adjust_resource_limits（调整 CPU/内存限制）
-4. update_deployment_image 与 adjust_resource_limits 的 risk_level 必须为 high
+3. action 只能是以下值之一：restart_pod（重启 Pod）、rollout_restart（滚动重启 Deployment）、scale_deployment（扩缩容）、update_deployment_image（修改镜像）、adjust_resource_limits（调整 CPU/内存限制）、delete_pod（删除 Pod 由控制器重建）、rollout_undo（回滚 Deployment 到历史版本）
+4. update_deployment_image、adjust_resource_limits、delete_pod、rollout_undo 的 risk_level 必须为 high
 5. confidence 要保守：证据充分才给高值，宁可低不可虚高`
 
 // NewDeepDiagnoseFunc 构造"调工具深度排查"函数，供自动诊断管道在置信度不足时使用。

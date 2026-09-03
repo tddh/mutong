@@ -140,6 +140,20 @@
 - [ ] **其他无测试模块** — `services/audit/`、`services/terminal/`、`services/trace/`、`services/logsearch/`、`services/prompt/`
   *估时：1.5h*
 
+### 安全债（认证 / 告警接入，2026-09-02 排查发现）
+
+- [ ] **告警 webhook 实际公开无鉴权** — `/api/v1/alerts/webhook` 与 `/api/v1/alerts/external/` 在 `RequireAuthMiddleware` 白名单里（`controllers/auth_middleware.go`），而本应保护它的两个中间件 `AuthMiddleware`（IP 白名单 `MUTONG_WEBHOOK_TRUSTED_IPS`）和 `WebhookSignatureMiddleware`（HMAC 签名 `MUTONG_WEBHOOK_SECRET`，`controllers/webhook_verifier.go`）**都写了却从未 `.Use()` 挂载 = 死代码**。任何人都能伪造告警打入。
+  *修复方向：在 webhook 路由组挂载签名或 IP 白名单中间件，并同步配置 Alertmanager 侧的签名/来源；或二者择一*
+  *风险：🔴 高（可伪造告警触发自动诊断/自愈提议）*
+
+- [ ] **`X-Admin-Key` 未设置即放行** — `controllers/executor_controller.go` `requireAdminKey()` 只读 `MUTONG_ADMIN_KEY`，环境变量未设置时**直接 `return true` 放行**危险执行操作。注释声称"same as MUTONG_API_KEY"，但 `MUTONG_API_KEY` 全仓仅存在于该注释、代码从未读取——文档与实现不符。
+  *修复方向：未配置 admin key 时应拒绝而非放行（或强制启动时校验）；对齐注释与实际读取的环境变量*
+  *风险：🟡 中（依赖部署方是否设置了 MUTONG_ADMIN_KEY）*
+
+- [ ] **登录 access_token 作为 Bearer 不可用（认证"双轨"表象）** — `/api/auth/login` 返回的 `access_token` 与 `mutong_session` cookie 是同一个 HMAC session token，但 `BearerTokenMiddleware`（`controllers/auth_middleware.go`）的 Bearer 分支只校验 PAT/OIDC/OAuth2，从不对 Bearer 调 `sessions.Verify()`，导致同一 token 放 cookie 能用、放 Bearer 报 `invalid token`。前端全程靠 cookie，故不影响使用，但 access_token 名义签发实际不可用。
+  *修复方向（方案 B，最小改动）：Bearer 分支末尾对 token 也调 `sessions.Verify()` 注入用户上下文，使 cookie/Bearer 等价*
+  *风险：🟢 低（现状前端不受影响，属能力缺失而非漏洞）*
+
 ### P0 — 商业竞标必备缺失（所有竞品标配但 Mutong 没有）
 
 - [ ] **成本管理模块** — 集成 OpenCost（Apache 2.0 / CNCF Incubating），实现按 Namespace/Label/Deployment 粒度的实时成本分配 + Right-Sizing 推荐 + 闲置资源检测
@@ -191,7 +205,7 @@
   *参考：Datadog Watchdog Forecast / Dynatrace*
   *估时：3h*
 
-- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批），见 `services/mcp/exec_tools.go`
+- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批，含删除 Pod / rollout undo 回滚），执行后后台自动验证就绪状态、可回滚动作验证失败自动恢复变更，见 `services/mcp/exec_tools.go`、`services/executor/verify.go`
   *涉及：增强现有 MCP 工具 + Agent 回路编排（Eino Agent 框架）*
   *估时：4h*
 
@@ -279,7 +293,7 @@
   *参考：Datadog Watchdog Forecast / Dynatrace*
   *估时：12h*
 
-- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批），见 `services/mcp/exec_tools.go`
+- [x] **AI Agent 自治运维** — 检测 → 诊断 → 建议修复 → 审批执行闭环已落地：执行类 MCP 工具（安全组走自动门禁，危险动作提案式强制人工审批，含删除 Pod / rollout undo 回滚），执行后后台自动验证就绪状态、可回滚动作验证失败自动恢复变更，见 `services/mcp/exec_tools.go`、`services/executor/verify.go`
   *涉及：增强现有 MCP 工具 + Agent 回路编排（Eino Agent 框架）*
   *估时：20h*
 

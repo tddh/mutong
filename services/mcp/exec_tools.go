@@ -30,6 +30,8 @@ func (s *Server) WithSelfHealing(exec interfaces.Executor, reader DiagnosisResul
 		s.tools["scale_deployment"] = s.handleScaleDeployment
 		s.tools["update_deployment_image"] = s.handleUpdateDeploymentImage
 		s.tools["adjust_resource_limits"] = s.handleAdjustResourceLimits
+		s.tools["delete_pod"] = s.handleDeletePod
+		s.tools["rollout_undo"] = s.handleRolloutUndo
 	}
 	return s
 }
@@ -92,6 +94,27 @@ func execToolDefs() []diagnosis.ToolDefinition {
 				{Name: "cpu_request", Required: false, Description: "CPU 请求（如 250m）"},
 				{Name: "memory_request", Required: false, Description: "内存请求（如 256Mi）"},
 				{Name: "container", Required: false, Description: "容器名（多容器时必填，默认第一个容器）"},
+				{Name: "fingerprint", Required: true, Description: "关联告警指纹（必填，提供诊断置信度依据）"},
+				{Name: "reason", Required: false, Description: "提议理由"},
+			},
+		},
+		{
+			Name:        "delete_pod",
+			Description: "【提案动作·危险】提议删除指定 Pod，由其控制器（Deployment/StatefulSet/DaemonSet）自动重建。此动作只会生成待审批提议，永远不会自动执行，必须由人工在执行记录中批准后才生效。仅限有控制器管理的 Pod；适用于 Pod 卡死、状态异常且安全重启无效时。",
+			Parameters: []diagnosis.ParamDef{
+				{Name: "namespace", Required: true, Description: "Pod 所在命名空间"},
+				{Name: "pod_name", Required: true, Description: "Pod 名称"},
+				{Name: "fingerprint", Required: true, Description: "关联告警指纹（必填，提供诊断置信度依据）"},
+				{Name: "reason", Required: false, Description: "提议理由"},
+			},
+		},
+		{
+			Name:        "rollout_undo",
+			Description: "【提案动作·危险】提议将指定 Deployment 回滚到历史版本（等价 kubectl rollout undo，基于 ReplicaSet revision 历史）。此动作只会生成待审批提议，永远不会自动执行，必须由人工在执行记录中批准后才生效。适用于新版本发布后出现故障需要退回旧版本的场景。",
+			Parameters: []diagnosis.ParamDef{
+				{Name: "namespace", Required: true, Description: "Deployment 所在命名空间"},
+				{Name: "deployment", Required: true, Description: "Deployment 名称"},
+				{Name: "revision", Required: false, Description: "目标版本号（整数，从 ReplicaSet 历史中查询），留空默认回滚到上一版本"},
 				{Name: "fingerprint", Required: true, Description: "关联告警指纹（必填，提供诊断置信度依据）"},
 				{Name: "reason", Required: false, Description: "提议理由"},
 			},
@@ -266,6 +289,48 @@ func (s *Server) handleAdjustResourceLimits(ctx context.Context, args map[string
 	return s.proposalAndRecord(ctx, ex.ActionUpdateResourceLimits, ex.RiskHigh, namespace, deployment, fingerprint, args["reason"], func(p *ex.ExecutionPlan) {
 		p.ConfigData = configData
 		p.ContainerName = args["container"]
+	})
+}
+
+func (s *Server) handleDeletePod(ctx context.Context, args map[string]string) (string, error) {
+	namespace := args["namespace"]
+	podName := args["pod_name"]
+	fingerprint := args["fingerprint"]
+	if namespace == "" || podName == "" || fingerprint == "" {
+		return "", fmt.Errorf("namespace、pod_name、fingerprint 均为必填")
+	}
+	if !isValidNamespace(namespace) {
+		return "", fmt.Errorf("invalid namespace: %s", namespace)
+	}
+	if !isValidResourceName(podName) {
+		return "", fmt.Errorf("invalid pod name: %s", podName)
+	}
+	return s.proposalAndRecord(ctx, ex.ActionDeletePod, ex.RiskHigh, namespace, podName, fingerprint, args["reason"], nil)
+}
+
+func (s *Server) handleRolloutUndo(ctx context.Context, args map[string]string) (string, error) {
+	namespace := args["namespace"]
+	deployment := args["deployment"]
+	fingerprint := args["fingerprint"]
+	if namespace == "" || deployment == "" || fingerprint == "" {
+		return "", fmt.Errorf("namespace、deployment、fingerprint 均为必填")
+	}
+	if !isValidNamespace(namespace) {
+		return "", fmt.Errorf("invalid namespace: %s", namespace)
+	}
+	if !isValidResourceName(deployment) {
+		return "", fmt.Errorf("invalid deployment name: %s", deployment)
+	}
+	var revision int64
+	if v := strings.TrimSpace(args["revision"]); v != "" {
+		parsed, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || parsed <= 0 {
+			return "", fmt.Errorf("revision 必须为正整数: %s", args["revision"])
+		}
+		revision = parsed
+	}
+	return s.proposalAndRecord(ctx, ex.ActionRolloutUndo, ex.RiskHigh, namespace, deployment, fingerprint, args["reason"], func(p *ex.ExecutionPlan) {
+		p.Revision = revision
 	})
 }
 

@@ -19,7 +19,7 @@
 - **资源可视化**: 以 Nebula Graph 图数据库存储 K8s 资源拓扑关系，支持复杂关系查询和 G6 / force-graph / d3 三种渲染引擎的交互式拓扑图展示，多维度筛选过滤
 - **告警收敛与智能诊断**: 基于拓扑感知的告警抑制与因果链抑制，消除告警风暴；混合 AI 诊断引擎（规则快速路径 + LLM 深度分析），自动降级，多维度置信度评估
 - **声明式巡检**: YAML 声明式巡检规则，内置 3 类检查类型（min_rows / field_contains / command），Cron 定时调度，支持历史报告对比与趋势分析
-- **自愈执行器**: 风险分级（Low / Medium / High）的自动修复操作（Pod 驱逐重启、Deployment 扩缩容、HPA 管理），支持手动审批与自动执行双模式，完整审计日志
+- **自愈执行器**: 风险分级（Low / Medium / High）的自动修复操作（Pod 驱逐重启/删除、Deployment 扩缩容/回滚、镜像与资源调整等），支持手动审批与自动执行双模式；执行后后台自动验证就绪状态、可回滚动作验证失败自动恢复变更，完整审计日志
 - **复盘知识沉淀**: 事件时间线 + 因果链 DAG + LLM 复盘报告 + 图增强混合检索（pgvector 语义 + NebulaGraph 拓扑），将每次故障转化为可检索、可复用的结构化知识资产
 
 ### 💡 为什么做这个项目 / Evolution
@@ -73,7 +73,7 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 - **Owner / Stakeholder 双维度路由**: 中间件告警同时通知负责方（PagerDuty）与所有受影响业务方（Slack）
 - **混合 AI 诊断引擎**:
   - 多维度自动置信度评分：规则诊断分 + 关联告警 + 业务关键度，分够直接返回结果
-  - LLM 深度分析：基于 Eino ADK Runner（cloudwego/eino）ReAct Agent，全量注册 MCP 工具（20 个），LLM 按需选择调用
+  - LLM 深度分析：基于 Eino ADK Runner（cloudwego/eino）ReAct Agent，全量注册 MCP 工具（29 个，含执行类自愈提议工具），LLM 按需选择调用
   - 容错机制：SafeTool middleware 工具失败不中断、ModelRetryConfig 自动重试（3 次指数退避）
   - 全流程 SSE 流式输出（`text/event-stream`），前端增量渲染 + 工具调用浮动面板 + 分层超时
   - 自动降级：LLM 不可用时无缝降级到纯规则诊断
@@ -96,9 +96,9 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 
 ### 5. 自愈执行器
 
-- **支持操作**（11 类，API 参数使用 snake_case）:
+- **支持操作**（12 类，API 参数使用 snake_case）:
   - `restart_pod`: Pod 优雅重启（先尝试 Eviction API，失败后 fallback 到 Delete）
-  - `delete_pod`: 删除 Pod
+  - `delete_pod`: 删除 Pod（由 Deployment/StatefulSet/DaemonSet 控制器自动重建）
   - `scale_deployment`: Deployment 副本扩缩容（有 maxReplicas 上限保护）
   - `create_hpa`: 创建 HPA（Horizontal Pod Autoscaler）
   - `update_hpa`: 更新已有 HPA 配置
@@ -106,10 +106,13 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
   - `update_secret`: 更新 Secret 数据
   - `update_resource_limits`: 调整容器 CPU/Memory 资源限制（支持 cpu_limit/memory_limit/cpu_request/memory_request）
   - `update_deployment_image`: 变更容器镜像
+  - `rollout_undo`: 回滚 Deployment 到历史版本（等价 `kubectl rollout undo`，基于 ReplicaSet revision 历史；支持指定 revision，0 = 上一版本）
   - `update_annotations`: 修改资源注解（当前仅支持 Deployment）
   - `update_labels`: 修改资源标签（当前仅支持 Deployment）
 - **风险等级**: Low / Medium / High 三级
 - **执行模式**: 手动审批模式（默认）/ 自动模式（基于风险阈值配置）
+- **执行后验证**: 执行成功后后台异步轮询 Deployment rollout 完成度 / 新 Pod Ready 状态（最长 4 分钟，每次轮询独立超时），结果回写审计记录并在前端展示验证徽标（验证通过 / 失败已回滚 / 失败需人工 / 验证中）
+- **失败自动回滚**: 改镜像 / 调资源等可回滚动作验证失败时，自动恢复"最近已知健康版本"（knownGood，无则回退变更前模板快照），防止"自愈"变"自伤"；其余动作验证失败标记待人工介入
 - **审计日志**: 操作人、时间、目标资源、操作类型、执行结果、风险等级完整写入 PostgreSQL
 
 ### 6. 复盘分析
@@ -148,19 +151,19 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 
 ### 10. MCP 工具服务器
 
-实现 Model Context Protocol (MCP)，提供 22 个内置工具供 LLM 通过 Function Calling 自动调用。AI 诊断全量注册所有工具（不再按场景过滤），LLM 根据 prompt 指引按需选择。每次工具调用自动记录日志，支持调试追踪。
+实现 Model Context Protocol (MCP)，提供 22 个诊断工具 + 7 个执行类工具（自愈提议），共 29 个工具供 LLM 通过 Function Calling 自动调用。AI 诊断全量注册所有工具（不再按场景过滤），LLM 根据 prompt 指引按需选择。每次工具调用自动记录日志，支持调试追踪。
 
 | 工具名 | 功能描述 |
 |--------|----------|
-| `query_topology` | 查询 K8s 资源拓扑关系（节点 + 边） |
+| `query_topology` | 查询某资源的拓扑关联（最多 2 跳，含上下游依赖、服务关联及 ownerReferences 归属链；支持任意内置/CRD Kind，可上溯到 operator/CRD 根因） |
 | `get_active_alerts` | 获取当前活跃告警列表 |
 | `get_alert_detail` | 获取指定告警的详细信息 |
 | `run_diagnosis` | 执行 AI 诊断流程 |
 | `inspect_resource` | 检查指定 K8s 资源实时状态 |
 | `get_inspection_report` | 获取最新巡检报告 |
 | `list_resources_from_graph` | 从 NebulaGraph 列出指定类型资源 |
-| `list_k8s_resources` | 从 K8s API 实时查询资源清单 |
-| `list_resources_from_cache` | 从本地 Informer 缓存查询资源 |
+| `list_k8s_resources` | 从 K8s API 实时查询资源清单（内置资源走 typed client；任意 CRD 走 watch 同步的 informer，group/version 由 discovery 自动解析） |
+| `list_resources_from_cache` | 从本地 Informer 缓存查询资源（内置资源 + 任意 CRD，秒级新鲜度，不超时；CRD 的 group/version/复数名由 discovery 自动解析） |
 | `get_resource_metrics` | 获取资源 Prometheus 指标快照 |
 | `query_metric_timeseries` | 查询指标时序数据 |
 | `get_system_health` | 获取系统各组件健康状态 |
@@ -174,6 +177,20 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 | `search_github_issues` | 搜索 GitHub Issues 查找已知 Bug 和修复方案 |
 | `list_alerts` | 简化版活跃告警列表 |
 | `generate_retrospective` | 生成故障复盘报告（条件启用） |
+
+**执行类工具（自愈提议，强制携带告警指纹，无诊断支撑的调用直接拒绝；同指纹待审批提议去重）**：
+
+| 工具名 | 分组 | 功能描述 |
+|--------|------|----------|
+| `restart_pod_safe` | 安全组（自动门禁） | 安全重启 Pod（先 Eviction 优雅驱逐，失败 fallback Delete） |
+| `rollout_restart` | 安全组（自动门禁） | 滚动重启 Deployment（template 注解触发） |
+| `scale_deployment` | 安全组（自动门禁） | Deployment 副本扩缩容（maxReplicas 上限保护） |
+| `update_deployment_image` | 提案组（强制人工审批） | 提议变更容器镜像（执行后验证，失败自动回滚） |
+| `adjust_resource_limits` | 提案组（强制人工审批） | 提议调整 CPU/内存 requests/limits（执行后验证，失败自动回滚） |
+| `delete_pod` | 提案组（强制人工审批） | 提议删除 Pod 由控制器重建（仅限有控制器管理的 Pod） |
+| `rollout_undo` | 提案组（强制人工审批） | 提议回滚 Deployment 到历史版本（ReplicaSet revision，支持指定版本） |
+
+> 安全组工具调用后进入既有门禁（自动模式 + 诊断置信度阈值）；提案组工具只生成待审批提议，**任何情况下都不自动执行**，必须人工在执行记录中批准后才生效。
 
 ### 11. RBAC 权限
 
@@ -464,6 +481,9 @@ executor:
       risk: medium
       autoThreshold: 0.85
     delete_pod:
+      risk: high
+      autoThreshold: 1.0
+    rollout_undo:
       risk: high
       autoThreshold: 1.0
     create_hpa:

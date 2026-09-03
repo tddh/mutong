@@ -32,7 +32,7 @@ func (b *RemediationBridge) ShouldExecute(remediation diagModel.RemediationSugge
 	}
 	switch remediation.Action {
 	case "update_deployment_image", "delete_pod", "update_configmap", "update_secret",
-		"update_resource_limits", "Rollback", "Delete", "UpdateConfig", "UpdateSecret", "AdjustLimits":
+		"update_resource_limits", "rollout_undo", "Rollback", "Delete", "UpdateConfig", "UpdateSecret", "AdjustLimits":
 		// 危险动作：只能走人工审批
 		return false
 	}
@@ -89,6 +89,8 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 		action = exModel.ActionUpdateLabels
 	case string(exModel.ActionRolloutRestart):
 		action = exModel.ActionRolloutRestart
+	case string(exModel.ActionRolloutUndo):
+		action = exModel.ActionRolloutUndo
 	// 兼容 LLM 诊断输出的旧命名
 	case "Restart":
 		action = exModel.ActionRestartPod
@@ -107,7 +109,7 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 	case "AdjustLimits":
 		action = exModel.ActionUpdateResourceLimits
 	case "Rollback":
-		action = exModel.ActionUpdateDeploymentImage
+		action = exModel.ActionRolloutUndo
 	case "UpdateAnnotation":
 		action = exModel.ActionUpdateAnnotations
 	case "UpdateLabel":
@@ -120,6 +122,25 @@ func (b *RemediationBridge) CreatePlanFromDiagnosis(result *diagModel.DiagnosisR
 			action = exModel.ActionScaleDeployment
 		default:
 			// Node 等类型没有安全的自动执行动作，不生成计划（仅保留诊断结果供人工处理）
+			return nil, false
+		}
+	}
+
+	// bridge 只能生成"可被完整参数化"的计划。诊断结果（规则或 LLM remediation）不携带
+	// 目标镜像、资源值、明确副本数，也无法保证根因资源类型与动作层级匹配。这类动作若照样
+	// 产出计划，批准后必然执行失败：改镜像/调资源缺参数、对 Pod 名执行 Deployment 级动作、
+	// 扩缩容缺副本数会误缩到 0。因此这里直接不生成，改由 MCP 执行工具（AI 显式带上
+	// image/configData/replicas、且已定位到正确目标）发起提议。
+	switch action {
+	case exModel.ActionUpdateDeploymentImage, exModel.ActionUpdateResourceLimits:
+		// 诊断不产出目标镜像 / 具体资源值
+		return nil, false
+	case exModel.ActionScaleDeployment:
+		// 诊断不产出明确副本数，避免缩容到 0
+		return nil, false
+	case exModel.ActionRolloutRestart, exModel.ActionRolloutUndo:
+		// Deployment 级动作：根因资源必须是 Deployment，否则 target 会是 Pod 名而失败
+		if root.ResourceType != "Deployment" {
 			return nil, false
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 
 	"gitee.com/tddh/mutong/interfaces"
 	alert_interfaces "gitee.com/tddh/mutong/interfaces/alert"
@@ -142,9 +144,9 @@ func (s *Server) ListTools() []diagnosis.ToolDefinition {
 	defs := []diagnosis.ToolDefinition{
 		{
 			Name:        "query_topology",
-			Description: "从 Nebula Graph 查询 K8s 资源拓扑关系，查找资源间的上下游依赖、服务关联。用于分析资源间依赖关系。",
+			Description: "从 Nebula Graph 查询某资源的拓扑关联（最多 2 跳，含上下游依赖、服务关联、以及 ownerReferences 归属链）。可用于发现 workload 被哪个控制器/CRD 托管——例如 Deployment 被某 operator 的自定义资源（K8sGPT、Certificate 等）拥有时，会返回该 CR 节点，帮助定位\"配置由 CR 渲染、直接改 workload 会被 reconcile 还原\"这类根因。",
 			Parameters: []diagnosis.ParamDef{
-				{Name: "resource_type", Required: true, Description: "资源类型：Pod, Node, Service, Deployment 等"},
+				{Name: "resource_type", Required: true, Description: "资源类型（Kind）：Pod, Node, Service, Deployment，或任意 CRD Kind"},
 				{Name: "resource_name", Required: true, Description: "资源名称"},
 				{Name: "namespace", Required: false, Description: "Kubernetes 命名空间"},
 			},
@@ -201,21 +203,24 @@ func (s *Server) ListTools() []diagnosis.ToolDefinition {
 		},
 		{
 			Name:        "list_k8s_resources",
-			Description: "直接从 Kubernetes API 查询资源清单（实时数据，不含拓扑关系），按资源类型和命名空间筛选。用于确认资源是否真实存在。",
+			Description: "直接从 Kubernetes API 查询资源清单（实时数据，不含拓扑关系），按资源类型和命名空间筛选。用于确认资源是否真实存在。内置资源走 typed client 实时查询；CRD（如 K8sGPT、Certificate）走 watch 同步的 informer，group/version 由 discovery 自动解析。",
 			Parameters: []diagnosis.ParamDef{
-				{Name: "resource_type", Required: true, Description: "资源类型：Pod, Deployment, Service, Node, StatefulSet, DaemonSet 等"},
+				{Name: "resource_type", Required: true, Description: "资源类型（Kind）：Pod, Deployment, Service, Node, StatefulSet, DaemonSet, ReplicaSet，或任意 CRD Kind（如 K8sGPT）"},
 				{Name: "namespace", Required: false, Description: "Kubernetes 命名空间（Node 不需要，留空查所有命名空间）"},
 				{Name: "limit", Required: false, Description: "返回条数上限（默认100，最大500）"},
+				{Name: "api_group", Required: false, Description: "CRD 的 API Group（如 core.k8sgpt.ai）；不传则按 Kind 自动发现"},
+				{Name: "api_version", Required: false, Description: "CRD 的版本（如 v1alpha1）；不传则用 discovery 首选版本"},
 			},
 		},
 		{
 			Name:        "list_resources_from_cache",
-			Description: "从本地 Informer 缓存查询资源清单（秒级新鲜度，不超时，支持全量查询）。比 list_k8s_resources 更快更可靠，推荐优先使用。支持 Pod/Deployment/Service/Node/StatefulSet/DaemonSet/ConfigMap/Secret/PVC/PV/Ingress/Job/CronJob 等内置资源。CRD 资源可用 api_group 参数指定 Group。",
+			Description: "从本地 Informer 缓存查询资源清单（秒级新鲜度，不超时，支持全量查询）。比 list_k8s_resources 更快更可靠，推荐优先使用。支持 Pod/Deployment/Service/Node/StatefulSet/DaemonSet/ConfigMap/Secret/PVC/PV/Ingress/Job/CronJob 等内置资源，也支持任意 CRD（如 K8sGPT、Certificate）——CRD 的 group/version/复数名由 discovery 自动解析，可选传 api_group/api_version 缩小范围。",
 			Parameters: []diagnosis.ParamDef{
-				{Name: "resource_type", Required: true, Description: "资源类型：Pod, Deployment, Service, Node, ConfigMap, Secret, Ingress, Job, CronJob 等"},
+				{Name: "resource_type", Required: true, Description: "资源类型（Kind）：Pod, Deployment, Service, Node, ConfigMap, Secret, Ingress, Job, CronJob，或任意 CRD Kind（如 K8sGPT, Certificate）"},
 				{Name: "namespace", Required: false, Description: "Kubernetes 命名空间（留空查所有命名空间）"},
 				{Name: "limit", Required: false, Description: "返回条数上限（默认 200，最大 1000）"},
-				{Name: "api_group", Required: false, Description: "CRD 资源的 API Group（如 cert-manager.io），内置资源无需传"},
+				{Name: "api_group", Required: false, Description: "CRD 的 API Group（如 core.k8sgpt.ai、cert-manager.io）；不传则按 Kind 全组自动发现"},
+				{Name: "api_version", Required: false, Description: "CRD 的版本（如 v1alpha1）；不传则用 discovery 的首选版本"},
 			},
 		},
 		{
@@ -370,37 +375,125 @@ func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string
 		alert.TopologyCacheMisses.Inc()
 	}
 
-	nsClause := ""
+	// schema 是统一的 K8sResource 顶点（kind 是属性），不是 per-kind tag。
+	// Step 1: 按 kind+name(+namespace) 定位种子节点 VID。
+	props := fmt.Sprintf(`kind:%s, name:%s, is_deleted:false`, strconv.Quote(resourceType), strconv.Quote(resourceName))
 	if namespace != "" {
 		if !isValidNamespace(namespace) {
 			return "", fmt.Errorf("invalid namespace: %s", namespace)
 		}
-		nsClause = fmt.Sprintf(`, namespace: "%s"`, namespace)
+		props += fmt.Sprintf(`, name_space:%s`, strconv.Quote(namespace))
 	}
-
-	query := fmt.Sprintf(
-		`MATCH p = (n:%s {name: "%s"%s})-[*1..3]-(related) RETURN p LIMIT 50`,
-		resourceType, resourceName, nsClause,
-	)
-
-	result, err := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(query)
+	seedQuery := fmt.Sprintf(`MATCH (v:K8sResource{%s}) RETURN id(v) AS vid LIMIT 1`, props)
+	seedRes, err := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(seedQuery)
 	if err != nil {
-		return "", fmt.Errorf("topology query failed: %w", err)
+		return "", fmt.Errorf("topology seed lookup failed: %w", err)
 	}
-
-	if result == nil || result.GetRowSize() == 0 {
+	if seedRes == nil || seedRes.GetRowSize() == 0 {
+		return fmt.Sprintf("未找到 %s/%s 的拓扑关系（图中无此节点）", resourceType, resourceName), nil
+	}
+	seedRow, err := seedRes.GetRowValuesByIndex(0)
+	if err != nil {
+		return "", fmt.Errorf("topology seed parse failed: %w", err)
+	}
+	seedVal, err := seedRow.GetValueByColName("vid")
+	if err != nil {
+		return "", fmt.Errorf("topology seed vid failed: %w", err)
+	}
+	seedVID, _ := seedVal.AsString()
+	if seedVID == "" {
 		return fmt.Sprintf("未找到 %s/%s 的拓扑关系", resourceType, resourceName), nil
 	}
 
-	var relations []string
-	for i := 0; i < result.GetRowSize() && i < 30; i++ {
-		row, err := result.GetRowValuesByIndex(i)
-		if err != nil {
-			continue
+	// Step 2: 从种子 VID 多跳遍历（正向 + 反向），收集邻居 UID 与关系类型。
+	seen := map[string]bool{seedVID: true}
+	currentLevel := []string{seedVID}
+	var relatedUIDs []string
+	edgeTypes := map[string]bool{}
+	const maxHops = 2
+	for h := 0; h < maxHops; h++ {
+		if len(currentLevel) == 0 {
+			break
 		}
-		relations = append(relations, fmt.Sprintf("%v", row))
+		var nextLevel []string
+		for _, srcUID := range currentLevel {
+			for _, suffix := range []string{"", " REVERSELY"} {
+				goQuery := fmt.Sprintf("GO FROM %s OVER *%s YIELD id($$) AS target, type(edge) AS etype | LIMIT 50",
+					strconv.Quote(srcUID), suffix)
+				rs, gerr := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(goQuery)
+				if gerr != nil || rs == nil {
+					continue
+				}
+				for _, row := range rs.GetRows() {
+					if len(row.Values) < 2 {
+						continue
+					}
+					dst := string(row.Values[0].GetSVal())
+					et := string(row.Values[1].GetSVal())
+					if et != "" {
+						edgeTypes[et] = true
+					}
+					if dst == "" || seen[dst] {
+						continue
+					}
+					seen[dst] = true
+					relatedUIDs = append(relatedUIDs, dst)
+					nextLevel = append(nextLevel, dst)
+				}
+			}
+		}
+		currentLevel = nextLevel
 	}
-	resultStr := fmt.Sprintf("%s/%s 拓扑关系 (%d):\n%s", resourceType, resourceName, len(relations), strings.Join(relations, "\n"))
+
+	if len(relatedUIDs) == 0 {
+		return fmt.Sprintf("%s/%s 在图中没有关联资源", resourceType, resourceName), nil
+	}
+
+	// Step 3: 批量取邻居节点属性（kind/name/namespace/apiVersion），CRD 也在内。
+	quoted := make([]string, 0, len(relatedUIDs))
+	for _, u := range relatedUIDs {
+		quoted = append(quoted, strconv.Quote(u))
+	}
+	propQuery := fmt.Sprintf(
+		`MATCH (v:K8sResource) WHERE id(v) IN [%s] AND v.K8sResource.is_deleted == false RETURN v.K8sResource.kind AS kind, v.K8sResource.name AS name, v.K8sResource.name_space AS ns, v.K8sResource.api_version AS apiVer LIMIT 60`,
+		strings.Join(quoted, ","),
+	)
+	propRes, perr := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(propQuery)
+	if perr != nil {
+		return "", fmt.Errorf("topology neighbor props failed: %w", perr)
+	}
+	var relations []string
+	if propRes != nil {
+		for i := 0; i < propRes.GetRowSize() && i < 60; i++ {
+			row, rerr := propRes.GetRowValuesByIndex(i)
+			if rerr != nil {
+				continue
+			}
+			kindV, _ := row.GetValueByColName("kind")
+			kind, _ := kindV.AsString()
+			nameV, _ := row.GetValueByColName("name")
+			name, _ := nameV.AsString()
+			nsV, _ := row.GetValueByColName("ns")
+			ns, _ := nsV.AsString()
+			avV, _ := row.GetValueByColName("apiVer")
+			apiVer, _ := avV.AsString()
+			loc := name
+			if ns != "" {
+				loc = ns + "/" + name
+			}
+			line := fmt.Sprintf("%s %s", kind, loc)
+			if apiVer != "" {
+				line += fmt.Sprintf(" (%s)", apiVer)
+			}
+			relations = append(relations, line)
+		}
+	}
+	var etList []string
+	for et := range edgeTypes {
+		etList = append(etList, et)
+	}
+	resultStr := fmt.Sprintf("%s/%s 拓扑关联（%d 个邻居，关系类型: %s）:\n%s",
+		resourceType, resourceName, len(relations), strings.Join(etList, ","), strings.Join(relations, "\n"))
 
 	if s.cache != nil {
 		go func() {
@@ -412,14 +505,30 @@ func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string
 	return resultStr, nil
 }
 
+// isValidResourceType 校验资源类型（Kind）是否合法。
+// 不再用固定白名单——那样会把所有 CRD（如 K8sGPT、Result、CiliumNode）挡在外面，
+// 导致诊断无法上溯到 operator/CRD 根因。K8s 的 Kind 名只含字母数字，
+// 因此这里只放行"字母开头 + 仅字母数字"的串：既容纳任意内置/CRD kind，
+// 又天然阻断 nGQL 注入（引号、空格、花括号、星号等特殊字符一律不通过）。
 func isValidResourceType(s string) bool {
-	validTypes := map[string]bool{
-		"Pod": true, "Node": true, "Service": true, "Deployment": true,
-		"StatefulSet": true, "DaemonSet": true, "ReplicaSet": true,
-		"ConfigMap": true, "Secret": true, "PersistentVolumeClaim": true,
-		"Ingress": true, "EndpointSlice": true, "Namespace": true,
+	if len(s) == 0 || len(s) > 63 {
+		return false
 	}
-	return validTypes[s]
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		isAlpha := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		isDigit := c >= '0' && c <= '9'
+		if i == 0 {
+			if !isAlpha {
+				return false
+			}
+			continue
+		}
+		if !isAlpha && !isDigit {
+			return false
+		}
+	}
+	return true
 }
 
 func isValidResourceName(s string) bool {
@@ -923,8 +1032,59 @@ func (s *Server) handleListK8sResources(ctx context.Context, args map[string]str
 			items = append(items, fmt.Sprintf("%s/%s (ready:%d)", d.Namespace, d.Name, d.Status.NumberReady))
 		}
 
+	case "ReplicaSet":
+		rsList, err := s.k8sClient.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{Limit: int64(limit)})
+		if err != nil {
+			return "", fmt.Errorf("list replicasets failed: %w", err)
+		}
+		for _, r := range rsList.Items {
+			revision := r.Annotations["deployment.kubernetes.io/revision"]
+			revInfo := ""
+			if revision != "" {
+				revInfo = fmt.Sprintf(" revision:%s", revision)
+			}
+			items = append(items, fmt.Sprintf("%s/%s (ready:%d/%d%s)", r.Namespace, r.Name, r.Status.ReadyReplicas, r.Status.Replicas, revInfo))
+		}
+
 	default:
-		return "", fmt.Errorf("unsupported resource type for K8s direct query: %s (support: Pod/Deployment/Service/Node/StatefulSet/DaemonSet)", resourceType)
+		// 非内置 kind：当作 CRD 处理。用 discovery 解析真实 GVR，再从 watch 同步的 informer 取实例
+		// （typed client 无法列任意 CRD；informer 由 watch 持续同步，数据等同实时）。
+		factory := s.informerGetter()
+		if factory == nil {
+			return "", fmt.Errorf("unsupported resource type for K8s direct query: %s (内置支持 Pod/Deployment/Service/Node/StatefulSet/DaemonSet/ReplicaSet；CRD 需缓存就绪)", resourceType)
+		}
+		gvr, rerr := s.resolveCRDGVR(args["api_group"], resourceType, args["api_version"])
+		if rerr != nil {
+			return "", fmt.Errorf("unsupported resource type: %s（%v）", resourceType, rerr)
+		}
+		inf := factory.ForResource(gvr).Informer()
+		if !inf.HasSynced() {
+			syncCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			if !cache.WaitForCacheSync(syncCtx.Done(), inf.HasSynced) {
+				return "", fmt.Errorf("%s 缓存尚未同步完成，请稍后再试", resourceType)
+			}
+		}
+		for _, obj := range inf.GetStore().List() {
+			u, isU := obj.(*unstructured.Unstructured)
+			if !isU {
+				continue
+			}
+			if namespace != "" && u.GetNamespace() != namespace {
+				continue
+			}
+			if u.GetDeletionTimestamp() != nil {
+				continue
+			}
+			loc := u.GetName()
+			if ns := u.GetNamespace(); ns != "" {
+				loc = ns + "/" + u.GetName()
+			}
+			items = append(items, fmt.Sprintf("%s (%s)", loc, u.GetAPIVersion()))
+			if len(items) >= limit {
+				break
+			}
+		}
 	}
 
 	if len(items) == 0 {
@@ -959,18 +1119,23 @@ func (s *Server) handleListResourcesFromCache(ctx context.Context, args map[stri
 
 	gvr, ok := resourceTypeToGVR(resourceType)
 	if !ok {
-		// CRD 资源：需要 api_group 参数
-		apiGroup := args["api_group"]
-		if apiGroup == "" {
-			return "", fmt.Errorf("不支持从缓存查询的资源类型: %s (支持: Pod/Deployment/Service/Node/StatefulSet/DaemonSet/ConfigMap/Secret/PVC/PV/Ingress/Job/CronJob/Namespace/ReplicaSet/ServiceAccount)。CRD 请传 api_group 参数", resourceType)
+		// CRD 资源：通过 discovery 解析真实的 group/version/复数名。
+		// 不能硬编码 Version:"v1"（如 K8sGPT 是 v1alpha1）也不能 ToLower+"s" 猜复数名。
+		resolved, err := s.resolveCRDGVR(args["api_group"], resourceType, args["api_version"])
+		if err != nil {
+			return "", err
 		}
-		resourceName := strings.ToLower(resourceType) + "s"
-		gvr = schema.GroupVersionResource{Group: apiGroup, Version: "v1", Resource: resourceName}
+		gvr = resolved
 	}
 
 	informer := factory.ForResource(gvr).Informer()
 	if !informer.HasSynced() {
-		return "", fmt.Errorf("%s 缓存尚未同步完成，请稍后再试", resourceType)
+		// 首次查询该资源类型时 informer 是按需创建的，等待初始同步完成（最多 10 秒）
+		syncCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if !cache.WaitForCacheSync(syncCtx.Done(), informer.HasSynced) {
+			return "", fmt.Errorf("%s 缓存尚未同步完成，请稍后再试", resourceType)
+		}
 	}
 
 	store := informer.GetStore()
@@ -1019,6 +1184,51 @@ func (s *Server) handleListResourcesFromCache(ctx context.Context, args map[stri
 		totalHint = fmt.Sprintf("，仅显示前%d条，共%d条", limit, activeCount)
 	}
 	return fmt.Sprintf("%s 资源列表 (本地缓存,共%d条%s):\n%s", resourceType, activeCount, totalHint, strings.Join(items, "\n")), nil
+}
+
+// resolveCRDGVR 通过 discovery 解析 CRD 的真实 GroupVersionResource（正确的 group、version、复数名）。
+// apiGroup / explicitVersion 为空时不作过滤（按 Kind 全组搜索）。避免硬编码 v1 和 ToLower+"s" 猜复数名。
+func (s *Server) resolveCRDGVR(apiGroup, kind, explicitVersion string) (schema.GroupVersionResource, error) {
+	if s.k8sClient == nil {
+		return schema.GroupVersionResource{}, fmt.Errorf("k8s client not configured，无法解析 CRD %s 的 GVR", kind)
+	}
+	// ServerPreferredResources 可能返回部分错误（个别 group 不可达），lists 仍可用，故不因 err 直接返回
+	lists, discErr := s.k8sClient.Discovery().ServerPreferredResources()
+	for _, l := range lists {
+		gv, perr := schema.ParseGroupVersion(l.GroupVersion)
+		if perr != nil {
+			continue
+		}
+		if apiGroup != "" && gv.Group != apiGroup {
+			continue
+		}
+		if explicitVersion != "" && gv.Version != explicitVersion {
+			continue
+		}
+		for _, api := range l.APIResources {
+			if !strings.EqualFold(api.Kind, kind) {
+				continue
+			}
+			// 只要可 list 的主资源（跳过 status/scale 等子资源）
+			if api.Namespaced == false && apiGroup == "" && gv.Group == "" {
+				continue
+			}
+			listable := false
+			for _, v := range api.Verbs {
+				if v == "list" {
+					listable = true
+					break
+				}
+			}
+			if listable && !strings.Contains(api.Name, "/") {
+				return gv.WithResource(api.Name), nil
+			}
+		}
+	}
+	if discErr != nil {
+		return schema.GroupVersionResource{}, fmt.Errorf("discovery 未找到 CRD kind=%s (group=%s version=%s)，且部分发现失败: %v", kind, apiGroup, explicitVersion, discErr)
+	}
+	return schema.GroupVersionResource{}, fmt.Errorf("discovery 未找到 CRD kind=%s (group=%s version=%s)；请确认 api_group/api_version", kind, apiGroup, explicitVersion)
 }
 
 func resourceTypeToGVR(resourceType string) (schema.GroupVersionResource, bool) {

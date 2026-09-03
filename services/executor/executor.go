@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,23 +17,28 @@ import (
 	audstore "gitee.com/tddh/mutong/services/audit"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
 	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 )
 
 type K8sExecutor struct {
 	logger       interfaces.Logger
-	k8sClient    *kubernetes.Clientset
+	k8sClient    kubernetes.Interface
 	cfg          *cfg.Config
 	auditStore   AuditLogStore
 	opAuditStore audstore.OperationAuditStore
 	autoMode     atomic.Bool
 	coolDowns    sync.Map // map[string]time.Time — key: "restart:<ns>:<name>"
-	stopCh       chan struct{}
+	// knownGood 记录每个 Deployment "最近一次观测到健康"的 PodTemplate JSON，
+	// key: "<ns>/<name>"。验证失败自动回滚时优先回滚到它，而非可能是坏状态的变更前快照。
+	knownGood sync.Map
+	stopCh    chan struct{}
 }
 
 // memory-based in-memory store implementation
@@ -67,6 +74,19 @@ func (m *memoryAuditStore) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.logs)
+}
+
+func (m *memoryAuditStore) UpdateResult(planID string, success bool, message string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i := range m.logs {
+		if m.logs[i].Plan.ID == planID {
+			m.logs[i].Result.Success = success
+			m.logs[i].Result.Message = message
+			return nil
+		}
+	}
+	return fmt.Errorf("audit log not found for plan: %s", planID)
 }
 
 // GetByID returns an audit log by its ID from the in-memory store
@@ -125,7 +145,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 		action != ex.ActionUpdateConfigMap && action != ex.ActionUpdateSecret &&
 		action != ex.ActionUpdateResourceLimits && action != ex.ActionUpdateDeploymentImage &&
 		action != ex.ActionUpdateAnnotations && action != ex.ActionUpdateLabels &&
-		action != ex.ActionRolloutRestart {
+		action != ex.ActionRolloutRestart && action != ex.ActionRolloutUndo {
 		return nil, fmt.Errorf("unsupported action: %s", action)
 	}
 
@@ -166,8 +186,12 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 	var err error
 	var success bool
 	var msg string
+	// 执行后验证所需的变更前快照
+	var oldPod podSnapshot
+	var oldTemplateJSON string
 	switch action {
 	case ex.ActionRestartPod:
+		oldPod = e.snapshotPod(ctx, plan.Namespace, plan.ResourceName)
 		err = e.restartPod(ctx, plan.Namespace, plan.ResourceName)
 		if err != nil {
 			msg = err.Error()
@@ -176,6 +200,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 			msg = "pod restarted (eviction triggers restart)"
 		}
 	case ex.ActionDeletePod:
+		oldPod = e.snapshotPod(ctx, plan.Namespace, plan.ResourceName)
 		err = e.deletePod(ctx, plan.Namespace, plan.ResourceName)
 		if err != nil {
 			msg = err.Error()
@@ -247,6 +272,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 			msg = fmt.Sprintf("updated Secret %s/%s", plan.Namespace, plan.ResourceName)
 		}
 	case ex.ActionUpdateResourceLimits:
+		oldTemplateJSON = e.snapshotDeploymentTemplate(ctx, plan.Namespace, plan.ResourceName)
 		err = e.executeUpdateResourceLimits(ctx, plan)
 		if err != nil {
 			msg = err.Error()
@@ -255,6 +281,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 			msg = fmt.Sprintf("updated resource limits for %s/%s", plan.Namespace, plan.ResourceName)
 		}
 	case ex.ActionUpdateDeploymentImage:
+		oldTemplateJSON = e.snapshotDeploymentTemplate(ctx, plan.Namespace, plan.ResourceName)
 		err = e.executeUpdateDeploymentImage(ctx, plan)
 		if err != nil {
 			msg = err.Error()
@@ -286,6 +313,15 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 			success = true
 			msg = fmt.Sprintf("rollout restart triggered for deployment %s/%s", plan.Namespace, plan.ResourceName)
 		}
+	case ex.ActionRolloutUndo:
+		var rev int64
+		rev, err = e.rolloutUndoDeployment(ctx, plan.Namespace, plan.ResourceName, plan.Revision)
+		if err != nil {
+			msg = err.Error()
+		} else {
+			success = true
+			msg = fmt.Sprintf("rolled back deployment %s/%s to revision %d", plan.Namespace, plan.ResourceName, rev)
+		}
 	}
 
 	audit := ex.AuditLog{
@@ -296,7 +332,15 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 		ApprovedBy:   plan.ApprovedBy,
 		Timestamp:    time.Now(),
 	}
+	// 模板快照只用于进程内验证回滚，不写入审计明细
+	audit.Plan.OldTemplateJSON = ""
 	e.appendAuditLog(audit)
+
+	if success {
+		// 执行后验证：后台异步轮询目标就绪状态，结果回写审计（HTTP 请求上下文结束后仍需运行）
+		verifyCtx := context.WithoutCancel(ctx)
+		go e.startVerification(verifyCtx, plan, msg, oldPod, oldTemplateJSON)
+	}
 
 	e.logger.Info("Self-healing action executed",
 		zap.String("action", string(plan.Action)),
@@ -452,6 +496,147 @@ func (e *K8sExecutor) rolloutRestartDeployment(ctx context.Context, namespace, n
 	deploy.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
 	_, err = e.k8sClient.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
 	return err
+}
+
+// snapshotDeploymentTemplate 变更前抓取 Deployment 的 PodTemplate JSON 快照，
+// 供执行后验证失败时自动回滚使用；失败返回空串（不影响主流程）。
+// 若此刻 rollout 已健康，顺带把它记为"最近已知健康版本"，作为回滚的首选目标。
+func (e *K8sExecutor) snapshotDeploymentTemplate(ctx context.Context, namespace, name string) string {
+	if namespace == "" {
+		namespace = e.cfg.GetExecutorConf().DefaultNamespace
+	}
+	deploy, err := e.k8sClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		e.logger.Warn("Snapshot deployment template failed", zap.String("deployment", namespace+"/"+name), zap.Error(err))
+		return ""
+	}
+	b, err := json.Marshal(deploy.Spec.Template)
+	if err != nil {
+		e.logger.Warn("Marshal deployment template failed", zap.String("deployment", namespace+"/"+name), zap.Error(err))
+		return ""
+	}
+	if deploymentRolloutStatus(deploy).ok {
+		e.knownGood.Store(namespace+"/"+name, string(b))
+	}
+	return string(b)
+}
+
+// restorePodTemplate 将快照模板回写 Deployment（内部回滚，不经过 Execute 避免递归验证）
+func (e *K8sExecutor) restorePodTemplate(ctx context.Context, namespace, name, templateJSON string) error {
+	if namespace == "" {
+		namespace = e.cfg.GetExecutorConf().DefaultNamespace
+	}
+	var tmpl corev1.PodTemplateSpec
+	if err := json.Unmarshal([]byte(templateJSON), &tmpl); err != nil {
+		return fmt.Errorf("unmarshal template snapshot: %w", err)
+	}
+	deploy, err := e.k8sClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get Deployment: %w", err)
+	}
+	// pod-template-hash 由控制器管理，回写时必须剔除
+	delete(tmpl.Labels, "pod-template-hash")
+	deploy.Spec.Template = tmpl
+	_, err = e.k8sClient.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{})
+	return err
+}
+
+// rolloutUndoDeployment 回滚 Deployment 到历史 ReplicaSet 版本，等价 kubectl rollout undo。
+// targetRevision 为 0 时回滚到上一版本。返回实际回滚到的 revision。
+func (e *K8sExecutor) rolloutUndoDeployment(ctx context.Context, namespace, name string, targetRevision int64) (int64, error) {
+	if namespace == "" {
+		namespace = e.cfg.GetExecutorConf().DefaultNamespace
+	}
+	deploy, err := e.k8sClient.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("get Deployment: %w", err)
+	}
+	rsList, err := e.k8sClient.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("list ReplicaSets: %w", err)
+	}
+	type revisionedRS struct {
+		rs       *appsv1.ReplicaSet
+		revision int64
+	}
+	var histories []revisionedRS
+	var currentRev int64
+	for i := range rsList.Items {
+		rs := &rsList.Items[i]
+		if !metav1.IsControlledBy(rs, deploy) {
+			continue
+		}
+		rev, convErr := strconv.ParseInt(rs.Annotations["deployment.kubernetes.io/revision"], 10, 64)
+		if convErr != nil {
+			continue
+		}
+		if rs.Spec.Replicas != nil && *rs.Spec.Replicas > 0 {
+			currentRev = rev
+		}
+		histories = append(histories, revisionedRS{rs: rs, revision: rev})
+	}
+	if len(histories) == 0 {
+		return 0, fmt.Errorf("deployment %s/%s 没有可用的历史版本（ReplicaSet revision）", namespace, name)
+	}
+	var target *revisionedRS
+	if targetRevision > 0 {
+		for i := range histories {
+			if histories[i].revision == targetRevision {
+				target = &histories[i]
+				break
+			}
+		}
+		if target == nil {
+			return 0, fmt.Errorf("未找到 revision %d 的历史版本", targetRevision)
+		}
+	} else {
+		// 默认回滚到上一版本：小于当前 revision 的最大者
+		for i := range histories {
+			if histories[i].revision >= currentRev {
+				continue
+			}
+			if target == nil || histories[i].revision > target.revision {
+				target = &histories[i]
+			}
+		}
+		if target == nil {
+			return 0, fmt.Errorf("deployment %s/%s 没有更早的历史版本可回滚（当前 revision %d）", namespace, name, currentRev)
+		}
+	}
+	tmpl := target.rs.Spec.Template.DeepCopy()
+	delete(tmpl.Labels, "pod-template-hash")
+	deploy.Spec.Template = *tmpl
+	if _, err = e.k8sClient.AppsV1().Deployments(namespace).Update(ctx, deploy, metav1.UpdateOptions{}); err != nil {
+		return 0, fmt.Errorf("update Deployment: %w", err)
+	}
+	return target.revision, nil
+}
+
+// podSnapshot 执行前的 Pod 快照，供执行后验证使用
+type podSnapshot struct {
+	uid        types.UID
+	selector   string // 控制器的标签选择器（Pod 删除后仍可据此找替代 Pod）
+	ownerName  string // 控制器描述，如 "Deployment nginx"
+	controller bool    // 是否有控制器管理（裸 Pod 删除后不会重建）
+}
+
+// snapshotPod 抓取 Pod 及其控制器信息（执行前调用；失败返回零值，验证退化为按名字判断）
+func (e *K8sExecutor) snapshotPod(ctx context.Context, namespace, name string) podSnapshot {
+	if namespace == "" {
+		namespace = e.cfg.GetExecutorConf().DefaultNamespace
+	}
+	pod, err := e.k8sClient.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return podSnapshot{}
+	}
+	snap := podSnapshot{uid: pod.UID}
+	selector, ownerName, err := e.podOwnerSelector(ctx, namespace, pod)
+	if err == nil {
+		snap.selector = selector
+		snap.ownerName = ownerName
+		snap.controller = true
+	}
+	return snap
 }
 
 // createHPA creates a Horizontal Pod Autoscaler for the given Deployment

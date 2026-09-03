@@ -6,7 +6,7 @@
 
 In this project, I made a very conscious trade-off: **There are almost no complex operation buttons on the Web.**
 
-Although Mutong supports 11 complex remediation operations (scaling, hot updates, HPA, etc.), I chose not to build traditional form-based UIs. There are two reasons for this:
+Although Mutong supports 12 complex remediation operations (scaling, hot updates, HPA, version rollback, etc.), I chose not to build traditional form-based UIs. There are two reasons for this:
 
 1. **The Professional Reason**: I believe "API-First" and "Conversational UI" are the future. Instead of forcing users to navigate complex forms and modals, the AI can simply understand intent and execute via API.
 2. **The Brutally Honest Reason**: **My frontend skills are terrible.** As an SRE, I can write Go and nGQL all day, but asking me to build dozens of validated Vue forms and tweak CSS... that's just torture.
@@ -46,11 +46,13 @@ It turns a frontend weakness into a modern, "AI-Native" architectural advantage.
 **Solution**: Add **execution tools** to the MCP tool server, gated by a propose-and-approve mechanism.
 * **Two tool groups**:
     * **Safe group** (Pod restart, Deployment rollout restart, scaling): invocations pass through the existing gate — auto mode + diagnosis-confidence threshold — with full audit trails;
-    * **Proposal group** (image change, resource limits adjustment): the LLM can only create pending-approval proposals; these are **never auto-executed** and must be approved by a human in the UI.
+    * **Proposal group** (image change, resource limits adjustment, Pod deletion, rollout undo): the LLM can only create pending-approval proposals; these are **never auto-executed** and must be approved by a human in the UI.
 * **Admission constraints**: every execution tool requires an alert fingerprint; calls without a supporting diagnosis result (no confidence score) are rejected outright, preventing the LLM from acting on nothing; duplicate pending plans for the same fingerprint are deduplicated.
+* **Post-execution verification**: a successful API call does not mean the workload recovered. After every execution a background verifier polls Deployment rollout completion or new-Pod readiness (up to 4 minutes), writes the outcome back to the audit record, and surfaces it as a badge in the UI. For rollbackable actions (image change, resource limits), a failed verification **automatically restores the pre-change pod template** so self-healing cannot become self-harm; other actions are flagged for manual intervention.
+* **Version rollback**: rollout undo built on ReplicaSet revision history (equivalent to kubectl rollout undo, with optional target revision) — the last missing piece of "how to back out of a bad change".
 * **Auto-diagnosis persistence**: alert-triggered diagnoses are written to cache and database and automatically produce pending plans, so the UI reuses them instead of re-diagnosing on demand.
 * **Real bugs fixed along the way**: alert self-suppression (suppression rules matching the alert's own fingerprint), knowledge-base actions mismatched with executor enums, slow chat diagnoses aborted by frontend timeouts, audit table losing execution parameters, etc.
-* **Outcome**: a complete diagnosis → plan → approval → execution → audit loop. The button for dangerous actions remains in human hands, while every step before it runs automatically.
+* **Outcome**: a complete diagnosis → plan → approval → execution → **verification → (on failure) auto-rollback** → audit loop. The button for dangerous actions remains in human hands, while every step before it runs automatically.
 
 ---
 **Summary**:

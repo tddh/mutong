@@ -10,6 +10,21 @@ const SEVERITY_COLORS = {
   info: 'var(--primary-color)',
 }
 
+const ACTION_NAMES_CN = {
+  restart_pod: '重启 Pod',
+  rollout_restart: '滚动重启',
+  scale_deployment: '扩缩容',
+  update_deployment_image: '修改镜像',
+  adjust_resource_limits: '调整资源限制',
+  update_resource_limits: '调整资源限制',
+  delete_pod: '删除 Pod',
+  rollout_undo: '回滚版本',
+}
+
+function actionText(action) {
+  return ACTION_NAMES_CN[action] || (action || '').replace(/_/g, ' ')
+}
+
 function getSeverityColor(severity) {
   const s = (severity || '').toLowerCase()
   return SEVERITY_COLORS[s] || 'var(--text-secondary)'
@@ -260,7 +275,7 @@ createApp({
     const approveExecution = async (rec) => {
       const p = rec.plan || {}
       const target = p.target || (p.namespace ? p.namespace + '/' + p.resourceName : p.resourceName)
-      const actionText = (p.action || '').replace(/_/g, ' ')
+      const actText = actionText(p.action)
       const detailLines = []
       if (p.image) detailLines.push('镜像: ' + p.image)
       if (p.containerName) detailLines.push('容器: ' + p.containerName)
@@ -268,8 +283,9 @@ createApp({
         detailLines.push('资源: ' + Object.entries(p.configData).map(([k, v]) => k + '=' + v).join(', '))
       }
       if (p.action === 'scale_deployment' && (p.replicas || p.replicas === 0)) detailLines.push('副本数: ' + p.replicas)
+      if (p.action === 'rollout_undo') detailLines.push(p.revision ? '回滚到版本: ' + p.revision : '回滚到上一版本')
       const detail = detailLines.length ? '\n' + detailLines.join('\n') : ''
-      if (!window.confirm(`确认批准并执行？\n动作: ${actionText}\n目标: ${target}\n风险: ${p.risk || '-'}${detail}`)) {
+      if (!window.confirm(`确认批准并执行？\n动作: ${actText}\n目标: ${target}\n风险: ${p.risk || '-'}${detail}`)) {
         return
       }
       approvingId.value = rec.id
@@ -2052,9 +2068,22 @@ createApp({
           const rStatus = rAuto ? (rOk ? '已自动执行成功' : '已自动执行失败') : (rOk ? '已执行' : '待审批/未执行')
           const rColor = rOk ? '#52c41a' : (rAuto ? '#ff4d4f' : '#faad14')
           const target = p.target || (p.namespace ? p.namespace + '/' + p.resourceName : p.resourceName)
-          const actionText = (p.action || '').replace(/_/g, ' ')
+          const actText = actionText(p.action)
           const riskText = p.risk || ''
           const opText = rAuto ? '自动执行' : (rec.approvedBy ? '审批人: ' + rec.approvedBy : '未自动执行')
+          // 执行后验证徽标（后台异步验证，结果追加在结果消息里）
+          const rMsg = r.message || ''
+          const pending = rMsg.includes('pending approval') || rMsg.includes('approval required')
+          let verifyBadge = null
+          if (!pending && rMsg.includes('执行验证失败已自动回滚')) {
+            verifyBadge = { text: '⛔ 验证失败·已自动回滚', color: '#ff4d4f' }
+          } else if (!pending && rMsg.includes('执行验证失败')) {
+            verifyBadge = { text: '❌ 验证失败·需人工', color: '#ff4d4f' }
+          } else if (!pending && rMsg.includes('执行验证通过')) {
+            verifyBadge = { text: '🟢 验证通过', color: '#52c41a' }
+          } else if (rOk) {
+            verifyBadge = { text: '⏳ 后台验证中', color: '#1677ff' }
+          }
           const detailParts = []
           if (p.image) detailParts.push('镜像: ' + p.image)
           if (p.containerName) detailParts.push('容器: ' + p.containerName)
@@ -2062,6 +2091,7 @@ createApp({
             detailParts.push('资源: ' + Object.entries(p.configData).map(([k, v]) => k + '=' + v).join(', '))
           }
           if (p.action === 'scale_deployment' && (p.replicas || p.replicas === 0)) detailParts.push('副本数: ' + p.replicas)
+          if (p.action === 'rollout_undo') detailParts.push(p.revision ? '回滚到版本: ' + p.revision : '回滚到上一版本')
           return h('div', {
             key: idx,
             style: {
@@ -2074,8 +2104,13 @@ createApp({
             },
           }, [
             h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' } }, [
-              h('span', { style: { fontWeight: 600, fontSize: '13px' } }, actionText),
-              h('span', { style: { fontSize: '12px', color: rColor, fontWeight: 600 } }, rStatus),
+              h('span', { style: { fontWeight: 600, fontSize: '13px' } }, actText),
+              h('span', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, [
+                verifyBadge
+                  ? h('span', { style: { fontSize: '11px', color: verifyBadge.color, border: '1px solid ' + verifyBadge.color, borderRadius: '10px', padding: '1px 8px' } }, verifyBadge.text)
+                  : null,
+                h('span', { style: { fontSize: '12px', color: rColor, fontWeight: 600 } }, rStatus),
+              ]),
             ]),
             h('div', { style: { fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' } },
               '目标: ' + target + (riskText ? ' · 风险: ' + riskText : '')),
@@ -2116,9 +2151,15 @@ createApp({
       this.businessFilterTeam ||
       this.businessFilterCriticality
     )
-    const sourceAlerts = hasBusinessFilters ? this.filteredAlerts : this.alerts
+    const rawAlerts = hasBusinessFilters ? this.filteredAlerts : this.alerts
+    // 按开始时间倒序（最新告警在最前）
+    const sourceAlerts = [...rawAlerts].sort(
+      (x, y) => new Date(getAlertStartsAt(y) || 0).getTime() - new Date(getAlertStartsAt(x) || 0).getTime(),
+    )
     const rows = []
+    let rowNo = 0
     for (const a of sourceAlerts) {
+      rowNo++
       const fp = getAlertFingerprint(a)
       const isSelected = this.selectedAlert && getAlertFingerprint(this.selectedAlert) === fp
       const rowStyle = {
@@ -2149,6 +2190,11 @@ createApp({
               onMouseleave: hoverOut,
             },
             [
+              h(
+                'td',
+                { style: { padding: '10px 12px', fontSize: '12px', color: '#999', whiteSpace: 'nowrap' } },
+                String(rowNo),
+              ),
               h(
                 'td',
                 { style: { padding: '10px 12px', fontWeight: 600, fontSize: '14px' } },
@@ -2195,6 +2241,7 @@ createApp({
                   style: { borderBottom: '1px solid var(--border-color)', background: '#fafbfc' },
                 },
                 [
+                  h('td', { style: { padding: '8px 12px' } }, ''),
                   h(
                     'td',
                     { style: { padding: '8px 12px 8px 32px', fontSize: '13px' } },
@@ -2267,6 +2314,11 @@ createApp({
               onMouseleave: hoverOut,
             },
             [
+              h(
+                'td',
+                { style: { padding: '10px 12px', fontSize: '12px', color: '#999', whiteSpace: 'nowrap' } },
+                String(rowNo),
+              ),
               h(
                 'td',
                 { style: { padding: '10px 12px', fontWeight: 500, fontSize: '14px' } },
@@ -2425,6 +2477,21 @@ createApp({
                           },
                         },
                         [
+                          h(
+                            'th',
+                            {
+                              style: {
+                                textAlign: 'left',
+                                padding: '10px 12px',
+                                fontWeight: 600,
+                                fontSize: '12px',
+                                color: 'var(--text-secondary)',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.5px',
+                              },
+                            },
+                            '#',
+                          ),
                           h(
                             'th',
                             {

@@ -28,6 +28,9 @@ type BusinessAppNode struct {
 	Environment  string `json:"environment"`
 	Team         string `json:"team"`
 	BusinessUnit string `json:"businessUnit"`
+	OwnerName    string `json:"ownerName"`
+	OwnerKind    string `json:"ownerKind"`
+	Provenance   string `json:"provenance"` // "label"=资源建模 / "trace"=链路推断
 }
 
 type CallEdge struct {
@@ -61,7 +64,7 @@ func (s *BusinessTopologyService) GetApps(businessUnit, team, namespace string) 
 		}
 	}
 
-	query := fmt.Sprintf(`MATCH (v:BusinessApp)%s RETURN v.BusinessApp.uid as uid, v.BusinessApp.app_name as app_name, v.BusinessApp.namespace as namespace, v.BusinessApp.criticality as criticality, v.BusinessApp.environment as environment, v.BusinessApp.team as team, v.BusinessApp.business_unit as business_unit`, whereClause)
+	query := fmt.Sprintf(`MATCH (v:BusinessApp)%s RETURN v.BusinessApp.uid as uid, v.BusinessApp.app_name as app_name, v.BusinessApp.namespace as namespace, v.BusinessApp.criticality as criticality, v.BusinessApp.environment as environment, v.BusinessApp.team as team, v.BusinessApp.business_unit as business_unit, v.BusinessApp.owner_name as owner_name, v.BusinessApp.owner_kind as owner_kind`, whereClause)
 
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -97,10 +100,47 @@ func (s *BusinessTopologyService) GetApps(businessUnit, team, namespace string) 
 		if v, err := row.GetValueByColName("business_unit"); err == nil {
 			app.BusinessUnit, _ = v.AsString()
 		}
+		if v, err := row.GetValueByColName("owner_name"); err == nil {
+			app.OwnerName, _ = v.AsString()
+		}
+		if v, err := row.GetValueByColName("owner_kind"); err == nil {
+			app.OwnerKind, _ = v.AsString()
+		}
 		apps = append(apps, app)
 	}
 
+	// provenance：有 BelongsToApp 入边=资源建模(label)，否则=链路推断(trace)。
+	// 一次性查出有成员的顶点集合，避免逐点查询。
+	memberUIDs := s.appUIDsWithMembers()
+	for i := range apps {
+		if memberUIDs[apps[i].UID] {
+			apps[i].Provenance = "label"
+		} else {
+			apps[i].Provenance = "trace"
+		}
+	}
+
 	return apps, nil
+}
+
+// appUIDsWithMembers 返回所有拥有 BelongsToApp 入边（即有真实 K8s 资源指向）的业务顶点 uid 集合。
+func (s *BusinessTopologyService) appUIDsWithMembers() map[string]bool {
+	set := make(map[string]bool)
+	query := `MATCH (v:BusinessApp)<-[:BelongsToApp]-() RETURN DISTINCT id(v) AS uid`
+	resultSet, err := s.graphDB.ExecuteAndCheck(query)
+	if err != nil || resultSet == nil {
+		return set
+	}
+	for i := 0; i < resultSet.GetRowSize(); i++ {
+		row, e := resultSet.GetRowValuesByIndex(i)
+		if e != nil {
+			continue
+		}
+		if uid, ue := getStrVal(row, "uid"); ue == nil && uid != "" {
+			set[uid] = true
+		}
+	}
+	return set
 }
 
 func (s *BusinessTopologyService) GetCalls() ([]CallEdge, error) {
@@ -158,6 +198,141 @@ func (s *BusinessTopologyService) GetGraph(businessUnit, team string) (BusinessT
 		Nodes: apps,
 		Edges: filteredEdges,
 	}, nil
+}
+
+// BusinessAppMember 业务顶点的成员资源（通过 BelongsToApp 入边反查得到）。
+// 成员即「创建/构成该业务顶点的 K8s 资源」，是回答“哪个资源创建了这个顶点”的权威来源。
+type BusinessAppMember struct {
+	UID          string `json:"uid"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	Namespace    string `json:"namespace"`
+	IsDeleted    bool   `json:"isDeleted"`
+	IsController bool   `json:"isController"`
+}
+
+// BusinessAppDetail 业务顶点详情，含创建来源（provenance）、归属工作负载与成员资源清单。
+type BusinessAppDetail struct {
+	UID          string              `json:"id"`
+	AppName      string              `json:"appName"`
+	Namespace    string              `json:"namespace"`
+	Criticality  string              `json:"criticality"`
+	Environment  string              `json:"environment"`
+	Team         string              `json:"team"`
+	BusinessUnit string              `json:"businessUnit"`
+	OwnerName    string              `json:"ownerName"`
+	OwnerKind    string              `json:"ownerKind"`
+	Provenance   string              `json:"provenance"` // "label"=资源建模 / "trace"=链路推断
+	PrimaryKind  string              `json:"primaryKind"`
+	PrimaryName  string              `json:"primaryName"`
+	PrimaryUID   string              `json:"primaryUid"`
+	MemberCount  int                 `json:"memberCount"`
+	Members      []BusinessAppMember `json:"members"`
+}
+
+// controllerRank 返回工作负载的“主体性”排序，数字越小越接近顶层控制器。
+// 用于从成员资源里推导 primaryWorkload（如 Deployment 优于其 ReplicaSet/Pod）。
+func controllerRank(kind string) int {
+	switch kind {
+	case "Deployment":
+		return 1
+	case "StatefulSet":
+		return 2
+	case "DaemonSet":
+		return 3
+	case "CronJob":
+		return 4
+	case "Job":
+		return 5
+	case "ReplicaSet":
+		return 6
+	default:
+		return 99
+	}
+}
+
+// GetAppDetail 返回单个业务顶点的完整来源信息。
+// uid 即 BusinessApp 的 VID（bizapp-<cluster>-<ns>-<appName>）。
+func (s *BusinessTopologyService) GetAppDetail(uid string) (BusinessAppDetail, error) {
+	detail := BusinessAppDetail{UID: uid, Provenance: "trace"}
+	if uid == "" {
+		return detail, fmt.Errorf("empty business app uid")
+	}
+
+	// 1. 读顶点自身属性（owner_name/owner_kind 可能为 NULL，getStrVal 会安全降级为 ""）
+	propQuery := fmt.Sprintf(`FETCH PROP ON BusinessApp %s YIELD BusinessApp.app_name AS app_name, BusinessApp.namespace AS namespace, BusinessApp.criticality AS criticality, BusinessApp.environment AS environment, BusinessApp.team AS team, BusinessApp.business_unit AS business_unit, BusinessApp.owner_name AS owner_name, BusinessApp.owner_kind AS owner_kind`,
+		strconv.Quote(uid))
+	if rs, err := s.graphDB.ExecuteAndCheck(propQuery); err == nil && rs != nil && rs.GetRowSize() > 0 {
+		if row, e := rs.GetRowValuesByIndex(0); e == nil {
+			detail.AppName, _ = getStrVal(row, "app_name")
+			detail.Namespace, _ = getStrVal(row, "namespace")
+			detail.Criticality, _ = getStrVal(row, "criticality")
+			detail.Environment, _ = getStrVal(row, "environment")
+			detail.Team, _ = getStrVal(row, "team")
+			detail.BusinessUnit, _ = getStrVal(row, "business_unit")
+			detail.OwnerName, _ = getStrVal(row, "owner_name")
+			detail.OwnerKind, _ = getStrVal(row, "owner_kind")
+		}
+	}
+
+	// 2. BelongsToApp 反查成员资源（权威“创建来源”）
+	memberQuery := fmt.Sprintf(`MATCH (r:K8sResource)-[:BelongsToApp]->(v:BusinessApp) WHERE id(v) == %s RETURN id(r) AS uid, r.K8sResource.kind AS kind, r.K8sResource.name AS name, r.K8sResource.name_space AS ns, r.K8sResource.is_deleted AS del`,
+		strconv.Quote(uid))
+	rs, err := s.graphDB.ExecuteAndCheck(memberQuery)
+	if err != nil {
+		return detail, fmt.Errorf("query BelongsToApp members failed: %w", err)
+	}
+	if rs != nil {
+		for i := 0; i < rs.GetRowSize(); i++ {
+			row, e := rs.GetRowValuesByIndex(i)
+			if e != nil {
+				continue
+			}
+			m := BusinessAppMember{}
+			m.UID, _ = getStrVal(row, "uid")
+			m.Kind, _ = getStrVal(row, "kind")
+			m.Name, _ = getStrVal(row, "name")
+			m.Namespace, _ = getStrVal(row, "ns")
+			if v, ve := row.GetValueByColName("del"); ve == nil {
+				m.IsDeleted, _ = v.AsBool()
+			}
+			m.IsController = controllerRank(m.Kind) < 99
+			detail.Members = append(detail.Members, m)
+		}
+	}
+	detail.MemberCount = len(detail.Members)
+	if detail.MemberCount > 0 {
+		detail.Provenance = "label"
+	}
+
+	// 3. 从成员推导 primaryWorkload：优先未删除、controller 级、rank 最小者
+	bestIdx := -1
+	for i, m := range detail.Members {
+		if bestIdx == -1 {
+			bestIdx = i
+			continue
+		}
+		b := detail.Members[bestIdx]
+		// 未删除优先
+		if b.IsDeleted && !m.IsDeleted {
+			bestIdx = i
+			continue
+		}
+		if m.IsDeleted && !b.IsDeleted {
+			continue
+		}
+		// rank 小者优先
+		if controllerRank(m.Kind) < controllerRank(b.Kind) {
+			bestIdx = i
+		}
+	}
+	if bestIdx >= 0 {
+		detail.PrimaryKind = detail.Members[bestIdx].Kind
+		detail.PrimaryName = detail.Members[bestIdx].Name
+		detail.PrimaryUID = detail.Members[bestIdx].UID
+	}
+
+	return detail, nil
 }
 
 func (s *BusinessTopologyService) EnrichAlertByResourceUID(resourceUID string) interfaces.BusinessAppContext {

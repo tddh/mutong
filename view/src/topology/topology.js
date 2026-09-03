@@ -477,6 +477,7 @@ createApp({
       const color = getKindColor(kind, viewMode.value)
       const isSeed = node._isSeed
       const highlighted = node.__highlighted || false
+      const isGhost = node.provenance === 'trace'
       const r = nodeRadius(node)
 
       ctx.save()
@@ -486,17 +487,19 @@ createApp({
         ctx.shadowBlur = highlighted ? 20 : 12
       }
 
-      const bgColor = isSeed ? '#fffbe6' : color
-      const borderColor = highlighted ? '#1890ff' : isSeed ? '#faad14' : color
+      const bgColor = isGhost ? '#f5f5f5' : isSeed ? '#fffbe6' : color
+      const borderColor = highlighted ? '#1890ff' : isGhost ? '#bfbfbf' : isSeed ? '#faad14' : color
       const borderWidth = highlighted ? 2.5 : isSeed ? 2.5 : 1.5
 
       ctx.beginPath()
       ctx.arc(node.x, node.y, r, 0, Math.PI * 2)
       ctx.fillStyle = bgColor
       ctx.fill()
+      if (isGhost && !highlighted) ctx.setLineDash([3, 2])
       ctx.strokeStyle = borderColor
       ctx.lineWidth = borderWidth
       ctx.stroke()
+      ctx.setLineDash([])
 
       ctx.shadowBlur = 0
       ctx.shadowColor = 'transparent'
@@ -507,13 +510,15 @@ createApp({
       ctx.font = `${highlighted ? '600' : '400'} 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
-      ctx.fillStyle = highlighted ? '#1890ff' : isSeed ? '#333' : '#555'
+      ctx.fillStyle = highlighted ? '#1890ff' : isGhost ? '#999' : isSeed ? '#333' : '#555'
       ctx.fillText(displayLabel, node.x, node.y + r + 4)
 
+      const subLabel =
+        kind === 'BusinessApp' ? (isGhost ? '链路推断' : node.ownerKind || 'BusinessApp') : kind
       ctx.font = '500 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
       ctx.fillStyle = highlighted ? '#1890ff' : '#888'
       ctx.globalAlpha = 0.75
-      ctx.fillText(kind, node.x, node.y + r + 18)
+      ctx.fillText(subLabel, node.x, node.y + r + 18)
       ctx.globalAlpha = 1
 
       if (isSeed) {
@@ -745,8 +750,36 @@ createApp({
                 businessUnit: node.businessUnit,
                 criticality: node.criticality,
                 environment: node.environment,
+                ownerName: node.ownerName || '',
+                ownerKind: node.ownerKind || '',
+                provenance: node.provenance || '',
+                members: [],
+                memberCount: 0,
               }
-              detailLoading.value = false
+              detailLoading.value = true
+              fetch(`/api/v1/business-topology/app?uid=${encodeURIComponent(node.id)}`)
+                .then((res) => (res.ok ? res.json() : null))
+                .then((data) => {
+                  if (selectedNode.value && selectedNode.value.id === clickedNodeId && data) {
+                    selectedNode.value = {
+                      ...selectedNode.value,
+                      ownerName: data.ownerName || selectedNode.value.ownerName || '',
+                      ownerKind: data.ownerKind || selectedNode.value.ownerKind || '',
+                      provenance: data.provenance || selectedNode.value.provenance || '',
+                      primaryKind: data.primaryKind || '',
+                      primaryName: data.primaryName || '',
+                      primaryUid: data.primaryUid || '',
+                      memberCount: data.memberCount || 0,
+                      members: data.members || [],
+                    }
+                  }
+                })
+                .catch(() => {})
+                .finally(() => {
+                  if (selectedNode.value && selectedNode.value.id === clickedNodeId) {
+                    detailLoading.value = false
+                  }
+                })
             } else {
               selectedNode.value = {
                 id: node.id,
@@ -1137,6 +1170,9 @@ createApp({
           businessUnit: n.businessUnit || '-',
           criticality: n.criticality || 'medium',
           environment: n.environment || '-',
+          ownerName: n.ownerName || '',
+          ownerKind: n.ownerKind || '',
+          provenance: n.provenance || '',
           _isSeed: false,
         }))
 
@@ -1470,6 +1506,17 @@ createApp({
       window.removeEventListener('resize', handleResize)
     })
 
+    const openMemberResource = (member) => {
+      if (!member || !member.uid) return
+      selectedNode.value = null
+      viewMode.value = 'physical'
+      if (member.namespace) selectedNs.value = member.namespace
+      // selectedNs 的 watch 会清空 selectedResourceUid，故等其 flush 后再设置，触发物理拓扑拉取
+      nextTick(() => {
+        selectedResourceUid.value = member.uid
+      })
+    }
+
     return {
       loading,
       error,
@@ -1515,6 +1562,7 @@ createApp({
       handleZoomOut,
       handleFitView,
       handleResourceSelect,
+      openMemberResource,
       handleSuggestionSelect,
       handleSuggestKeydown,
       handleViewModeChange,

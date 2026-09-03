@@ -202,6 +202,38 @@
                         </table>
                     </div>
 
+                    <div class="detail-section" v-if="selectedNode.kind === 'BusinessApp'">
+                        <h4 class="section-title">🏢 业务应用</h4>
+                        <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">
+                            <tr>
+                                <td style="padding: 5px 0; color: #888; width: 65px;">来源</td>
+                                <td style="padding: 5px 0;">
+                                    <span v-if="selectedNode.provenance === 'label'" class="status-badge status-running">资源建模</span>
+                                    <span v-else-if="selectedNode.provenance === 'trace'" class="status-badge status-pending">链路推断</span>
+                                    <span v-else style="color:#aaa;">未知</span>
+                                </td>
+                            </tr>
+                            <tr v-if="selectedNode.primaryName || selectedNode.ownerName">
+                                <td style="padding: 5px 0; color: #888;">归属负载</td>
+                                <td style="padding: 5px 0; word-break: break-word;">
+                                    <span v-if="selectedNode.primaryName">{{ selectedNode.primaryKind }}/{{ selectedNode.primaryName }}</span>
+                                    <span v-else>{{ selectedNode.ownerKind }}/{{ selectedNode.ownerName }}</span>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 5px 0; color: #888; vertical-align: top;">成员资源</td>
+                                <td style="padding: 5px 0;">
+                                    <div v-if="selectedNode.members && selectedNode.members.length" class="detail-list">
+                                        <div v-for="(m, i) in selectedNode.members" :key="i" class="detail-list-item" style="cursor:pointer;" @click="openMemberResource(m)" :title="'点击在物理拓扑中查看 ' + m.kind + '/' + m.name">
+                                            {{ m.kind }}/{{ m.name }}<span v-if="m.isDeleted" style="color:#c0392b; margin-left:4px;">(已删除)</span>
+                                        </div>
+                                    </div>
+                                    <span v-else style="color:#aaa;">无（由链路流量推断，无 K8s 资源直接建模）</span>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+
                     <div class="detail-section" v-if="selectedNode.annotationsCount !== undefined || selectedNode.owners || selectedNode.conditionsSummary">
                         <h4 class="section-title">🧾 通用元数据</h4>
                         <table style="width:100%; text-align:left; border-collapse: collapse; font-size: 12px;">

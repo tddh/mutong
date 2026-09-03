@@ -19,6 +19,19 @@ func (c *BusinessTopologyController) RegisterRoutes(app *gin.Engine) {
 	app.GET("/api/v1/business-topology/apps", c.GetApps)
 	app.GET("/api/v1/business-topology/calls", c.GetCalls)
 	app.GET("/api/v1/business-topology/graph", c.GetGraph)
+	app.GET("/api/v1/business-topology/app", c.GetApp)
+}
+
+func (c *BusinessTopologyController) GetApp(ctx *gin.Context) {
+	uid := ctx.Query("uid")
+
+	detail, err := c.svc.GetAppDetail(uid)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, detail)
 }
 
 func (c *BusinessTopologyController) GetApps(ctx *gin.Context) {

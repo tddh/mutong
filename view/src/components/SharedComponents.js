@@ -16,10 +16,16 @@ export const NavBar = {
 <a href="/view/retrospective-history/index.html" :class="{ active: isActive('/view/retrospective-history/index.html') }">历史复盘</a>
 <a href="/view/resource-table.html" :class="{ active: isActive('/view/resource-table.html') }">资源表格</a>
                 <a href="/view/status/index.html" :class="{ active: isActive('/view/status/index.html') }">状态</a>
+                <!-- [暂时隐藏-勿删] 日志菜单入口已收起，页面代码完整保留于 src/logs/；恢复：删除本行与末行注释标记，保留中间的链接
                 <a href="/view/logs/index.html" :class="{ active: isActive('/view/logs/index.html') }">📋 日志</a>
+                [暂时隐藏-勿删] -->
+                <!-- [暂时隐藏-勿删] 监控菜单入口已收起（该页将重建为 Grafana 内嵌），页面代码完整保留于 src/monitoring/；恢复：删除本行与末行注释标记，保留中间的链接
                 <a href="/view/monitoring/index.html" :class="{ active: isActive('/view/monitoring/index.html') }">📊 监控</a>
+                [暂时隐藏-勿删] -->
                 <a href="/view/terminal/index.html" :class="{ active: isActive('/view/terminal/index.html') }">💻 终端</a>
+                <!-- [暂时隐藏-勿删] 链路追踪菜单入口已收起，页面代码完整保留于 src/trace/；恢复：删除本行与末行注释标记，保留中间的链接
                 <a href="/view/trace/index.html" :class="{ active: isActive('/view/trace/index.html') }">🔗 追踪</a>
+                [暂时隐藏-勿删] -->
                 <a href="/view/clusters/index.html" :class="{ active: isActive('/view/clusters/index.html') }">🖥️ 集群</a>
             </div>
             <div class="nav-actions">

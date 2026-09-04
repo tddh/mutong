@@ -393,6 +393,56 @@
 :where(.error-banner .m-btn) {
   margin-left: var(--sp-3);
 }
+
+/* ---------- 详情区块：告警详情的键值表与分节 ---------- */
+:where(.m-detail-section) {
+  margin-bottom: var(--sp-4);
+}
+:where(.m-detail-section:last-child) {
+  margin-bottom: 0;
+}
+:where(.m-detail-title) {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-300);
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+:where(.m-info-tbl) {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--fs-300);
+}
+:where(.m-info-tbl.has-more) {
+  margin-bottom: var(--sp-3);
+}
+:where(.m-info-row) {
+  border-bottom: 1px solid var(--border-split);
+}
+:where(.m-info-row:last-child) {
+  border-bottom: none;
+}
+:where(.m-info-k) {
+  width: 112px;
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) 0;
+  text-align: left;
+  font-size: var(--fs-200);
+  font-weight: 400;
+  color: var(--text-muted);
+  vertical-align: top;
+  white-space: nowrap;
+}
+:where(.m-info-v) {
+  padding: var(--sp-2) 0;
+  color: var(--text-primary);
+  line-height: 1.5;
+  word-break: break-word;
+  vertical-align: top;
+}
+:where(.m-risk-line) {
+  margin-bottom: var(--sp-3);
+}
 :where(.m-tbl .m-tbl-check) {
   width: 36px;
   text-align: center;

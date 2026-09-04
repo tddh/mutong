@@ -1,14 +1,8 @@
 import { createApp, ref, onMounted, h } from 'vue'
 import { NavBar } from '../components/SharedComponents.js'
+import { StatusBadge } from '../components/primitives.js'
 import { API } from '../utils/api.js'
 import '../styles/common.css'
-
-const SEVERITY_COLORS = {
-  critical: 'var(--error-color)',
-  error: 'var(--error-color)',
-  warning: 'var(--warning-color)',
-  info: 'var(--primary-color)',
-}
 
 const ACTION_NAMES_CN = {
   restart_pod: '重启 Pod',
@@ -23,17 +17,6 @@ const ACTION_NAMES_CN = {
 
 function actionText(action) {
   return ACTION_NAMES_CN[action] || (action || '').replace(/_/g, ' ')
-}
-
-function getSeverityColor(severity) {
-  const s = (severity || '').toLowerCase()
-  return SEVERITY_COLORS[s] || 'var(--text-secondary)'
-}
-
-function getSeverityBg(severity) {
-  const s = (severity || '').toLowerCase()
-  const map = { critical: '#fff1f0', error: '#fff1f0', warning: '#fff7e6', info: '#e6f7ff' }
-  return map[s] || '#f5f5f5'
 }
 
 function formatTime(ts) {
@@ -92,81 +75,44 @@ function getBusinessCriticality(alert) {
   return alert?.businessContext?.criticality || '-'
 }
 
-function getBusinessCriticalityColor(criticality) {
-  const c = (criticality || '').toLowerCase()
-  const map = { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }
-  return map[c] || 'var(--text-secondary)'
+/** 严重度→语义档位；颜色由 CSS 的 [data-sev] 决定，不再有色表 */
+export function severityBadge(severity) {
+  const s = (severity || '').toLowerCase()
+  const sev = s === 'critical' || s === 'error' || s === 'warning' || s === 'info' ? s : 'pending'
+  return h(StatusBadge, { sev, text: severity || '—', dot: true })
 }
 
-function getBusinessCriticalityBg(criticality) {
+const CRIT_LABEL = { critical: '核心', high: '重要', medium: '一般', low: '低' }
+const CRIT_SEV = { critical: 'critical', high: 'warning', medium: 'pass', low: 'pending' }
+
+export function criticalityBadge(criticality) {
   const c = (criticality || '').toLowerCase()
-  const map = { critical: '#fff1f0', high: '#fff7e6', medium: '#e6f7ee', low: '#f5f5f5' }
-  return map[c] || '#f5f5f5'
+  return h(StatusBadge, { sev: CRIT_SEV[c] || 'pending', text: CRIT_LABEL[c] || criticality || '—' })
 }
 
-function severityBadge(severity) {
-  return h(
-    'span',
-    {
-      style: {
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 500,
-        color: getSeverityColor(severity),
-        background: getSeverityBg(severity),
-      },
-    },
-    severity,
-  )
+const RISK_LABEL = { critical: '严重', high: '高风险', medium: '中风险', low: '低风险' }
+const RISK_SEV = { critical: 'critical', high: 'warning', medium: 'pending', low: 'pass' }
+
+export function riskBadge(level) {
+  const l = (level || '').toLowerCase()
+  return h(StatusBadge, { sev: RISK_SEV[l] || 'pending', text: RISK_LABEL[l] || level || '—', dot: true })
 }
 
 function infoRow(label, value) {
-  return h('tr', { style: { borderBottom: '1px solid #f0f0f0' } }, [
-    h(
-      'td',
-      {
-        style: {
-          padding: '8px 0',
-          color: 'var(--text-secondary)',
-          fontSize: '12px',
-          width: '110px',
-          verticalAlign: 'top',
-        },
-      },
-      label,
-    ),
-    h(
-      'td',
-      {
-        style: {
-          padding: '8px 0',
-          fontSize: '13px',
-          color: 'var(--text-primary)',
-          wordBreak: 'break-all',
-          lineHeight: '1.5',
-        },
-      },
-      value != null ? value : '-',
-    ),
+  return h('tr', { class: 'm-info-row' }, [
+    h('th', { class: 'm-info-k', scope: 'row' }, label),
+    h('td', { class: 'm-info-v' }, value != null ? value : '—'),
   ])
 }
 
+/** infoRow 产出行，宽度与分隔线由这个表格壳承载 */
+function infoTable(rows) {
+  return h('table', { class: 'm-info-tbl' }, h('tbody', null, rows))
+}
+
 function sectionBlock(title, content) {
-  return h('div', { style: { marginBottom: '16px' } }, [
-    h(
-      'h4',
-      {
-        style: {
-          fontSize: '13px',
-          fontWeight: 600,
-          color: 'var(--text-primary)',
-          margin: '0 0 10px 0',
-        },
-      },
-      title,
-    ),
+  return h('section', { class: 'm-detail-section' }, [
+    h('h4', { class: 'm-detail-title' }, title),
     content,
   ])
 }
@@ -515,23 +461,7 @@ createApp({
           '-',
         )
       }
-      const labelMap = { critical: '核心', high: '重要', medium: '一般', low: '低' }
-      const label = labelMap[criticality.toLowerCase()] || criticality
-      return h(
-        'span',
-        {
-          style: {
-            display: 'inline-block',
-            padding: '2px 8px',
-            borderRadius: '4px',
-            fontSize: '12px',
-            fontWeight: 500,
-            color: getBusinessCriticalityColor(criticality),
-            background: getBusinessCriticalityBg(criticality),
-          },
-        },
-        label,
-      )
+      return criticalityBadge(criticality)
     },
     groupResourcesByKind(resources) {
       const groups = {}
@@ -653,11 +583,7 @@ createApp({
       sections.push(
         sectionBlock(
           '📋 基本信息',
-          h(
-            'table',
-            { style: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' } },
-            h('tbody', null, basicRows),
-          ),
+          infoTable(basicRows),
         ),
       )
 
@@ -672,18 +598,10 @@ createApp({
         if (bc.businessUnit) bcRows.push(infoRow('业务单元', bc.businessUnit))
         if (bc.team) bcRows.push(infoRow('负责团队', bc.team))
         if (bc.criticality) {
-          const critLabel =
-            { critical: '核心', high: '重要', medium: '一般', low: '低' }[
-              bc.criticality.toLowerCase()
-            ] || bc.criticality
           bcRows.push(
             infoRow(
               '重要等级',
-              h(
-                'span',
-                { style: { color: getBusinessCriticalityColor(bc.criticality), fontWeight: 600 } },
-                critLabel,
-              ),
+              criticalityBadge(bc.criticality),
             ),
           )
         }
@@ -692,11 +610,7 @@ createApp({
         sections.push(
           sectionBlock(
             '🏢 业务上下文',
-            h(
-              'table',
-              { style: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' } },
-              h('tbody', null, bcRows),
-            ),
+            infoTable(bcRows),
           ),
         )
       } else {
@@ -891,11 +805,7 @@ createApp({
         sections.push(
           sectionBlock(
             '📊 业务影响',
-            h(
-              'table',
-              { style: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' } },
-              h('tbody', null, biRows),
-            ),
+            infoTable(biRows),
           ),
         )
       }
@@ -925,11 +835,7 @@ createApp({
           sections.push(
             sectionBlock(
               '📦 子告警 (' + subs.length + ')',
-              h(
-                'table',
-                { style: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' } },
-                h('tbody', null, childRows),
-              ),
+              infoTable(childRows),
             ),
           )
         }
@@ -1097,37 +1003,7 @@ createApp({
         const bizChildren = []
 
         if (hasDirect || hasIndirect) {
-          const riskMap = {
-            critical: { label: '🔴 严重', color: '#cf1322', bg: '#fff1f0', border: '#ffa39e' },
-            high: { label: '🟠 高风险', color: '#d46b08', bg: '#fff7e6', border: '#ffd591' },
-            medium: { label: '🟡 中风险', color: '#d48806', bg: '#fffbe6', border: '#ffe58f' },
-            low: { label: '🟢 低风险', color: '#389e0d', bg: '#f6ffed', border: '#b7eb8f' },
-          }
-          const risk = riskMap[bizImpact.riskLevel?.toLowerCase()] || {
-            label: bizImpact.riskLevel || '-',
-            color: '#666',
-            bg: '#f5f5f5',
-            border: '#d9d9d9',
-          }
-          bizChildren.push(
-            h(
-              'div',
-              {
-                style: {
-                  display: 'inline-block',
-                  padding: '4px 12px',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  color: risk.color,
-                  background: risk.bg,
-                  border: '1px solid ' + risk.border,
-                  marginBottom: '12px',
-                },
-              },
-              risk.label,
-            ),
-          )
+          bizChildren.push(h('div', { class: 'm-risk-line' }, riskBadge(bizImpact.riskLevel)))
           if (bizImpact.summary)
             bizChildren.push(
               h(
@@ -1741,14 +1617,7 @@ createApp({
           impactSections.push(
             h(
               'table',
-              {
-                style: {
-                  width: '100%',
-                  borderCollapse: 'collapse',
-                  fontSize: '13px',
-                  marginBottom: directGrouped.length > 0 || indirectGrouped.length > 0 ? '12px' : 0,
-                },
-              },
+              { class: ['m-info-tbl', { 'has-more': directGrouped.length > 0 || indirectGrouped.length > 0 }] },
               h('tbody', null, impactChildren),
             ),
           )
@@ -2465,7 +2334,7 @@ createApp({
                 this.buildBusinessFilterBar(),
                 h(
                   'table',
-                  { width: '100%', style: { borderCollapse: 'collapse', fontSize: '14px' } },
+                  { class: 'm-info-tbl' },
                   [
                     h('thead', null, [
                       h(

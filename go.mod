@@ -8,7 +8,7 @@ require (
 	github.com/apache/skywalking-go v0.6.0
 	github.com/casbin/casbin/v3 v3.10.0
 	github.com/casbin/gorm-adapter/v3 v3.41.0
-	github.com/cloudwego/eino v0.8.13
+	github.com/cloudwego/eino v0.9.4
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
 	github.com/coreos/go-oidc/v3 v3.12.0
 	github.com/elastic/go-elasticsearch/v8 v8.19.4

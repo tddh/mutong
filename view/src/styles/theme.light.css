@@ -1,0 +1,128 @@
+/* 语义层 · 浅色（默认）。页面与组件只引用本层变量，暗色在 theme.dark.css 用同名覆盖。
+   状态色与严重度一律 fg/bg/bd 三元组，不留单值——否则暗色下必然出现"深字压深底"。
+   注意：--chart-* 以及 --graph-node-fill、--graph-node-stroke、--graph-edge
+   必须保持 6 位 hex，因 retrospective.js:619 存在 `color + '10'` 的透明度字符串拼接，
+   rgb() 之类的函数值会拼出非法色号。 */
+:root {
+  color-scheme: light;
+
+  /* ---- 面 ---- */
+  --surface-page: #f0f2f5;
+  --surface-card: var(--pal-white);
+  --surface-raised: var(--pal-gray-2);
+  --surface-sunken: var(--pal-gray-3);
+  --surface-inset: var(--pal-gray-1);
+  --surface-hover: var(--pal-gray-1);
+  --surface-selected: var(--pal-blue-1);
+  --surface-overlay: rgba(0, 0, 0, 0.45);
+  --surface-disabled: var(--pal-gray-4);
+
+  /* ---- 文本 ---- */
+  --text-primary: var(--pal-gray-11);
+  --text-secondary: var(--pal-gray-9);
+  --text-muted: var(--pal-gray-8);
+  --text-disabled: var(--pal-gray-7);
+  --text-inverse: var(--pal-white);
+  --text-on-accent: var(--pal-white);
+
+  /* ---- 边框 ---- */
+  --border-default: var(--pal-gray-5);
+  --border-strong: var(--pal-gray-6);
+  --border-subtle: var(--pal-gray-4);
+  --border-focus: var(--pal-blue-5);
+  --border-split: rgba(0, 0, 0, 0.06);
+
+  /* ---- 主色 ---- */
+  --accent: var(--pal-blue-6);
+  --accent-hover: var(--pal-blue-5);
+  --accent-active: var(--pal-blue-7);
+  --accent-on: var(--pal-white);
+  --accent-subtle-bg: var(--pal-blue-1);
+  --accent-subtle-bd: var(--pal-blue-3);
+  --accent-strong-fg: var(--pal-blue-8);
+
+  /* ---- 状态 ---- */
+  --st-success-fg: var(--pal-green-7);
+  --st-success-bg: var(--pal-green-1);
+  --st-success-bd: var(--pal-green-3);
+  --st-warning-fg: var(--pal-gold-7);
+  --st-warning-bg: var(--pal-gold-1);
+  --st-warning-bd: var(--pal-gold-3);
+  --st-danger-fg: var(--pal-red-7);
+  --st-danger-bg: var(--pal-red-1);
+  --st-danger-bd: var(--pal-red-2);
+  --st-info-fg: var(--pal-blue-7);
+  --st-info-bg: var(--pal-blue-1);
+  --st-info-bd: var(--pal-blue-3);
+  --st-neutral-fg: var(--pal-gray-9);
+  --st-neutral-bg: var(--pal-gray-1);
+  --st-neutral-bd: var(--pal-gray-6);
+
+  /* ---- 严重度（告警 / 巡检 / 复盘 / 待审批共用同一套键） ---- */
+  --sev-critical-fg: var(--pal-red-7);
+  --sev-critical-bg: var(--pal-red-1);
+  --sev-critical-bd: var(--pal-red-3);
+  --sev-error-fg: var(--pal-red-5);
+  --sev-error-bg: var(--pal-red-1);
+  --sev-error-bd: var(--pal-red-2);
+  --sev-warning-fg: var(--pal-orange-7);
+  --sev-warning-bg: var(--pal-orange-1);
+  --sev-warning-bd: var(--pal-orange-2);
+  --sev-info-fg: var(--pal-blue-7);
+  --sev-info-bg: var(--pal-blue-1);
+  --sev-info-bd: var(--pal-blue-3);
+  --sev-pass-fg: var(--pal-green-7);
+  --sev-pass-bg: var(--pal-green-1);
+  --sev-pass-bd: var(--pal-green-3);
+  --sev-pending-fg: var(--pal-gray-9);
+  --sev-pending-bg: var(--pal-gray-1);
+  --sev-pending-bd: var(--pal-gray-6);
+
+  /* ---- 图表分类色（12 支，force-graph 与 G6 共用） ---- */
+  --chart-1: #1890ff;
+  --chart-2: #52c41a;
+  --chart-3: #faad14;
+  --chart-4: #f5222d;
+  --chart-5: #722ed1;
+  --chart-6: #13c2c2;
+  --chart-7: #fa8c16;
+  --chart-8: #2f54eb;
+  --chart-9: #eb2f96;
+  --chart-10: #a0d911;
+  --chart-11: #08979c;
+  --chart-12: #d48806;
+
+  /* ---- 图形结构色（canvas 内绘制，由 styles/theme.js 读出） ---- */
+  --graph-canvas-bg: #f8f9fa;
+  --graph-node-fill: #ffffff;
+  --graph-node-stroke: #d9d9d9;
+  --graph-label: #8c8c8c;
+  --graph-edge: #bfbfbf;
+  --graph-tooltip-bg: rgba(0, 0, 0, 0.8);
+  --graph-tooltip-fg: #ffffff;
+
+  /* ---- 等宽文本 / 终端 ---- */
+  --code-bg: var(--pal-gray-3);
+  --code-text: var(--pal-gray-11);
+  /* 终端两主题同为深色：黑底终端是运维惯例，反白反而不可读 */
+  --terminal-bg: #1e1e1e;
+  --terminal-fg: #d4d4d4;
+
+  /* ---- 海拔：组件统一用这一组，切换主题时随之换原语 ---- */
+  --elev-1: var(--sh-1);
+  --elev-2: var(--sh-2);
+  --elev-3: var(--sh-3);
+
+  /* ---- 组件 token：只引用语义层，暗色自动穿透，不在 dark 文件里重复 ---- */
+  --badge-pad: var(--sp-1) var(--sp-2);
+  --badge-radius: var(--r-1);
+  --btn-pad: var(--sp-2) var(--sp-4);
+  --btn-h: 32px;
+  --tbl-cell-pad: var(--sp-2) var(--sp-3);
+  --tbl-head-pad: var(--sp-3);
+  --panel-pad: var(--sp-5);
+  --panel-head-bg: linear-gradient(180deg, var(--surface-raised), var(--surface-inset));
+  --card-radius: var(--r-3);
+  --shadow-sm: var(--elev-2);
+  --nav-height: 60px;
+}

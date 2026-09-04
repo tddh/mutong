@@ -1,0 +1,114 @@
+/* 语义层 · 暗色。只覆盖语义变量：--pal-* 原始层、各 scale、组件 token 一律不重复，
+   组件 token（--badge-pad/--panel-head-bg 等）定义在 :root 且引用语义层，
+   因 data-theme 与 :root 同为 <html> 元素，覆盖后自动穿透。
+   暗色不是反色：面提亮而非加深，状态色 bg 改低透明叠加以免刺眼，图表色整体提亮一档。
+   --chart-* 与各个 --graph-* 结构色仍须 6 位 hex（禁 rgb() 与 oklch()）。 */
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* ---- 面 ---- */
+  --surface-page: #0d1117;
+  --surface-card: #161b22;
+  --surface-raised: #1c2128;
+  --surface-sunken: #0b0e13;
+  --surface-inset: #12161c;
+  --surface-hover: #1f2630;
+  --surface-selected: #162c44;
+  --surface-overlay: rgba(1, 4, 9, 0.7);
+  --surface-disabled: #21262d;
+
+  /* ---- 文本 ---- */
+  --text-primary: #e6edf3;
+  --text-secondary: #adbac7;
+  --text-muted: #768390;
+  --text-disabled: #545d68;
+  --text-inverse: #141414;
+  --text-on-accent: #ffffff;
+
+  /* ---- 边框 ---- */
+  --border-default: #30363d;
+  --border-strong: #444c56;
+  --border-subtle: #21262d;
+  --border-focus: #40a9ff;
+  --border-split: rgba(255, 255, 255, 0.08);
+
+  /* ---- 主色（暗底上蓝要提亮，否则对比不足） ---- */
+  --accent: #177ddc;
+  --accent-hover: #3c9ae8;
+  --accent-active: #0d5ba8;
+  --accent-on: #ffffff;
+  --accent-subtle-bg: rgba(24, 144, 255, 0.14);
+  --accent-subtle-bd: rgba(24, 144, 255, 0.32);
+  --accent-strong-fg: #69c0ff;
+
+  /* ---- 状态：fg 提亮、bg 透明叠加、bd 半透明 ---- */
+  --st-success-fg: #95de64;
+  --st-success-bg: rgba(82, 196, 26, 0.14);
+  --st-success-bd: rgba(82, 196, 26, 0.32);
+  --st-warning-fg: #ffc53d;
+  --st-warning-bg: rgba(250, 173, 20, 0.14);
+  --st-warning-bd: rgba(250, 173, 20, 0.32);
+  --st-danger-fg: #ff7875;
+  --st-danger-bg: rgba(255, 77, 79, 0.14);
+  --st-danger-bd: rgba(255, 77, 79, 0.32);
+  --st-info-fg: #69c0ff;
+  --st-info-bg: rgba(24, 144, 255, 0.14);
+  --st-info-bd: rgba(24, 144, 255, 0.32);
+  --st-neutral-fg: #adbac7;
+  --st-neutral-bg: rgba(255, 255, 255, 0.06);
+  --st-neutral-bd: rgba(255, 255, 255, 0.12);
+
+  /* ---- 严重度 ---- */
+  --sev-critical-fg: #ff7875;
+  --sev-critical-bg: rgba(207, 19, 34, 0.18);
+  --sev-critical-bd: rgba(255, 120, 117, 0.36);
+  --sev-error-fg: #ff9c6e;
+  --sev-error-bg: rgba(255, 77, 79, 0.14);
+  --sev-error-bd: rgba(255, 156, 110, 0.32);
+  --sev-warning-fg: #ffc53d;
+  --sev-warning-bg: rgba(250, 140, 22, 0.14);
+  --sev-warning-bd: rgba(255, 197, 61, 0.32);
+  --sev-info-fg: #69c0ff;
+  --sev-info-bg: rgba(24, 144, 255, 0.14);
+  --sev-info-bd: rgba(105, 192, 255, 0.32);
+  --sev-pass-fg: #95de64;
+  --sev-pass-bg: rgba(82, 196, 26, 0.14);
+  --sev-pass-bd: rgba(149, 222, 100, 0.32);
+  --sev-pending-fg: #adbac7;
+  --sev-pending-bg: rgba(255, 255, 255, 0.06);
+  --sev-pending-bd: rgba(255, 255, 255, 0.12);
+
+  /* ---- 图表分类色：较浅色整体提亮一档，保证深底上可辨 ---- */
+  --chart-1: #40a9ff;
+  --chart-2: #73d13d;
+  --chart-3: #ffc53d;
+  --chart-4: #ff7875;
+  --chart-5: #9254de;
+  --chart-6: #36cfc9;
+  --chart-7: #ffa940;
+  --chart-8: #597ef7;
+  --chart-9: #f759ab;
+  --chart-10: #bae637;
+  --chart-11: #13c2c2;
+  --chart-12: #faad14;
+
+  /* ---- 图形结构色 ---- */
+  --graph-canvas-bg: #0d1117;
+  --graph-node-fill: #161b22;
+  --graph-node-stroke: #30363d;
+  --graph-label: #768390;
+  --graph-edge: #444c56;
+  --graph-tooltip-bg: rgba(255, 255, 255, 0.1);
+  --graph-tooltip-fg: #e6edf3;
+
+  /* ---- 等宽文本 / 终端 ---- */
+  --code-bg: #0b0e13;
+  --code-text: #e6edf3;
+  --terminal-bg: #0d1117;
+  --terminal-fg: #e6edf3;
+
+  /* ---- 海拔：暗色下纯黑投影不可见，改选加深原语，分层主要靠边框 ---- */
+  --elev-1: var(--sh-dark-1);
+  --elev-2: var(--sh-dark-2);
+  --elev-3: var(--sh-dark-3);
+}

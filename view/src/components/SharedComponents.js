@@ -1,5 +1,6 @@
 import { h, onMounted } from 'vue'
 import { useAuth } from '../stores/auth.js'
+import { useTheme } from '../composables/useTheme.js'
 
 export const NavBar = {
   template: `
@@ -29,6 +30,19 @@ export const NavBar = {
                 <a href="/view/clusters/index.html" :class="{ active: isActive('/view/clusters/index.html') }">🖥️ 集群</a>
             </div>
             <div class="nav-actions">
+                <button class="theme-toggle" type="button" @click="toggleTheme"
+                        :title="isDark ? '切换到浅色' : '切换到暗色'"
+                        :aria-label="isDark ? '切换到浅色' : '切换到暗色'">
+                    <svg v-if="isDark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+                         fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"
+                         fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="4"/>
+                        <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+                    </svg>
+                </button>
                 <a v-if="auth.isAuthenticated" href="#" @click.prevent="logout">{{ auth.user?.username || '登出' }}</a>
                 <a v-else href="/view/login.html">登录</a>
             </div>
@@ -36,6 +50,7 @@ export const NavBar = {
     `,
   setup() {
     const auth = useAuth()
+    const { isDark, toggleTheme } = useTheme()
     const currentPath = window.location.pathname
     const home = () => {
       window.location.href = '/view/index.html'
@@ -49,7 +64,7 @@ export const NavBar = {
       await auth.init()
     })
 
-    return { home, isActive, auth, logout }
+    return { home, isActive, auth, logout, isDark, toggleTheme }
   },
 }
 

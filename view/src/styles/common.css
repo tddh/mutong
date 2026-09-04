@@ -1,16 +1,24 @@
+@import './tokens.css';
+@import './theme.light.css';
+@import './theme.dark.css';
+
+/* 旧变量名转发层：16 个页面的 CSS/JS 与 login/consent 的内联 style 都在引用这批名字，
+   保留为别名可让页面在逐个迁移到语义名的过程中不破版。
+   注意 --text-primary / --text-secondary / --card-radius / --shadow-sm / --nav-height
+   与语义层同名，故不在此转发——自引用会使变量失效，它们直接由 theme.*.css 提供。 */
 :root {
-  --primary-color: #1890ff;
-  --bg-color: #f0f2f5;
-  --card-bg: #ffffff;
-  --text-primary: #333333;
-  --text-secondary: #666666;
-  --border-color: #e8e8e8;
-  --success-color: #52c41a;
-  --warning-color: #faad14;
-  --error-color: #ff4d4f;
-  --nav-height: 60px;
-  --card-radius: 8px;
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --primary-color: var(--accent);
+  --bg-color: var(--surface-page);
+  --card-bg: var(--surface-card);
+  --border-color: var(--border-default);
+  --success-color: var(--st-success-fg);
+  --warning-color: var(--st-warning-fg);
+  --error-color: var(--st-danger-fg);
+}
+
+/* 背景必须同时挂在 html 上：暗色下 body 之前会有首屏白闪 */
+html {
+  background-color: var(--surface-page);
 }
 * {
   margin: 0;
@@ -18,10 +26,14 @@
   box-sizing: border-box;
 }
 body {
-  font-family:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background-color: var(--bg-color);
+  font-family: var(--font-sans);
+  background-color: var(--surface-page);
   color: var(--text-primary);
+}
+/* 主题切换瞬间关掉所有过渡：全站有 60+ 处 transition，否则切一次主题满屏彩色涟漪。
+   由 useTheme 在 window load 后摘掉该类，正常交互仍保留动效。 */
+html.theming * {
+  transition: none !important;
 }
 .container {
   max-width: 1400px;
@@ -65,6 +77,35 @@ body {
 .nav-links a.active {
   color: var(--primary-color);
   border-bottom-color: var(--primary-color);
+}
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease);
+}
+.theme-toggle:hover {
+  color: var(--accent);
+  background: var(--accent-subtle-bg);
+  border-color: var(--accent-subtle-bd);
+}
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
 }
 .stat-card-grid {
   display: grid;

@@ -2,6 +2,18 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
+/* 主题引导：必须早于任何样式执行，否则暗色下刷新会闪一帧浅色。
+   head-prepend 使本脚本排在 vite 注入的 stylesheet/modulepreload 之前；
+   17 个入口共用这一份真源，dev 与 build 行为一致，不引额外依赖。 */
+const THEME_BOOTSTRAP = `!function(){try{var d=document.documentElement;d.classList.add('theming');if(localStorage.getItem('mutong.theme')==='dark')d.setAttribute('data-theme','dark')}catch(e){}}()`
+
+const themeBootstrap = {
+  name: 'theme-bootstrap',
+  transformIndexHtml() {
+    return [{ tag: 'script', children: THEME_BOOTSTRAP, injectTo: 'head-prepend' }]
+  },
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ command, mode }) => {
   // Allow OUT_DIR env var to override output directory
@@ -9,7 +21,7 @@ export default defineConfig(({ command, mode }) => {
   
   return {
     root: resolve(__dirname, 'src'),
-    plugins: [vue()],
+    plugins: [themeBootstrap, vue()],
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

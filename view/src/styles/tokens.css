@@ -1,0 +1,136 @@
+/* 原始层：色板 + scale。主题无关，永不被暗色覆盖。
+   色板取自 AntD v4 预设 10 阶——实测本仓 1067 处色值使用中约 800 次落在此表内
+   （#1890ff/#52c41a/#faad14/#cf1322/#722ed1/#2f54eb/#fa8c16 等），故沿用而非另发明。
+   页面与组件一律不直接引用本层，只经 theme.*.css 的语义层取用。 */
+:root {
+  /* ---- 中性灰（把散落的 #888/#999/#aaa/#bbb/#ccc/#666/#555/#333 归一到此） ---- */
+  --pal-white: #ffffff;
+  --pal-gray-1: #fafafa;
+  --pal-gray-2: #fafbfc;
+  --pal-gray-3: #f5f5f5;
+  --pal-gray-4: #f0f0f0;
+  --pal-gray-5: #e8e8e8;
+  --pal-gray-6: #d9d9d9;
+  --pal-gray-7: #bfbfbf;
+  --pal-gray-8: #8c8c8c;
+  --pal-gray-9: #595959;
+  --pal-gray-10: #434343;
+  --pal-gray-11: #262626;
+  --pal-gray-12: #141414;
+  --pal-black: #000000;
+
+  /* ---- blue（主色族；6 阶为品牌主色） ---- */
+  --pal-blue-1: #e6f7ff;
+  --pal-blue-2: #bae7ff;
+  --pal-blue-3: #91d5ff;
+  --pal-blue-4: #69c0ff;
+  --pal-blue-5: #40a9ff;
+  --pal-blue-6: #1890ff;
+  --pal-blue-7: #096dd9;
+  --pal-blue-8: #0050b3;
+  --pal-blue-9: #002a61;
+  --pal-blue-10: #001529;
+
+  /* ---- green ---- */
+  --pal-green-1: #f6ffed;
+  --pal-green-2: #d9f7be;
+  --pal-green-3: #b7eb8f;
+  --pal-green-4: #95de64;
+  --pal-green-5: #73d13d;
+  --pal-green-6: #52c41a;
+  --pal-green-7: #389e0d;
+  --pal-green-8: #237804;
+
+  /* ---- gold（warning 族） ---- */
+  --pal-gold-1: #fffbe6;
+  --pal-gold-3: #ffe58f;
+  --pal-gold-5: #ffc53d;
+  --pal-gold-6: #faad14;
+  --pal-gold-7: #d48806;
+  --pal-gold-8: #ad6800;
+
+  /* ---- orange ---- */
+  --pal-orange-1: #fff7e6;
+  --pal-orange-2: #ffd591;
+  --pal-orange-3: #ffa940;
+  --pal-orange-6: #fa8c16;
+  --pal-orange-7: #d46b08;
+
+  /* ---- red / volcano（danger 族） ---- */
+  --pal-red-1: #fff1f0;
+  --pal-red-2: #ffccc7;
+  --pal-red-3: #ffa39e;
+  --pal-red-4: #ff7875;
+  --pal-red-5: #ff4d4f;
+  --pal-red-6: #f5222d;
+  --pal-red-7: #cf1322;
+  --pal-red-8: #a8071a;
+  --pal-volcano-1: #fff2e8;
+  --pal-volcano-7: #d4380d;
+
+  /* ---- 分类色族（图表/拓扑/G6 用） ---- */
+  --pal-purple-1: #f9f0ff;
+  --pal-purple-5: #9254de;
+  --pal-purple-6: #722ed1;
+  --pal-geekblue-1: #f0f5ff;
+  --pal-geekblue-6: #2f54eb;
+  --pal-cyan-1: #e6fffb;
+  --pal-cyan-6: #13c2c2;
+  --pal-cyan-7: #08979c;
+  --pal-magenta-6: #eb2f96;
+  --pal-lime-6: #a0d911;
+
+  /* K8s 品牌蓝：显式排除主题化（logo/图标专用，暗色下也不变） */
+  --pal-k8s-blue: #326ce5;
+
+  /* ---- 间距 scale（收掉散落的 4/6/8/12/16/20/24） ---- */
+  --sp-0: 0;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 40px;
+  --sp-8: 48px;
+
+  /* ---- 字号 scale ---- */
+  --fs-100: 11px;
+  --fs-200: 12px;
+  --fs-300: 13px;
+  --fs-400: 14px;
+  --fs-500: 16px;
+  --fs-600: 20px;
+  --fs-700: 24px;
+  --fs-800: 32px;
+
+  /* ---- 圆角 / 阴影 / 层级 / 动效 ---- */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 8px;
+  --r-4: 12px;
+  --r-full: 999px;
+  /* 阴影原语两套并列，由语义层 --elev-* 按主题选取（原始层自身永不被覆盖） */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 6px rgba(0, 0, 0, 0.03);
+  --sh-2: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --sh-3: 0 6px 16px rgba(0, 0, 0, 0.12), 0 3px 6px rgba(0, 0, 0, 0.08);
+  /* 暗色下纯黑投影几乎不可见，分层主要靠边框，投影需显著加深 */
+  --sh-dark-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --sh-dark-2: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --sh-dark-3: 0 6px 16px rgba(0, 0, 0, 0.6);
+  --z-base: 1;
+  --z-sticky: 100;
+  --z-float: 200;
+  --z-mask: 999;
+  --z-panel: 1000;
+  --z-toast: 1100;
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 300ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- 字体 ---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+}

@@ -85,26 +85,7 @@ html.theming * {
   margin-bottom: 24px;
   font-weight: 600;
 }
-.quick-links {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin-top: 32px;
-}
-.quick-link {
-  padding: 16px 24px;
-  background: #e6f7ff;
-  border: 1px solid #91d5ff;
-  border-radius: 6px;
-  text-decoration: none;
-  color: #0050b3;
-  font-weight: 500;
-  transition: all 0.3s;
-}
-.quick-link:hover {
-  background: #bae7ff;
-  transform: translateY(-2px);
-}
+/* 快捷入口样式已迁至 components.css 的 .m-quick-grid */
 .status-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

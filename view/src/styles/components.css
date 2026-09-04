@@ -364,6 +364,18 @@
 :where(.m-tbl .is-nowrap) {
   white-space: nowrap;
 }
+:where(.m-tbl .m-tbl-check) {
+  width: 36px;
+  text-align: center;
+}
+:where(.m-tbl input[type='checkbox']) {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
 :where(.m-tbl th.is-sortable) {
   cursor: pointer;
   user-select: none;
@@ -775,6 +787,151 @@
   background: var(--st-success-fg);
 }
 
+/* ---------- 区块小标题 ---------- */
+:where(.m-section-title) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-500);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+:where(.m-section-title .icon) {
+  color: var(--text-muted);
+}
+
+/* ---------- 统计卡 ---------- */
+:where(.m-stat-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+:where(.m-stat-card) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  box-shadow: var(--elev-1);
+  transition: box-shadow var(--dur-2) var(--ease), transform var(--dur-2) var(--ease);
+}
+:where(.m-stat-card:hover) {
+  box-shadow: var(--elev-2);
+  transform: translateY(-1px);
+}
+:where(.m-stat-card-text) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+:where(.m-stat-card-title) {
+  font-size: var(--fs-300);
+  color: var(--text-secondary);
+}
+:where(.m-stat-card-value) {
+  font-size: var(--fs-800);
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+:where(.m-stat-card-unit) {
+  margin-left: var(--sp-1);
+  font-size: var(--fs-300);
+  font-weight: 400;
+  color: var(--text-muted);
+}
+:where(.m-stat-card-hint) {
+  font-size: var(--fs-200);
+  color: var(--text-muted);
+}
+:where(.m-stat-card-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: var(--r-2);
+  background: var(--st-neutral-bg);
+  color: var(--text-muted);
+}
+:where(.m-stat-card[data-tone='accent'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='accent'] .m-stat-card-icon) {
+  color: var(--accent);
+}
+:where(.m-stat-card[data-tone='success'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='success'] .m-stat-card-icon) {
+  color: var(--st-success-fg);
+}
+:where(.m-stat-card[data-tone='warning'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='warning'] .m-stat-card-icon) {
+  color: var(--st-warning-fg);
+}
+:where(.m-stat-card[data-tone='danger'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='danger'] .m-stat-card-icon) {
+  color: var(--st-danger-fg);
+}
+:where(.m-stat-card[data-tone='info'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='info'] .m-stat-card-icon) {
+  color: var(--st-info-fg);
+}
+:where(.m-stat-card[data-tone='alt'] .m-stat-card-value),
+:where(.m-stat-card[data-tone='alt'] .m-stat-card-icon) {
+  color: var(--chart-5);
+}
+:where(.m-stat-card[data-tone='accent'] .m-stat-card-icon) {
+  background: var(--accent-subtle-bg);
+}
+:where(.m-stat-card[data-tone='danger'] .m-stat-card-icon),
+:where(.m-stat-card[data-tone='warning'] .m-stat-card-icon),
+:where(.m-stat-card[data-tone='success'] .m-stat-card-icon),
+:where(.m-stat-card[data-tone='info'] .m-stat-card-icon) {
+  background: var(--surface-inset);
+}
+
+/* ---------- 快捷入口 ---------- */
+:where(.m-quick-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: var(--sp-3);
+}
+:where(.m-quick) {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-2);
+  color: var(--text-primary);
+  font-size: var(--fs-400);
+  text-decoration: none;
+  transition: border-color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+:where(.m-quick .icon) {
+  color: var(--text-muted);
+}
+:where(.m-quick-arrow) {
+  margin-left: auto;
+  color: var(--text-disabled);
+}
+:where(.m-quick:hover) {
+  border-color: var(--accent-subtle-bd);
+  background: var(--accent-subtle-bg);
+  color: var(--accent-strong-fg);
+}
+:where(.m-quick:hover .icon),
+:where(.m-quick:hover .m-quick-arrow) {
+  color: var(--accent);
+}
 /* ---------- 统计行（抑制率 / 通知率这类并排大字） ---------- */
 :where(.m-stat-row) {
   display: flex;

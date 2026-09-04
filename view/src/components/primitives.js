@@ -147,19 +147,35 @@ export const EmptyState = {
   },
 }
 
-/** 统计卡：从 SharedComponents.js 迁入，props 与结构保持不变以免打断仪表盘页 */
+/** 统计卡：tone 决定数字颜色，由调用方给语义档位而非具体色号——
+   否则暗色下这些色不会适配。color 仍保留作逃生口，供数据驱动的动态色使用。 */
 export const StatCard = {
   name: 'StatCard',
-  props: ['title', 'value', 'unit', 'color', 'icon'],
-  template: `
-        <div class="stat-card">
-            <div class="stat-content">
-                <span class="stat-title">{{ title }}</span>
-                <span class="stat-value" :style="{ color: color }">{{ value }}<small class="unit">{{ unit }}</small></span>
-            </div>
-            <div class="stat-icon" v-if="icon">{{ icon }}</div>
-        </div>
-    `,
+  props: {
+    title: { type: String, default: '' },
+    value: { type: [String, Number], default: '' },
+    unit: { type: String, default: '' },
+    tone: { type: String, default: 'neutral' },
+    icon: { type: String, default: '' },
+    color: { type: String, default: '' },
+    hint: { type: String, default: '' },
+  },
+  setup(props) {
+    return () =>
+      h('div', { class: 'm-stat-card', 'data-tone': props.tone }, [
+        h('div', { class: 'm-stat-card-text' }, [
+          h('span', { class: 'm-stat-card-title' }, props.title),
+          h('span', { class: 'm-stat-card-value' }, [
+            String(props.value ?? '—'),
+            props.unit ? h('small', { class: 'm-stat-card-unit' }, props.unit) : null,
+          ]),
+          props.hint ? h('span', { class: 'm-stat-card-hint' }, props.hint) : null,
+        ]),
+        props.icon
+          ? h('span', { class: 'm-stat-card-icon' }, [h(Icon, { name: props.icon, size: 20 })])
+          : null,
+      ])
+  },
 }
 
 /** 骨架屏：加载态不再只有一行"加载中..."文字 */

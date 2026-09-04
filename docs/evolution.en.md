@@ -13,7 +13,8 @@ Although Mutong supports 12 complex remediation operations (scaling, hot updates
 
 **Since I can't win that fight, I changed the battlefield:**
 I encapsulated all these capabilities as APIs and handed them over to the **CLI (mutongctl)** and **AI Agents**.
-* **Web UI stays minimal**: Focus on what I'm good at — Topology (Observation) and Chat (Interaction).
+* **Web UI stays minimal**: "minimal" here means **no write-operation forms**, not few pages. The UI does **observation** (Dashboard, Topology, Alerts, Inspection, Retrospective, Resource Table, Status, Clusters), **conversation** (AI Diagnosis chat), and **terminal** as a fallback; every mutation goes through APIs, driven by the CLI or AI Agents.
+  > **Correction (2026-09-04)**: the navigation currently exposes 12 entries. **Monitoring, Logs and Tracing** were temporarily hidden on 2026-09-04 (page code kept, only the menu entries collapsed): the monitoring page was too crude and will be rebuilt as an embedded Grafana view; the logs page depends on an Elasticsearch backend and the tracing page on OpenTelemetry, neither of which is wired up. Evidence and follow-ups: `docs/TODO.md`, "前端菜单收敛与监控重建".
 * **CLI handles the heavy lifting**: Scripts are faster than mouse clicks for senior engineers anyway.
 * **AI as the UX layer**: Users speak natural language, and the AI invokes those backend APIs that I "forgot" to build buttons for.
 

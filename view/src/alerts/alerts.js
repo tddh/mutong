@@ -75,6 +75,24 @@ function getBusinessCriticality(alert) {
   return alert?.businessContext?.criticality || '-'
 }
 
+/** 受影响业务应用卡片：外壳与说明块走语义面，暗色下不再是白底灰块 */
+function businessAppCard(item, extra) {
+  return h('div', { class: 'm-app-card' }, [
+    h('div', { class: 'm-app-card-head' }, [
+      h('span', { class: 'm-app-card-name' }, item.appName),
+      extra || null,
+    ]),
+    h('div', { class: 'm-app-card-tags' }, [
+      item.criticality ? criticalityBadge(item.criticality) : null,
+      item.businessUnit
+        ? h(StatusBadge, { sev: 'default', text: '业务线 ' + item.businessUnit })
+        : null,
+      item.team ? h(StatusBadge, { sev: 'info', text: '团队 ' + item.team }) : null,
+    ]),
+    item.reasoning ? h('div', { class: 'm-app-card-reason' }, item.reasoning) : null,
+  ])
+}
+
 /** 严重度→语义档位；颜色由 CSS 的 [data-sev] 决定，不再有色表 */
 export function severityBadge(severity) {
   const s = (severity || '').toLowerCase()
@@ -630,7 +648,6 @@ createApp({
       const bcCalls = a.businessCalls
       if (bcCalls && (bcCalls.upstreams?.length || bcCalls.downstreams?.length)) {
         const depChildren = []
-        const badgeStyle = { fontSize: '12px', fontWeight: 500 }
         if (bcCalls.upstreams?.length) {
           depChildren.push(
             h(
@@ -643,45 +660,13 @@ createApp({
                   '上游调用方 (' + bcCalls.upstreams.length + ')',
                 ),
               ].concat(
-                bcCalls.upstreams.map((u, i) => {
-                  const critLabel =
-                    { critical: '核心', high: '重要', medium: '一般', low: '低' }[
-                      u.criticality?.toLowerCase()
-                    ] ||
-                    u.criticality ||
-                    '-'
-                  const critColor =
-                    { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                      u.criticality?.toLowerCase()
-                    ] || 'var(--text-secondary)'
-                  return h(
-                    'div',
-                    {
-                      key: i,
-                      style: {
-                        fontSize: '13px',
-                        padding: '3px 0 3px 12px',
-                        color: 'var(--text-primary)',
-                        lineHeight: '1.5',
-                      },
-                    },
-                    [
-                      '• ' + (u.appName || '-'),
-                      u.team
-                        ? h(
-                            'span',
-                            { style: { color: 'var(--text-secondary)', marginLeft: '6px' } },
-                            '(' + u.team + ') ',
-                          )
-                        : null,
-                      h(
-                        'span',
-                        { style: { ...badgeStyle, color: critColor, marginLeft: '6px' } },
-                        critLabel,
-                      ),
-                    ],
-                  )
-                }),
+                bcCalls.upstreams.map((u, i) =>
+                  h('div', { key: i, class: 'm-chain-item' }, [
+                    h('span', { class: 'm-chain-name' }, u.appName || '—'),
+                    u.team ? h('span', { class: 'm-chain-team' }, u.team) : null,
+                    u.criticality ? criticalityBadge(u.criticality) : null,
+                  ]),
+                ),
               ),
             ),
           )
@@ -705,45 +690,13 @@ createApp({
                   '下游依赖方 (' + bcCalls.downstreams.length + ')',
                 ),
               ].concat(
-                bcCalls.downstreams.map((d, i) => {
-                  const critLabel =
-                    { critical: '核心', high: '重要', medium: '一般', low: '低' }[
-                      d.criticality?.toLowerCase()
-                    ] ||
-                    d.criticality ||
-                    '-'
-                  const critColor =
-                    { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                      d.criticality?.toLowerCase()
-                    ] || 'var(--text-secondary)'
-                  return h(
-                    'div',
-                    {
-                      key: i,
-                      style: {
-                        fontSize: '13px',
-                        padding: '3px 0 3px 12px',
-                        color: 'var(--text-primary)',
-                        lineHeight: '1.5',
-                      },
-                    },
-                    [
-                      '• ' + (d.appName || '-'),
-                      d.team
-                        ? h(
-                            'span',
-                            { style: { color: 'var(--text-secondary)', marginLeft: '6px' } },
-                            '(' + d.team + ') ',
-                          )
-                        : null,
-                      h(
-                        'span',
-                        { style: { ...badgeStyle, color: critColor, marginLeft: '6px' } },
-                        critLabel,
-                      ),
-                    ],
-                  )
-                }),
+                bcCalls.downstreams.map((d, i) =>
+                  h('div', { key: i, class: 'm-chain-item' }, [
+                    h('span', { class: 'm-chain-name' }, d.appName || '—'),
+                    d.team ? h('span', { class: 'm-chain-team' }, d.team) : null,
+                    d.criticality ? criticalityBadge(d.criticality) : null,
+                  ]),
+                ),
               ),
             ),
           )
@@ -1036,115 +989,7 @@ createApp({
               ),
             )
             for (const item of bizImpact.directImpacts) {
-              const critColor =
-                { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                  item.criticality?.toLowerCase()
-                ] || '#999'
-              bizChildren.push(
-                h(
-                  'div',
-                  {
-                    style: {
-                      background: '#fff',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '6px',
-                      padding: '10px 12px',
-                      marginBottom: '8px',
-                    },
-                  },
-                  [
-                    h(
-                      'div',
-                      {
-                        style: {
-                          fontSize: '14px',
-                          fontWeight: 600,
-                          marginBottom: '4px',
-                          color: '#333',
-                        },
-                      },
-                      item.appName,
-                    ),
-                    h(
-                      'div',
-                      {
-                        style: {
-                          display: 'flex',
-                          gap: '6px',
-                          flexWrap: 'wrap',
-                          marginBottom: '6px',
-                        },
-                      },
-                      [
-                        item.criticality
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: critColor + '18',
-                                  color: critColor,
-                                  fontWeight: 500,
-                                },
-                              },
-                              '关键度: ' + item.criticality,
-                            )
-                          : null,
-                        item.businessUnit
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: '#f9f0ff',
-                                  color: '#722ed1',
-                                  fontWeight: 500,
-                                },
-                              },
-                              '业务线: ' + item.businessUnit,
-                            )
-                          : null,
-                        item.team
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: '#e6f7ff',
-                                  color: '#096dd9',
-                                  fontWeight: 500,
-                                },
-                              },
-                              '团队: ' + item.team,
-                            )
-                          : null,
-                      ],
-                    ),
-                    item.reasoning
-                      ? h(
-                          'div',
-                          {
-                            style: {
-                              fontSize: '12px',
-                              color: '#555',
-                              lineHeight: '1.4',
-                              background: '#f7f7f7',
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                            },
-                          },
-                          item.reasoning,
-                        )
-                      : null,
-                  ],
-                ),
-              )
+              bizChildren.push(businessAppCard(item))
             }
           }
           if (hasIndirect) {
@@ -1164,152 +1009,12 @@ createApp({
               ),
             )
             for (const item of bizImpact.indirectImpacts) {
-              const critColor =
-                { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                  item.criticality?.toLowerCase()
-                ] || '#999'
               bizChildren.push(
-                h(
-                  'div',
-                  {
-                    style: {
-                      background: '#fff',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '6px',
-                      padding: '10px 12px',
-                      marginBottom: '8px',
-                    },
-                  },
-                  [
-                    h(
-                      'div',
-                      {
-                        style: {
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          marginBottom: '4px',
-                        },
-                      },
-                      [
-                        h(
-                          'div',
-                          { style: { fontSize: '13px', fontWeight: 600, color: '#555' } },
-                          item.appName,
-                        ),
-                        h(
-                          'span',
-                          {
-                            style: {
-                              fontSize: '11px',
-                              padding: '1px 8px',
-                              borderRadius: '10px',
-                              background: '#f5f5f5',
-                              color: '#999',
-                              fontWeight: 500,
-                            },
-                          },
-                          '下游 ' + item.hopDistance + ' 跳',
-                        ),
-                      ],
-                    ),
-                    h(
-                      'div',
-                      {
-                        style: {
-                          display: 'flex',
-                          gap: '6px',
-                          flexWrap: 'wrap',
-                          marginBottom: '6px',
-                          fontFamily: 'monospace',
-                        },
-                      },
-                      [
-                        item.criticality
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: critColor + '18',
-                                  color: critColor,
-                                  fontWeight: 500,
-                                },
-                              },
-                              '关键度: ' + item.criticality,
-                            )
-                          : null,
-                        item.businessUnit
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: '#f9f0ff',
-                                  color: '#722ed1',
-                                  fontWeight: 500,
-                                },
-                              },
-                              '业务线: ' + item.businessUnit,
-                            )
-                          : null,
-                        item.team
-                          ? h(
-                              'span',
-                              {
-                                style: {
-                                  fontSize: '11px',
-                                  padding: '2px 6px',
-                                  borderRadius: '3px',
-                                  background: '#e6f7ff',
-                                  color: '#096dd9',
-                                  fontWeight: 500,
-                                },
-                              },
-                              '团队: ' + item.team,
-                            )
-                          : null,
-                      ],
-                    ),
-                    item.impactPath
-                      ? h(
-                          'div',
-                          {
-                            style: {
-                              fontSize: '12px',
-                              color: '#096dd9',
-                              fontFamily: 'monospace',
-                              padding: '4px 8px',
-                              background: '#e6f7ff',
-                              borderRadius: '4px',
-                              marginBottom: '4px',
-                              border: '1px dashed #91d5ff',
-                            },
-                          },
-                          '🔗 ' + item.impactPath,
-                        )
-                      : null,
-                    item.reasoning
-                      ? h(
-                          'div',
-                          {
-                            style: {
-                              fontSize: '12px',
-                              color: '#555',
-                              lineHeight: '1.4',
-                              background: '#f7f7f7',
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                            },
-                          },
-                          item.reasoning,
-                        )
-                      : null,
-                  ],
+                businessAppCard(
+                  item,
+                  item.direction
+                    ? h(StatusBadge, { sev: 'pending', text: item.direction })
+                    : null,
                 ),
               )
             }
@@ -1354,7 +1059,6 @@ createApp({
       ) {
         const c = r.business_app_calls
         const depChildren = []
-        const badgeStyle = { fontSize: '12px', fontWeight: 500 }
         if (c.upstreams?.length) {
           depChildren.push(
             h(
@@ -1367,45 +1071,13 @@ createApp({
                   '上游调用方 (' + c.upstreams.length + ')',
                 ),
               ].concat(
-                c.upstreams.map((u, i) => {
-                  const critLabel =
-                    { critical: '核心', high: '重要', medium: '一般', low: '低' }[
-                      u.criticality?.toLowerCase()
-                    ] ||
-                    u.criticality ||
-                    '-'
-                  const critColor =
-                    { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                      u.criticality?.toLowerCase()
-                    ] || 'var(--text-secondary)'
-                  return h(
-                    'div',
-                    {
-                      key: i,
-                      style: {
-                        fontSize: '13px',
-                        padding: '3px 0 3px 12px',
-                        color: 'var(--text-primary)',
-                        lineHeight: '1.5',
-                      },
-                    },
-                    [
-                      '• ' + (u.appName || '-'),
-                      u.team
-                        ? h(
-                            'span',
-                            { style: { color: 'var(--text-secondary)', marginLeft: '6px' } },
-                            '(' + u.team + ') ',
-                          )
-                        : null,
-                      h(
-                        'span',
-                        { style: { ...badgeStyle, color: critColor, marginLeft: '6px' } },
-                        critLabel,
-                      ),
-                    ],
-                  )
-                }),
+                c.upstreams.map((u, i) =>
+                  h('div', { key: i, class: 'm-chain-item' }, [
+                    h('span', { class: 'm-chain-name' }, u.appName || '—'),
+                    u.team ? h('span', { class: 'm-chain-team' }, u.team) : null,
+                    u.criticality ? criticalityBadge(u.criticality) : null,
+                  ]),
+                ),
               ),
             ),
           )
@@ -1429,45 +1101,13 @@ createApp({
                   '下游依赖方 (' + c.downstreams.length + ')',
                 ),
               ].concat(
-                c.downstreams.map((d, i) => {
-                  const critLabel =
-                    { critical: '核心', high: '重要', medium: '一般', low: '低' }[
-                      d.criticality?.toLowerCase()
-                    ] ||
-                    d.criticality ||
-                    '-'
-                  const critColor =
-                    { critical: '#ff4d4f', high: '#faad14', medium: '#52c41a', low: '#8c8c8c' }[
-                      d.criticality?.toLowerCase()
-                    ] || 'var(--text-secondary)'
-                  return h(
-                    'div',
-                    {
-                      key: i,
-                      style: {
-                        fontSize: '13px',
-                        padding: '3px 0 3px 12px',
-                        color: 'var(--text-primary)',
-                        lineHeight: '1.5',
-                      },
-                    },
-                    [
-                      '• ' + (d.appName || '-'),
-                      d.team
-                        ? h(
-                            'span',
-                            { style: { color: 'var(--text-secondary)', marginLeft: '6px' } },
-                            '(' + d.team + ') ',
-                          )
-                        : null,
-                      h(
-                        'span',
-                        { style: { ...badgeStyle, color: critColor, marginLeft: '6px' } },
-                        critLabel,
-                      ),
-                    ],
-                  )
-                }),
+                c.downstreams.map((d, i) =>
+                  h('div', { key: i, class: 'm-chain-item' }, [
+                    h('span', { class: 'm-chain-name' }, d.appName || '—'),
+                    d.team ? h('span', { class: 'm-chain-team' }, d.team) : null,
+                    d.criticality ? criticalityBadge(d.criticality) : null,
+                  ]),
+                ),
               ),
             ),
           )

@@ -443,6 +443,77 @@
 :where(.m-risk-line) {
   margin-bottom: var(--sp-3);
 }
+
+/* ---------- 业务调用链列表项（前导圆点由伪元素画，不再拼 '• ' 字符） ---------- */
+:where(.m-chain-item) {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  padding: 3px 0 3px var(--sp-3);
+  font-size: var(--fs-300);
+  line-height: 1.5;
+}
+:where(.m-chain-item::before) {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--r-full);
+  background: var(--text-disabled);
+}
+:where(.m-chain-name) {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+:where(.m-chain-team) {
+  font-size: var(--fs-200);
+  color: var(--text-muted);
+}
+
+/* ---------- 受影响业务应用卡片 ---------- */
+:where(.m-app-card) {
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-2);
+}
+:where(.m-app-card:last-child) {
+  margin-bottom: 0;
+}
+:where(.m-app-card-head) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+:where(.m-app-card-name) {
+  font-size: var(--fs-400);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+:where(.m-app-card-tags) {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+:where(.m-app-card-tags:last-child) {
+  margin-bottom: 0;
+}
+:where(.m-app-card-reason) {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-1);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  font-size: var(--fs-200);
+  line-height: 1.4;
+}
 :where(.m-tbl .m-tbl-check) {
   width: 36px;
   text-align: center;

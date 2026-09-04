@@ -1,0 +1,813 @@
+/* 组件层样式。所有选择器包在 :where() 里保持 0 特异度——
+   改造期内 7 份页面 CSS 仍以更高特异度覆盖它，页面可以逐个迁移而不互相打架。
+   这里只允许出现 var(--*)，写死色号即破坏双主题。 */
+
+:where(.icon) {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+/* ---------- 页头 ---------- */
+:where(.m-page-header) {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-5);
+}
+:where(.m-page-header-text) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+:where(.m-page-title) {
+  font-size: var(--fs-700);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  line-height: 1.25;
+}
+:where(.m-page-desc) {
+  font-size: var(--fs-300);
+  color: var(--text-muted);
+}
+:where(.m-page-header-slot) {
+  margin-top: var(--sp-1);
+}
+:where(.m-page-actions) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---------- 面板 ---------- */
+:where(.m-panel) {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  box-shadow: var(--elev-1);
+  overflow: hidden;
+  margin-bottom: var(--sp-5);
+}
+:where(.m-panel-head) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--panel-pad);
+  border-bottom: 1px solid var(--border-default);
+  background: var(--panel-head-bg);
+}
+:where(.m-panel-titles) {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+:where(.m-panel-title) {
+  font-size: var(--fs-500);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+:where(.m-panel-hint) {
+  font-size: var(--fs-200);
+  color: var(--text-muted);
+}
+:where(.m-panel-actions) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+:where(.m-panel-body) {
+  padding: var(--panel-pad);
+}
+:where(.m-panel.is-flush .m-panel-body) {
+  padding: 0;
+}
+/* 并列面板：宽屏两列、放不下自动折成单列；折行时列宽下限避免文字挤压 */
+:where(.m-grid-2) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--sp-5);
+  align-items: start;
+}
+:where(.m-grid-2 .m-panel) {
+  margin-bottom: 0;
+}
+
+/* ---------- 徽标：一份基类 + 属性选择器，避免每个状态一个 class ---------- */
+:where(.m-badge) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: var(--badge-pad);
+  border-radius: var(--badge-radius);
+  font-size: var(--fs-200);
+  font-weight: 500;
+  line-height: 1.5;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+:where(.m-badge-dot) {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+  background: currentColor;
+  flex-shrink: 0;
+}
+:where(.m-badge[data-sev='critical']) {
+  color: var(--sev-critical-fg);
+  background: var(--sev-critical-bg);
+  border-color: var(--sev-critical-bd);
+}
+:where(.m-badge[data-sev='error']) {
+  color: var(--sev-error-fg);
+  background: var(--sev-error-bg);
+  border-color: var(--sev-error-bd);
+}
+:where(.m-badge[data-sev='warning']) {
+  color: var(--sev-warning-fg);
+  background: var(--sev-warning-bg);
+  border-color: var(--sev-warning-bd);
+}
+:where(.m-badge[data-sev='info']) {
+  color: var(--sev-info-fg);
+  background: var(--sev-info-bg);
+  border-color: var(--sev-info-bd);
+}
+:where(.m-badge[data-sev='pass']) {
+  color: var(--sev-pass-fg);
+  background: var(--sev-pass-bg);
+  border-color: var(--sev-pass-bd);
+}
+:where(.m-badge[data-sev='pending']) {
+  color: var(--sev-pending-fg);
+  background: var(--sev-pending-bg);
+  border-color: var(--sev-pending-bd);
+}
+:where(.m-badge[data-sev='default']) {
+  color: var(--st-neutral-fg);
+  background: var(--st-neutral-bg);
+  border-color: var(--st-neutral-bd);
+}
+
+/* ---------- 按钮 ---------- */
+:where(.m-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: var(--btn-h);
+  padding: 0 var(--sp-4);
+  border-radius: var(--r-2);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-400);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease);
+}
+:where(.m-btn.is-sm) {
+  height: 26px;
+  padding: 0 var(--sp-3);
+  font-size: var(--fs-300);
+}
+:where(.m-btn:hover) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+:where(.m-btn:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+:where(.m-btn.is-primary) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+:where(.m-btn.is-primary:hover) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--accent-on);
+}
+:where(.m-btn.is-danger) {
+  background: var(--st-danger-fg);
+  border-color: var(--st-danger-fg);
+  color: var(--text-inverse);
+}
+:where(.m-btn.is-danger:hover) {
+  background: var(--sev-error-fg);
+  border-color: var(--sev-error-fg);
+  color: var(--text-inverse);
+}
+:where(.m-btn.is-text) {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-secondary);
+}
+:where(.m-btn.is-text:hover) {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+:where(.m-btn:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+:where(.m-btn:disabled:hover) {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+  background: var(--surface-card);
+}
+:where(.m-btn.is-text:disabled:hover) {
+  background: transparent;
+  border-color: transparent;
+}
+:where(.m-btn-spinner) {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: var(--r-full);
+  animation: m-spin 0.7s linear infinite;
+}
+@keyframes m-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- 工具条 ---------- */
+:where(.m-toolbar) {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-4);
+}
+
+/* ---------- 空态 ---------- */
+:where(.m-empty) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-8) var(--sp-4);
+  color: var(--text-disabled);
+  text-align: center;
+}
+:where(.m-empty-title) {
+  font-size: var(--fs-400);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+:where(.m-empty-desc) {
+  font-size: var(--fs-300);
+  color: var(--text-muted);
+  max-width: 46ch;
+}
+:where(.m-empty-action) {
+  margin-top: var(--sp-3);
+}
+
+/* ---------- 骨架屏 ---------- */
+:where(.m-skeleton) {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+:where(.m-skeleton-bar) {
+  display: block;
+  height: 12px;
+  border-radius: var(--r-1);
+  background: linear-gradient(
+    90deg,
+    var(--surface-sunken) 25%,
+    var(--surface-hover) 37%,
+    var(--surface-sunken) 63%
+  );
+  background-size: 400% 100%;
+  animation: m-shimmer 1.4s var(--ease) infinite;
+}
+@keyframes m-shimmer {
+  from {
+    background-position: 100% 50%;
+  }
+  to {
+    background-position: 0 50%;
+  }
+}
+
+/* ---------- 表格 ---------- */
+:where(.m-tbl-wrap) {
+  overflow-x: auto;
+  border-radius: var(--card-radius);
+}
+:where(.m-tbl) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-400);
+}
+:where(.m-tbl caption) {
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--text-muted);
+  font-size: var(--fs-300);
+}
+:where(.m-tbl th) {
+  padding: var(--tbl-head-pad);
+  text-align: left;
+  font-size: var(--fs-200);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+:where(.m-tbl td) {
+  padding: var(--tbl-cell-pad) var(--sp-3);
+  border-bottom: 1px solid var(--border-split);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+:where(.m-tbl tbody tr:last-child td) {
+  border-bottom: none;
+}
+:where(.m-tbl tbody tr:hover td) {
+  background: var(--surface-hover);
+}
+:where(.m-tbl tbody tr.is-selected td) {
+  background: var(--surface-selected);
+}
+:where(.m-tbl .is-numeric) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+:where(.m-tbl .is-mono) {
+  font-family: var(--font-mono);
+  font-size: var(--fs-300);
+}
+:where(.m-tbl .is-muted) {
+  color: var(--text-muted);
+  font-size: var(--fs-300);
+}
+:where(.m-tbl .is-nowrap) {
+  white-space: nowrap;
+}
+:where(.m-tbl th.is-sortable) {
+  cursor: pointer;
+  user-select: none;
+}
+:where(.m-tbl th.is-sortable:hover) {
+  color: var(--accent);
+}
+:where(.m-tbl-sort) {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: -2px;
+}
+
+/* ---------- 分页 ---------- */
+:where(.m-pager) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--border-default);
+  font-size: var(--fs-300);
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+:where(.m-pager-pages) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+:where(.m-pager-btn) {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-1);
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+:where(.m-pager-btn:hover:not(:disabled)) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+:where(.m-pager-btn.is-active) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-subtle-bg);
+  font-weight: 600;
+}
+:where(.m-pager-btn:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---------- 导航栏（自 common.css 迁入，按带图标的 pill 形态重写） ---------- */
+:where(.navbar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  height: var(--nav-height);
+  padding: 0 var(--sp-5);
+  background: var(--surface-card);
+  border-bottom: 1px solid var(--border-default);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  margin-bottom: var(--sp-5);
+}
+:where(.nav-brand) {
+  font-size: var(--fs-500);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+:where(.nav-links) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: visible;
+}
+:where(.nav-links a),
+:where(.nav-more-btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px var(--sp-3);
+  border-radius: var(--r-2);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--fs-400);
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
+}
+:where(.nav-links a .icon),
+:where(.nav-more-btn .icon) {
+  opacity: 0.75;
+}
+:where(.nav-links a:hover),
+:where(.nav-more-btn:hover) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+:where(.nav-links a.active),
+:where(.nav-more.has-active .nav-more-btn) {
+  background: var(--accent-subtle-bg);
+  color: var(--accent);
+  font-weight: 500;
+}
+:where(.nav-links a.active .icon),
+:where(.nav-more.has-active .nav-more-btn .icon) {
+  opacity: 1;
+}
+:where(.nav-more) {
+  position: relative;
+  display: inline-flex;
+}
+:where(.nav-pop) {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 148px;
+  padding: var(--sp-1);
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-3);
+  box-shadow: var(--elev-3);
+  z-index: var(--z-float);
+}
+:where(.nav-more:hover .nav-pop),
+:where(.nav-more:focus-within .nav-pop) {
+  display: flex;
+}
+:where(.nav-pop a) {
+  margin-left: 0;
+  border-radius: var(--r-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-300);
+}
+:where(.nav-actions) {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+:where(.nav-actions > a) {
+  color: var(--text-secondary);
+  font-size: var(--fs-400);
+  text-decoration: none;
+  padding: 6px var(--sp-2);
+  border-radius: var(--r-2);
+}
+:where(.nav-actions > a:hover) {
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+:where(.theme-toggle) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-2);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease);
+}
+:where(.theme-toggle:hover) {
+  color: var(--accent);
+  background: var(--accent-subtle-bg);
+  border-color: var(--accent-subtle-bd);
+}
+:where(.theme-toggle:focus-visible) {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+/* ---------- 轻提示 ---------- */
+:where(.m-toasts) {
+  position: fixed;
+  top: calc(var(--nav-height) + var(--sp-3));
+  right: var(--sp-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  z-index: var(--z-toast);
+  pointer-events: none;
+  max-width: min(420px, calc(100vw - 2 * var(--sp-5)));
+}
+:where(.m-toast) {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-left-width: 3px;
+  border-radius: var(--r-2);
+  box-shadow: var(--elev-3);
+  color: var(--text-primary);
+  font-size: var(--fs-300);
+  line-height: 1.5;
+  pointer-events: auto;
+  animation: m-toast-in var(--dur-3) var(--ease);
+}
+:where(.m-toast[data-kind='pass']) {
+  border-left-color: var(--st-success-fg);
+}
+:where(.m-toast[data-kind='pass'] .icon) {
+  color: var(--st-success-fg);
+}
+:where(.m-toast[data-kind='info']) {
+  border-left-color: var(--accent);
+}
+:where(.m-toast[data-kind='info'] .icon) {
+  color: var(--accent);
+}
+:where(.m-toast[data-kind='warning']) {
+  border-left-color: var(--st-warning-fg);
+}
+:where(.m-toast[data-kind='warning'] .icon) {
+  color: var(--st-warning-fg);
+}
+:where(.m-toast[data-kind='critical']) {
+  border-left-color: var(--st-danger-fg);
+}
+:where(.m-toast[data-kind='critical'] .icon) {
+  color: var(--st-danger-fg);
+}
+:where(.m-toast-text) {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+:where(.m-toast-close) {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+:where(.m-toast-close:hover) {
+  color: var(--text-primary);
+  background: var(--surface-hover);
+}
+@keyframes m-toast-in {
+  from {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ---------- 键值明细：替代 status.js / clusters.js 里逐行拼的内联 field() ---------- */
+:where(.m-kv) {
+  display: flex;
+  flex-direction: column;
+}
+:where(.m-kv-row) {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border-split);
+  font-size: var(--fs-400);
+}
+:where(.m-kv-row:last-child) {
+  border-bottom: none;
+}
+:where(.m-kv-k) {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+:where(.m-kv-v) {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+  word-break: break-all;
+}
+:where(.m-kv-v.is-mono) {
+  font-family: var(--font-mono);
+  font-size: var(--fs-300);
+  font-weight: 400;
+}
+:where(.m-kv-v.is-accent) {
+  color: var(--accent);
+}
+:where(.m-kv-v.is-muted) {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+/* 卡内小节标题：此前用 border-top: 1px dashed 手写 */
+:where(.m-sub-label) {
+  margin: var(--sp-4) 0 var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border-default);
+  font-size: var(--fs-300);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+:where(.m-sub-label:first-child) {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* ---------- 指标网格 ---------- */
+:where(.m-metric-grid) {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: var(--sp-3);
+}
+:where(.m-metric) {
+  padding: var(--sp-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-2);
+  background: var(--surface-inset);
+  text-align: center;
+}
+:where(.m-metric-v) {
+  font-size: var(--fs-700);
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+:where(.m-metric-k) {
+  margin-top: 2px;
+  font-size: var(--fs-200);
+  color: var(--text-muted);
+}
+:where(.m-metric[data-tone='accent'] .m-metric-v) {
+  color: var(--accent);
+}
+:where(.m-metric[data-tone='success'] .m-metric-v) {
+  color: var(--st-success-fg);
+}
+:where(.m-metric[data-tone='warning'] .m-metric-v) {
+  color: var(--st-warning-fg);
+}
+:where(.m-metric[data-tone='danger'] .m-metric-v) {
+  color: var(--st-danger-fg);
+}
+:where(.m-metric[data-tone='alt'] .m-metric-v) {
+  color: var(--chart-5);
+}
+
+/* ---------- 占比条与图例 ---------- */
+:where(.m-bar) {
+  display: flex;
+  height: 8px;
+  border-radius: var(--r-full);
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+:where(.m-bar-seg) {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur-3) var(--ease);
+}
+:where(.m-bar-seg[data-tone='success']) {
+  background: var(--st-success-fg);
+}
+:where(.m-legend) {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: 6px;
+  font-size: var(--fs-200);
+  color: var(--text-secondary);
+}
+:where(.m-legend-item) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+:where(.m-legend-key) {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+:where(.m-legend-key[data-tone='success']) {
+  background: var(--st-success-fg);
+}
+
+/* ---------- 统计行（抑制率 / 通知率这类并排大字） ---------- */
+:where(.m-stat-row) {
+  display: flex;
+  gap: var(--sp-5);
+  flex-wrap: wrap;
+}
+:where(.m-metric-grid + .m-stat-row) {
+  margin-top: var(--sp-4);
+}
+:where(.m-bar-block) {
+  margin-top: var(--sp-4);
+}
+:where(.m-stat) {
+  flex: 1;
+  min-width: 100px;
+}
+:where(.m-stat-k) {
+  font-size: var(--fs-200);
+  color: var(--text-muted);
+  margin-bottom: var(--sp-1);
+}
+:where(.m-stat-v) {
+  font-size: var(--fs-600);
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+:where(.m-stat-v[data-tone='success']) {
+  color: var(--st-success-fg);
+}
+:where(.m-stat-v[data-tone='warning']) {
+  color: var(--st-warning-fg);
+}
+:where(.m-stat-v[data-tone='danger']) {
+  color: var(--st-danger-fg);
+}

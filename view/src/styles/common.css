@@ -1,6 +1,7 @@
 @import './tokens.css';
 @import './theme.light.css';
 @import './theme.dark.css';
+@import './components.css';
 
 /* 旧变量名转发层：16 个页面的 CSS/JS 与 login/consent 的内联 style 都在引用这批名字，
    保留为别名可让页面在逐个迁移到语义名的过程中不破版。
@@ -46,67 +47,7 @@ html.theming * {
   box-shadow: var(--shadow-sm);
   padding: 20px;
 }
-.navbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: var(--nav-height);
-  background: var(--card-bg);
-  padding: 0 24px;
-  box-shadow: var(--shadow-sm);
-  margin-bottom: 20px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-.nav-brand {
-  font-size: 20px;
-  font-weight: bold;
-  color: var(--primary-color);
-  cursor: pointer;
-}
-.nav-links a {
-  margin-left: 24px;
-  text-decoration: none;
-  color: var(--text-secondary);
-  padding: 8px 0;
-  border-bottom: 2px solid transparent;
-  transition: all 0.3s;
-}
-.nav-links a:hover,
-.nav-links a.active {
-  color: var(--primary-color);
-  border-bottom-color: var(--primary-color);
-}
-.nav-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--r-2);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: color var(--dur-1) var(--ease), background var(--dur-1) var(--ease),
-    border-color var(--dur-1) var(--ease);
-}
-.theme-toggle:hover {
-  color: var(--accent);
-  background: var(--accent-subtle-bg);
-  border-color: var(--accent-subtle-bd);
-}
-.theme-toggle:focus-visible {
-  outline: 2px solid var(--border-focus);
-  outline-offset: 1px;
-}
+/* 导航栏样式已迁至 components.css（NavBar 组件层） */
 .stat-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

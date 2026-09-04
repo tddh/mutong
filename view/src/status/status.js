@@ -1,7 +1,16 @@
 import { createApp, ref, onMounted, onUnmounted, h } from 'vue'
 import { NavBar } from '../components/SharedComponents.js'
+import { PageHeader, Panel, StatusBadge, Skeleton } from '../components/primitives.js'
 import { API } from '../utils/api.js'
 import '../styles/common.css'
+
+const kv = (k, v, valClass) =>
+  h('div', { class: 'm-kv-row' }, [
+    h('span', { class: 'm-kv-k' }, k),
+    h('span', { class: ['m-kv-v', valClass] }, v ?? '—'),
+  ])
+
+const kvList = (rows) => h('div', { class: 'm-kv' }, rows)
 
 createApp({
   components: { NavBar },
@@ -44,299 +53,164 @@ createApp({
     return { diagnosis, suppression, systemStatus, executor, loading, lastUpdated, errors }
   },
   render() {
-    const badge = (text, color) =>
-      h(
-        'span',
-        {
-          style: `display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;color:#fff;background:${color};letter-spacing:0.5px;`,
-        },
-        text,
-      )
+    const diag = this.diagnosis?.llm || {}
+    const diagStats = this.diagnosis?.diagnosis || {}
+    const re = this.suppression?.ruleEngine || this.suppression || {}
+    const metrics = this.systemStatus?.alerts?.metrics || {}
+    const stats = this.systemStatus?.diagnosis?.diagnosis || {}
+    const exec = this.executor || {}
 
-    const diagStatus = () => {
-      const llm = this.diagnosis?.llm
-      if (!llm) return badge('未知', '#999')
-      if (llm.configured && llm.available) return badge('可用', 'var(--success-color)')
-      if (llm.configured && !llm.available) return badge('不可用', 'var(--error-color)')
-      return badge('未配置', '#999')
-    }
+    const diagSev = !diag.configured ? 'pending' : diag.available ? 'pass' : 'critical'
+    const diagText = !diag.configured ? '未配置' : diag.available ? '可用' : '不可用'
+    const hasWindow = re.timeWindowSeconds != null
+    const suppSev = !hasWindow ? 'pending' : re.timeWindowSeconds > 0 ? 'pass' : 'pending'
+    const suppText = !hasWindow ? '未知' : re.timeWindowSeconds > 0 ? '运行中' : '未启用'
 
-    const suppStatus = () => {
-      const s = this.suppression?.ruleEngine || this.suppression || {}
-      if (!s || s.timeWindowSeconds == null) return badge('未知', '#999')
-      return s.timeWindowSeconds > 0
-        ? badge('运行中', 'var(--success-color)')
-        : badge('未启用', '#999')
-    }
+    const received = metrics.receivedTotal ?? 0
+    const suppressed = metrics.suppressedTotal ?? 0
+    const notified = metrics.notifiedTotal ?? 0
+    const pct = (n) => (received > 0 ? `${((n / received) * 100).toFixed(1)}%` : '—')
+    const suppTone =
+      received === 0 ? undefined : suppressed / received < 0.3 ? 'success' : suppressed / received < 0.6 ? 'warning' : 'danger'
+    const notifTone = received === 0 ? undefined : notified / received >= 0.5 ? 'success' : 'warning'
 
-    const field = (label, value, fallback = '-') =>
-      h(
-        'div',
-        {
-          style:
-            'display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);font-size:14px;',
-        },
-        [
-          h('span', { style: 'color:var(--text-secondary);' }, label),
-          h(
-            'span',
-            {
-              style:
-                'color:var(--text-primary);font-weight:500;word-break:break-all;text-align:right;max-width:60%;',
-            },
-            value ?? fallback,
-          ),
+    const total = stats.totalDiagnoses ?? 0
+    const llmPct = total > 0 ? ((stats.llmCalls ?? 0) / total) * 100 : 0
+    const rulePct = total > 0 ? ((stats.ruleOnlyCalls ?? 0) / total) * 100 : 0
+
+    const cards = [
+      h(Panel, { title: 'LLM 诊断服务' }, {
+        actions: () => h(StatusBadge, { sev: diagSev, text: diagText, dot: true }),
+        default: () => [
+          kvList([
+            kv('提供商', diag.provider),
+            kv('模型', diag.model, 'is-accent'),
+            kv('地址', diag.endpoint ? truncate(diag.endpoint) : undefined, 'is-mono'),
+          ]),
+          h('div', { class: 'm-sub-label' }, '调用统计'),
+          kvList([
+            kv('总诊断次数', diagStats.totalDiagnoses),
+            kv('LLM 调用次数', diagStats.llmCalls),
+            kv('规则快速路径', diagStats.ruleOnlyCalls),
+          ]),
         ],
-      )
-
-    const diagCard = () => {
-      const llm = this.diagnosis?.llm || {}
-      const stats = this.diagnosis?.diagnosis || {}
-      const truncateEndpoint = (url) => {
-        if (!url) return '-'
-        return url.length > 40 ? url.substring(0, 37) + '...' : url
-      }
-      return h('div', { class: 'status-card' }, [
-        h('div', { class: 'status-card-header' }, [
-          h('span', { class: 'status-card-title' }, '🧠 LLM 诊断服务'),
-          diagStatus(),
-        ]),
-        h('div', { class: 'status-card-body' }, [
-          field('提供商', llm.provider),
+      }),
+      h(Panel, { title: '告警抑制' }, {
+        actions: () => h(StatusBadge, { sev: suppSev, text: suppText, dot: true }),
+        default: () =>
+          kvList([
+            kv('时间窗口', hasWindow ? `${re.timeWindowSeconds} 秒` : undefined),
+            kv('最大抑制深度', re.maxDepth),
+            kv('活跃告警数', re.activeAlertsCount),
+            kv('例外严重级别', joinList(re.severityExceptions)),
+            kv('例外关键级别', joinList(re.criticalityExceptions)),
+          ]),
+      }),
+      h(Panel, { title: '告警处理指标' }, {
+        default: () => [
           h(
             'div',
-            {
-              style:
-                'display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border-color);font-size:14px;',
-            },
+            { class: 'm-metric-grid' },
             [
-              h('span', { style: 'color:var(--text-secondary);' }, '模型'),
-              h(
-                'span',
-                {
-                  style:
-                    'color:var(--primary-color);font-weight:600;text-align:right;max-width:60%;word-break:break-all;',
-                },
-                llm.model ?? '-',
-              ),
-            ],
-          ),
-          field('地址', truncateEndpoint(llm.endpoint)),
-          h(
-            'div',
-            { style: 'margin-top:12px;padding-top:8px;border-top:1px dashed var(--border-color);' },
-            [
-              h(
-                'div',
-                {
-                  style:
-                    'font-size:13px;color:var(--text-secondary);margin-bottom:8px;font-weight:600;',
-                },
-                '调用统计',
-              ),
-              field('总诊断次数', stats.totalDiagnoses ?? '-'),
-              field('LLM 调用次数', stats.llmCalls ?? '-'),
-              field('规则快速路径', stats.ruleOnlyCalls ?? '-'),
-            ],
-          ),
-        ]),
-      ])
-    }
-
-    const suppCard = () => {
-      const re = this.suppression?.ruleEngine || this.suppression || {}
-      return h('div', { class: 'status-card' }, [
-        h('div', { class: 'status-card-header' }, [
-          h('span', { class: 'status-card-title' }, '🛡️ 告警抑制'),
-          suppStatus(),
-        ]),
-        h('div', { class: 'status-card-body' }, [
-          field('时间窗口', re.timeWindowSeconds != null ? `${re.timeWindowSeconds} 秒` : '-'),
-          field('最大抑制深度', re.maxDepth ?? '-'),
-          field('活跃告警数', re.activeAlertsCount ?? '-'),
-          field(
-            '例外严重级别',
-            re.severityExceptions && re.severityExceptions.length > 0
-              ? re.severityExceptions.join(', ')
-              : '-',
-          ),
-          field(
-            '例外关键级别',
-            re.criticalityExceptions && re.criticalityExceptions.length > 0
-              ? re.criticalityExceptions.join(', ')
-              : '-',
-          ),
-        ]),
-      ])
-    }
-
-    const alertCard = () => {
-      const alertData = this.systemStatus?.alerts || {}
-      const metrics = alertData.metrics || {}
-      const received = metrics.receivedTotal ?? 0
-      const suppressed = metrics.suppressedTotal ?? 0
-      const notified = metrics.notifiedTotal ?? 0
-      const suppRate = received > 0 ? ((suppressed / received) * 100).toFixed(1) : '-'
-      const notifRate = received > 0 ? ((notified / received) * 100).toFixed(1) : '-'
-      const suppColor =
-        received > 0
-          ? suppressed / received < 0.3
-            ? 'var(--success-color)'
-            : suppressed / received < 0.6
-              ? 'var(--warning-color)'
-              : 'var(--error-color)'
-          : 'var(--text-secondary)'
-      const notifColor =
-        received > 0
-          ? notified / received >= 0.5
-            ? 'var(--success-color)'
-            : 'var(--warning-color)'
-          : 'var(--text-secondary)'
-      const items = [
-        { label: '收到总数', value: metrics.receivedTotal, color: 'var(--primary-color)' },
-        { label: '抑制总数', value: metrics.suppressedTotal, color: 'var(--warning-color)' },
-        { label: '通知总数', value: metrics.notifiedTotal, color: '#722ed1' },
-        { label: '活跃告警', value: metrics.activeFiring, color: 'var(--error-color)' },
-        { label: '已解决', value: metrics.activeResolved, color: 'var(--success-color)' },
-      ]
-      return h('div', { class: 'status-card' }, [
-        h('div', { class: 'status-card-header' }, [
-          h('span', { class: 'status-card-title' }, '📊 告警处理指标'),
-        ]),
-        h('div', { class: 'status-card-body' }, [
-          h(
-            'div',
-            { class: 'metric-grid' },
-            items.map((m) =>
-              h('div', { class: 'metric-item' }, [
-                h('div', { class: 'metric-value', style: `color:${m.color};` }, m.value ?? '-'),
-                h('div', { class: 'metric-label' }, m.label),
+              { k: '收到总数', v: metrics.receivedTotal, tone: 'accent' },
+              { k: '抑制总数', v: metrics.suppressedTotal, tone: 'warning' },
+              { k: '通知总数', v: metrics.notifiedTotal, tone: 'alt' },
+              { k: '活跃告警', v: metrics.activeFiring, tone: 'danger' },
+              { k: '已解决', v: metrics.activeResolved, tone: 'success' },
+            ].map((m) =>
+              h('div', { class: 'm-metric', 'data-tone': m.tone }, [
+                h('div', { class: 'm-metric-v' }, m.v ?? '—'),
+                h('div', { class: 'm-metric-k' }, m.k),
               ]),
             ),
           ),
-          h(
-            'div',
-            {
-              style:
-                'margin-top:16px;padding-top:12px;border-top:1px dashed var(--border-color);display:flex;gap:24px;',
-            },
-            [
-              h('div', { style: 'flex:1;' }, [
-                h(
-                  'div',
-                  { style: 'font-size:12px;color:var(--text-secondary);margin-bottom:4px;' },
-                  '抑制率',
-                ),
-                h(
-                  'div',
-                  { style: `font-size:20px;font-weight:700;color:${suppColor};` },
-                  suppRate === '-' ? '-' : `${suppRate}%`,
-                ),
-              ]),
-              h('div', { style: 'flex:1;' }, [
-                h(
-                  'div',
-                  { style: 'font-size:12px;color:var(--text-secondary);margin-bottom:4px;' },
-                  '通知率',
-                ),
-                h(
-                  'div',
-                  { style: `font-size:20px;font-weight:700;color:${notifColor};` },
-                  notifRate === '-' ? '-' : `${notifRate}%`,
-                ),
-              ]),
-            ],
-          ),
-        ]),
-      ])
-    }
-
-    const diagStatsCard = () => {
-      const diagData = this.systemStatus?.diagnosis || {}
-      const stats = diagData.diagnosis || {}
-      const total = stats.totalDiagnoses ?? 0
-      const llm = stats.llmCalls ?? 0
-      const rule = stats.ruleOnlyCalls ?? 0
-      const llmPct = total > 0 ? ((llm / total) * 100).toFixed(1) : 0
-      const rulePct = total > 0 ? ((rule / total) * 100).toFixed(1) : 0
-      return h('div', { class: 'status-card' }, [
-        h('div', { class: 'status-card-header' }, [
-          h('span', { class: 'status-card-title' }, '📈 诊断统计'),
-        ]),
-        h('div', { class: 'status-card-body' }, [
-          field('总诊断数', total),
-          field('LLM 调用', llm),
-          field('规则快速路径', rule),
+          h('div', { class: 'm-stat-row' }, [
+            h('div', { class: 'm-stat' }, [
+              h('div', { class: 'm-stat-k' }, '抑制率'),
+              h('div', { class: 'm-stat-v', 'data-tone': suppTone }, pct(suppressed)),
+            ]),
+            h('div', { class: 'm-stat' }, [
+              h('div', { class: 'm-stat-k' }, '通知率'),
+              h('div', { class: 'm-stat-v', 'data-tone': notifTone }, pct(notified)),
+            ]),
+          ]),
+        ],
+      }),
+      h(Panel, { title: '诊断统计' }, {
+        default: () => [
+          kvList([
+            kv('总诊断数', total),
+            kv('LLM 调用', stats.llmCalls),
+            kv('规则快速路径', stats.ruleOnlyCalls),
+          ]),
           total > 0
-            ? h('div', { style: 'margin-top:16px;' }, [
-                h(
-                  'div',
-                  { style: 'font-size:13px;color:var(--text-secondary);margin-bottom:8px;' },
-                  'LLM vs 规则占比',
-                ),
-                h('div', { class: 'bar-track' }, [
-                  h('div', { class: 'bar-fill bar-fill-llm', style: `width:${llmPct}%` }),
-                  h('div', { class: 'bar-fill bar-fill-rule', style: `width:${rulePct}%` }),
+            ? h('div', { class: 'm-bar-block' }, [
+                h('div', { class: 'm-sub-label' }, 'LLM 与规则占比'),
+                h('div', { class: 'm-bar' }, [
+                  h('div', { class: 'm-bar-seg', style: `width:${llmPct}%` }),
+                  h('div', {
+                    class: 'm-bar-seg',
+                    'data-tone': 'success',
+                    style: `width:${rulePct}%`,
+                  }),
                 ]),
-                h(
-                  'div',
-                  {
-                    style:
-                      'display:flex;justify-content:space-between;margin-top:6px;font-size:12px;color:var(--text-secondary);',
-                  },
-                  [h('span', null, `🤖 LLM ${llmPct}%`), h('span', null, `⚡ 规则 ${rulePct}%`)],
-                ),
+                h('div', { class: 'm-legend' }, [
+                  h('span', { class: 'm-legend-item' }, [
+                    h('i', { class: 'm-legend-key' }),
+                    `LLM ${llmPct.toFixed(1)}%`,
+                  ]),
+                  h('span', { class: 'm-legend-item' }, [
+                    h('i', { class: 'm-legend-key', 'data-tone': 'success' }),
+                    `规则 ${rulePct.toFixed(1)}%`,
+                  ]),
+                ]),
               ])
             : null,
-        ]),
-      ])
-    }
-
-    const execCard = () => {
-      const exec = this.executor || {}
-      const enabled = exec.enabled ?? false
-      const autoMode = exec.autoMode ?? false
-      const auditLogCount = exec.auditLogCount ?? '-'
-      const modeBadge = autoMode
-        ? badge('自主执行', 'var(--success-color)')
-        : badge('审批模式', 'var(--warning-color)')
-      return h('div', { class: 'status-card' }, [
-        h('div', { class: 'status-card-header' }, [
-          h('span', { class: 'status-card-title' }, '⚙️ 执行器状态'),
-          enabled ? badge('启用', 'var(--success-color)') : badge('未启用', '#999'),
-        ]),
-        h('div', { class: 'status-card-body' }, [
-          field('执行模式', modeBadge),
-          field('审计日志数', auditLogCount),
-        ]),
-      ])
-    }
-
-    const errorBanner = () => {
-      if (this.errors.length === 0) return null
-      return h('div', { class: 'error-banner' }, [
-        h('span', null, `⚠️ 以下服务数据获取失败: ${this.errors.join('、')}`),
-      ])
-    }
+        ],
+      }),
+      h(Panel, { title: '执行器状态' }, {
+        actions: () =>
+          h(StatusBadge, {
+            sev: exec.enabled ? 'pass' : 'pending',
+            text: exec.enabled ? '启用' : '未启用',
+            dot: true,
+          }),
+        default: () =>
+          kvList([
+            kv(
+              '执行模式',
+              h(StatusBadge, {
+                sev: exec.autoMode ? 'pass' : 'warning',
+                text: exec.autoMode ? '自主执行' : '审批模式',
+              }),
+            ),
+            kv('审计日志数', exec.auditLogCount),
+          ]),
+      }),
+    ]
 
     return h('div', [
       h(NavBar),
       h('div', { class: 'container' }, [
-        h('div', { class: 'dashboard-header' }, '系统状态'),
+        h(PageHeader, {
+          title: '系统状态',
+          desc: this.lastUpdated ? `每 30 秒自动刷新 · 更新于 ${this.lastUpdated}` : '正在加载…',
+        }),
+        this.errors.length > 0
+          ? h('div', { class: 'error-banner' }, `以下服务数据获取失败：${this.errors.join('、')}`)
+          : null,
         this.loading
-          ? h('div', { class: 'card' }, '加载中...')
-          : [
-              errorBanner(),
-              h('div', { class: 'status-grid' }, [
-                diagCard(),
-                suppCard(),
-                alertCard(),
-                diagStatsCard(),
-                execCard(),
-              ]),
-              h('div', { class: 'refresh-info' }, `最近更新: ${this.lastUpdated || '-'}`),
-            ],
+          ? h(Panel, { title: '系统状态', loading: true }, { default: () => null })
+          : h('div', { class: 'm-grid-2' }, cards),
       ]),
     ])
   },
 }).mount('#app')
+
+function truncate(url) {
+  return url.length > 40 ? url.slice(0, 37) + '…' : url
+}
+
+function joinList(arr) {
+  return arr && arr.length > 0 ? arr.join('、') : undefined
+}

@@ -71,7 +71,9 @@ export const API = {
     status: () => request('/api/v1/system/status').catch(() => null),
   },
   clusters: {
-    list: () => request('/api/v1/clusters').catch(() => ({ clusters: [] })),
+    // 不在这里吞错：原先 catch 返回 { clusters: [] }，会把后端故障伪装成"一个集群都没配"，
+    // 使调用方的错误分支成为死代码。错误交给页面处理（clusters.js 有 try/catch 与重试）。
+    list: () => request('/api/v1/clusters'),
     health: (name) =>
       request(`/api/v1/clusters/${encodeURIComponent(name)}/health`).catch(() => null),
     stats: (name) =>

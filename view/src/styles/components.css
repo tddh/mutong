@@ -1097,7 +1097,7 @@
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-@media (min-width: 1400px) {
+@media (min-width: 1280px) {
   :where(.m-stat-grid),
   :where(.m-quick-grid) {
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1106,12 +1106,8 @@
 :where(.m-stat-grid[data-n='4']) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-@media (min-width: 720px) {
-  :where(.m-stat-grid[data-n='4']) {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1400px) {
+@media (min-width: 1280px) {
+  /* 与 6 项网格同点升档：720px 就切 4 列的话单列仅 170px，数字与图标会挤作一团 */
   :where(.m-stat-grid[data-n='4']) {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
@@ -1122,8 +1118,10 @@
 :where(.m-stat-card) {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
+  /* 居中而非 space-between：4 列档下单卡 405px，把图标顶到右缘会在中部
+     撕出 250px 真空；居中后宽列两侧对称留白，窄列本就接近填满 */
+  justify-content: center;
+  gap: clamp(16px, 2vw, 28px);
   /* 内缩随列宽走：窄列下 32px 数字加 38px 图标会把文字列挤破 */
   padding: clamp(12px, 1vw + 4px, 20px) clamp(12px, 1.2vw + 2px, 24px);
   background: var(--surface-card);

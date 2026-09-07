@@ -73,7 +73,19 @@ async function init() {
   }
 
   term = new Terminal({ cols: 80, rows: 24, cursorBlink: true, theme: { background: '#1e1e1e' } })
-  term.open(document.getElementById('terminal'))
+  const host = document.getElementById('terminal')
+  term.open(host)
+  /* 以容器自身尺寸算行列：window.innerHeight 含导航与工具条，
+     按它算出的行数会把终端撑出容器；且首屏必须算一次，
+     原先只挂在 resize 事件上，首屏永远是写死的 24 行、页底空掉三分之二 */
+  const fit = () => {
+    if (!term) return
+    const cols = Math.max(20, Math.floor(host.clientWidth / 9))
+    const rows = Math.max(10, Math.floor(host.clientHeight / 18))
+    term.resize(cols, rows)
+    resizeSender(cols, rows)
+  }
+  requestAnimationFrame(fit)
   term.writeln('\x1b[32mWeb Terminal Ready\x1b[0m')
   term.writeln('Select namespace, pod, and container above to connect.')
 
@@ -88,14 +100,7 @@ async function init() {
     }
   })
 
-  window.addEventListener('resize', () => {
-    if (term) {
-      const cols = Math.max(20, Math.floor(window.innerWidth / 9))
-      const rows = Math.max(10, Math.floor(window.innerHeight / 18))
-      term.resize(cols, rows)
-      resizeSender(cols, rows)
-    }
-  })
+  window.addEventListener('resize', fit)
 }
 
 async function refreshPods() {

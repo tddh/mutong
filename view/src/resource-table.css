@@ -1,7 +1,10 @@
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* 与 common.css 同名层，跨文件合并为同一层；不分层会压过组件层的 padding */
+@layer reset {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 .resource-table-container {
   /* 与导航、其余页面共用同一 shell 口径。1200px 死上限使本页左边缘

@@ -21,10 +21,16 @@
 html {
   background-color: var(--surface-page);
 }
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+/* reset 必须降进层：未分层的 `* { padding: 0 }` 排在 @import 之后，
+   特异度虽是 0 却按源码顺序压过了组件层每一条 :where() 的 padding——
+   导航内缩、按钮/徽标/单元格内边距会被整片清零。放进 reset 层后，
+   未分层的组件规则依层叠层天然优先，而它仍压制 UA 默认 padding，行为不回退。 */
+@layer reset {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 }
 body {
   font-family: var(--font-sans);

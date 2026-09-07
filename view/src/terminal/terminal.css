@@ -19,7 +19,9 @@ body,
   height: 40px;
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  /* 与导航 brand 共用内缩基准，不再贴屏幕左缘 */
+  padding-block: 6px;
+  padding-inline: var(--shell-pad);
   gap: 12px;
   background: #1b1b2b;
   color: #ddd;

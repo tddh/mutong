@@ -4,11 +4,16 @@
   box-sizing: border-box;
 }
 .resource-table-container {
-  max-width: 1200px;
-  margin: 0 auto;
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  /* 与导航、其余页面共用同一 shell 口径。1200px 死上限使本页左边缘
+     与相邻页面错开（1920 视口下 360px vs 280px）。
+     原 background:#fff 在暗色下是一块白底，改走语义 token。 */
+  width: min(100% - 2 * var(--shell-pad), var(--shell-max));
+  margin-inline: auto;
+  margin-block: var(--sp-5);
+  background-color: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--card-radius);
+  box-shadow: var(--elev-1);
   overflow: hidden;
 }
 .resource-table-header {

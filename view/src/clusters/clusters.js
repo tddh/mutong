@@ -145,7 +145,7 @@ createApp({
         }),
         h(
           'div',
-          { class: 'm-stat-grid' },
+          { class: 'm-stat-grid', 'data-n': '4' },
           [
             { title: '集群总数', value: all.length, tone: 'accent', icon: 'cluster' },
             { title: '健康集群', value: healthy, tone: 'success', icon: 'check' },

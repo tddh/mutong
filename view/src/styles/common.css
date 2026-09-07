@@ -36,22 +36,27 @@ body {
 html.theming * {
   transition: none !important;
 }
-.container {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 20px;
+/* 页面外壳：全站唯一的水平对齐来源。导航内层（.nav-inner）用同一组
+   --shell-max / --shell-pad，因此 shell 宽度变化时导航自动跟随，两侧永远对齐。 */
+.container,
+.m-shell {
+  width: 100%;
+  max-width: var(--shell-max);
+  margin-inline: auto;
+  padding-inline: var(--shell-pad);
+  padding-block: var(--sp-5);
 }
 .card {
   background: var(--card-bg);
   border-radius: var(--card-radius);
   box-shadow: var(--shadow-sm);
-  padding: 20px;
+  padding: var(--sp-5);
 }
 /* 导航栏样式已迁至 components.css（NavBar 组件层） */
 /* 统计卡样式已迁至 components.css 的 .m-stat-grid / .m-stat-card */
 .dashboard-header {
-  font-size: 24px;
-  margin-bottom: 24px;
+  font-size: var(--fs-700);
+  margin-bottom: var(--sp-5);
   font-weight: 600;
 }
 /* 双列面板与指标网格已迁至 components.css（.m-grid-2 / .m-metric-grid，auto-fit 自带折列） */

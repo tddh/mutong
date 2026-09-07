@@ -6,8 +6,9 @@ body {
 
 .diagnosis-page {
   flex: 1;
-  height: calc(100vh - 60px);
-  background: #f5f7fa;
+  /* 60px 是在复述导航高度，与 --nav-height 无关联，改导航即静默破版 */
+  height: calc(100vh - var(--nav-height));
+  background: var(--surface-page);
   position: relative;
   display: flex;
   flex-direction: column;

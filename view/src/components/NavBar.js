@@ -13,30 +13,32 @@ export const NavBar = {
   components: { Icon },
   template: `
     <nav class="navbar">
-      <div class="nav-brand" @click="home">牧童 · 重明</div>
-      <div class="nav-links">
-        <a v-for="it in primary" :key="it.href" :href="it.href" :class="{ active: isActive(it.href) }">
-          <Icon :name="it.icon" :size="15" /><span>{{ it.label }}</span>
-        </a>
-        <div v-if="more.length" class="nav-more" :class="{ 'has-active': moreActive }">
-          <button class="nav-more-btn" type="button" aria-haspopup="true">
-            <span>更多</span><Icon name="chevron" :size="13" />
-          </button>
-          <div class="nav-pop">
-            <a v-for="it in more" :key="it.href" :href="it.href" :class="{ active: isActive(it.href) }">
-              <Icon :name="it.icon" :size="15" /><span>{{ it.label }}</span>
-            </a>
+      <div class="nav-inner">
+        <div class="nav-brand" @click="home">牧童 · 重明</div>
+        <div class="nav-links">
+          <a v-for="it in primary" :key="it.href" :href="it.href" :class="{ active: isActive(it.href) }">
+            <Icon :name="it.icon" :size="15" /><span>{{ it.label }}</span>
+          </a>
+          <div v-if="more.length" class="nav-more" :class="{ 'has-active': moreActive }">
+            <button class="nav-more-btn" type="button" aria-haspopup="true">
+              <span>更多</span><Icon name="chevron" :size="13" />
+            </button>
+            <div class="nav-pop">
+              <a v-for="it in more" :key="it.href" :href="it.href" :class="{ active: isActive(it.href) }">
+                <Icon :name="it.icon" :size="15" /><span>{{ it.label }}</span>
+              </a>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="nav-actions">
-        <button class="theme-toggle" type="button" @click="toggleTheme"
-                :title="isDark ? '切换到浅色' : '切换到暗色'"
-                :aria-label="isDark ? '切换到浅色' : '切换到暗色'">
-          <Icon :name="isDark ? 'moon' : 'sun'" :size="18" :stroke="1.8" />
-        </button>
-        <a v-if="auth.isAuthenticated" href="#" @click.prevent="logout">{{ auth.user?.username || '登出' }}</a>
-        <a v-else href="/view/login.html">登录</a>
+        <div class="nav-actions">
+          <button class="theme-toggle" type="button" @click="toggleTheme"
+                  :title="isDark ? '切换到浅色' : '切换到暗色'"
+                  :aria-label="isDark ? '切换到浅色' : '切换到暗色'">
+            <Icon :name="isDark ? 'moon' : 'sun'" :size="18" :stroke="1.8" />
+          </button>
+          <a v-if="auth.isAuthenticated" href="#" @click.prevent="logout">{{ auth.user?.username || '登出' }}</a>
+          <a v-else href="/view/login.html">登录</a>
+        </div>
       </div>
     </nav>
   `,

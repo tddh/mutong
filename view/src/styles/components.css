@@ -32,6 +32,8 @@
 :where(.m-page-desc) {
   font-size: var(--fs-300);
   color: var(--text-muted);
+  /* shell 放宽后不限行宽，一句说明能拉到两百字，扫读找不到落点 */
+  max-width: var(--measure);
 }
 :where(.m-page-header-slot) {
   margin-top: var(--sp-1);
@@ -88,12 +90,23 @@
 :where(.m-panel.is-flush .m-panel-body) {
   padding: 0;
 }
-/* 并列面板：宽屏两列、放不下自动折成单列；折行时列宽下限避免文字挤压 */
+/* 并列面板：显式两列而非 auto-fit。
+   minmax(380px) 在 shell 放宽后会排出 4 列，5 张面板变 4+1、右侧整片空；
+   两列下 5 项是 2+2+1，末位跨满整行，不留空洞。 */
 :where(.m-grid-2) {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: 1fr;
   gap: var(--sp-5);
   align-items: start;
+}
+@media (min-width: 880px) {
+  :where(.m-grid-2) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* 奇数个面板时让最后一张铺满整行，避免落单卡只占半宽 */
+  :where(.m-grid-2 > :last-child:nth-child(odd)) {
+    grid-column: 1 / -1;
+  }
 }
 :where(.m-grid-2 .m-panel) {
   margin-bottom: 0;
@@ -585,19 +598,27 @@
 }
 
 /* ---------- 导航栏（自 common.css 迁入，按带图标的 pill 形态重写） ---------- */
+/* 外层只负责通铺底色与 sticky；内缩交给 .nav-inner，与页面 shell 共用
+   --shell-max / --shell-pad，brand 才能与内容左边缘对齐。
+   原先的 margin-bottom 已删除：它挂在 sticky 元素上，滚动后间隙被内容穿过，
+   第一行会贴住甚至藏进导航下沿。场距改由 shell 的 padding-block 提供。 */
 :where(.navbar) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  height: var(--nav-height);
-  padding: 0 var(--sp-5);
   background: var(--surface-card);
   border-bottom: 1px solid var(--border-default);
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
-  margin-bottom: var(--sp-5);
+}
+:where(.nav-inner) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  height: var(--nav-height);
+  width: 100%;
+  max-width: var(--shell-max);
+  margin-inline: auto;
+  padding-inline: var(--shell-pad);
 }
 :where(.nav-brand) {
   font-size: var(--fs-500);
@@ -1060,10 +1081,42 @@
 }
 
 /* ---------- 统计卡 ---------- */
-:where(.m-stat-grid) {
+/* 列数只在能整除项数的档位间跳（6 项 → 1/2/3/6，4 项 → 1/2/4）。
+   auto-fit 会把 6 项塞进 5 列形成 5+1 落单行，且与下方 .m-quick-grid
+   的列数不一致导致两块网格竖线互相错开，故改为显式分档。
+   快捷入口同为 6 项、共用同一档表，因此两列网格永远对齐。 */
+:where(.m-stat-grid),
+:where(.m-quick-grid) {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-4);
+}
+@media (min-width: 720px) {
+  :where(.m-stat-grid),
+  :where(.m-quick-grid) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1400px) {
+  :where(.m-stat-grid),
+  :where(.m-quick-grid) {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+:where(.m-stat-grid[data-n='4']) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 720px) {
+  :where(.m-stat-grid[data-n='4']) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1400px) {
+  :where(.m-stat-grid[data-n='4']) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+:where(.m-stat-grid) {
   margin-bottom: var(--sp-5);
 }
 :where(.m-stat-card) {
@@ -1071,7 +1124,8 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-5);
+  /* 内缩随列宽走：窄列下 32px 数字加 38px 图标会把文字列挤破 */
+  padding: clamp(12px, 1vw + 4px, 20px) clamp(12px, 1.2vw + 2px, 24px);
   background: var(--surface-card);
   border: 1px solid var(--border-default);
   border-radius: var(--card-radius);
@@ -1093,7 +1147,7 @@
   color: var(--text-secondary);
 }
 :where(.m-stat-card-value) {
-  font-size: var(--fs-800);
+  font-size: clamp(20px, 0.9vw + 14px, 30px);
   font-weight: 700;
   line-height: 1.15;
   color: var(--text-primary);
@@ -1113,12 +1167,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: clamp(30px, 1.6vw, 36px);
+  height: clamp(30px, 1.6vw, 36px);
   flex-shrink: 0;
   border-radius: var(--r-2);
   background: var(--st-neutral-bg);
   color: var(--text-muted);
+}
+/* svg 按容器百分比走：组件传入的 size=20 是定值，容器缩放后锁死会失衡 */
+:where(.m-stat-card-icon .icon) {
+  width: 56%;
+  height: 56%;
 }
 :where(.m-stat-card[data-tone='accent'] .m-stat-card-value),
 :where(.m-stat-card[data-tone='accent'] .m-stat-card-icon) {
@@ -1155,11 +1214,7 @@
 }
 
 /* ---------- 快捷入口 ---------- */
-:where(.m-quick-grid) {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
-  gap: var(--sp-3);
-}
+/* 快捷入口列数见上方与 .m-stat-grid 共用的档表 */
 :where(.m-quick) {
   display: inline-flex;
   align-items: center;

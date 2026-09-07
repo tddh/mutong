@@ -120,8 +120,9 @@ body {
 }
 
 .metrics-dashboard {
-  max-width: 1200px;
-  margin: 0 auto;
+  /* 改用全站 shell 口径，1200px 死上限使本页与其他页左边缘错开 */
+  width: min(100% - 2 * var(--shell-pad), var(--shell-max));
+  margin-inline: auto;
 }
 
 .dashboard-header {

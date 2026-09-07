@@ -8,8 +8,10 @@ body,
   background: #0f1220;
   color: #e6e6e6;
 }
+/* 导航通铺占掉 --nav-height，容器必须扣除——原先 100vh 使页底 60px 被截掉
+   并多出等量滚动条（工具条那段已由下方 #terminal 的 flex:1 处理） */
 .terminal-container {
-  height: 100vh;
+  height: calc(100vh - var(--nav-height));
   display: flex;
   flex-direction: column;
 }

@@ -21,7 +21,9 @@ body {
 }
 
 .sidebar {
-  width: 300px;
+  /* 锁死 300px 时，视口增量全给图区：2560 下侧栏占比从 23% 掉到 12%。
+     随视口在 260–340px 间伸缩。本文件写死色号待 Phase 3 与 canvas 取色一并处理。 */
+  width: clamp(260px, 17vw, 340px);
   background: #fff;
   border-right: 1px solid #e8e8e8;
   display: flex;

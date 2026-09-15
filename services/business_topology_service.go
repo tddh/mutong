@@ -3,7 +3,6 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"gitee.com/tddh/mutong/interfaces"
 )
@@ -46,14 +45,15 @@ type BusinessTopologyGraph struct {
 
 func (s *BusinessTopologyService) GetApps(businessUnit, team, namespace string) ([]BusinessAppNode, error) {
 	conditions := []string{}
+	sanitizer := NewNGQLSanitizer()
 	if businessUnit != "" {
-		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.business_unit = %s", strconv.Quote(businessUnit)))
+		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.business_unit = %s", sanitizer.QuoteString(businessUnit)))
 	}
 	if team != "" {
-		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.team = %s", strconv.Quote(team)))
+		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.team = %s", sanitizer.QuoteString(team)))
 	}
 	if namespace != "" {
-		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.namespace = %s", strconv.Quote(namespace)))
+		conditions = append(conditions, fmt.Sprintf("v.BusinessApp.namespace = %s", sanitizer.QuoteString(namespace)))
 	}
 
 	whereClause := ""
@@ -255,13 +255,14 @@ func controllerRank(kind string) int {
 // uid 即 BusinessApp 的 VID（bizapp-<cluster>-<ns>-<appName>）。
 func (s *BusinessTopologyService) GetAppDetail(uid string) (BusinessAppDetail, error) {
 	detail := BusinessAppDetail{UID: uid, Provenance: "trace"}
+	sanitizer := NewNGQLSanitizer()
 	if uid == "" {
 		return detail, fmt.Errorf("empty business app uid")
 	}
 
 	// 1. 读顶点自身属性（owner_name/owner_kind 可能为 NULL，getStrVal 会安全降级为 ""）
 	propQuery := fmt.Sprintf(`FETCH PROP ON BusinessApp %s YIELD BusinessApp.app_name AS app_name, BusinessApp.namespace AS namespace, BusinessApp.criticality AS criticality, BusinessApp.environment AS environment, BusinessApp.team AS team, BusinessApp.business_unit AS business_unit, BusinessApp.owner_name AS owner_name, BusinessApp.owner_kind AS owner_kind`,
-		strconv.Quote(uid))
+		sanitizer.QuoteString(uid))
 	if rs, err := s.graphDB.ExecuteAndCheck(propQuery); err == nil && rs != nil && rs.GetRowSize() > 0 {
 		if row, e := rs.GetRowValuesByIndex(0); e == nil {
 			detail.AppName, _ = getStrVal(row, "app_name")
@@ -277,7 +278,7 @@ func (s *BusinessTopologyService) GetAppDetail(uid string) (BusinessAppDetail, e
 
 	// 2. BelongsToApp 反查成员资源（权威“创建来源”）
 	memberQuery := fmt.Sprintf(`MATCH (r:K8sResource)-[:BelongsToApp]->(v:BusinessApp) WHERE id(v) == %s RETURN id(r) AS uid, r.K8sResource.kind AS kind, r.K8sResource.name AS name, r.K8sResource.name_space AS ns, r.K8sResource.is_deleted AS del`,
-		strconv.Quote(uid))
+		sanitizer.QuoteString(uid))
 	rs, err := s.graphDB.ExecuteAndCheck(memberQuery)
 	if err != nil {
 		return detail, fmt.Errorf("query BelongsToApp members failed: %w", err)
@@ -338,6 +339,7 @@ func (s *BusinessTopologyService) GetAppDetail(uid string) (BusinessAppDetail, e
 func (s *BusinessTopologyService) EnrichAlertByResourceUID(resourceUID string) interfaces.BusinessAppContext {
 	// 1. 先从 Nebula 读该资源的 name + namespace + labels
 	appName, namespace := s.getResourceAppLabels(resourceUID)
+	sanitizer := NewNGQLSanitizer()
 	if appName != "" {
 		app := s.matchBusinessAppByName(appName, namespace)
 		if app.UID != "" {
@@ -356,7 +358,7 @@ func (s *BusinessTopologyService) EnrichAlertByResourceUID(resourceUID string) i
 		query := fmt.Sprintf(`
 			MATCH (r:K8sResource{uid: %s,is_deleted:false})-[:OwnedBy*%d..%d]->(o:K8sResource{is_deleted:false})-[:BelongsToApp]->(a:BusinessApp)
 			RETURN a.BusinessApp.uid as uid, a.BusinessApp.app_name as app_name, a.BusinessApp.namespace as namespace, a.BusinessApp.criticality as criticality, a.BusinessApp.environment as environment, a.BusinessApp.team as team, a.BusinessApp.business_unit as business_unit LIMIT 1`,
-			strconv.Quote(resourceUID), hops, hops)
+			sanitizer.QuoteString(resourceUID), hops, hops)
 		app = s.queryBusinessAppByRawSQL(query)
 		if app.UID != "" {
 			return app
@@ -366,10 +368,11 @@ func (s *BusinessTopologyService) EnrichAlertByResourceUID(resourceUID string) i
 }
 
 func (s *BusinessTopologyService) getResourceAppLabels(resourceUID string) (appName, namespace string) {
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf(`
 		MATCH (r:K8sResource{uid: %s,is_deleted:false})
 		RETURN r.K8sResource.name as name, r.K8sResource.name_namespace as ns, r.K8sResource.labels as labels LIMIT 1`,
-		strconv.Quote(resourceUID))
+		sanitizer.QuoteString(resourceUID))
 
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet == nil || resultSet.GetRowSize() == 0 {
@@ -389,10 +392,11 @@ func (s *BusinessTopologyService) getResourceAppLabels(resourceUID string) (appN
 }
 
 func (s *BusinessTopologyService) matchBusinessAppByName(appName, namespace string) interfaces.BusinessAppContext {
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf(`
 		MATCH (a:BusinessApp) WHERE a.BusinessApp.app_name == %s AND a.BusinessApp.namespace == %s
 		RETURN a.BusinessApp.uid as uid, a.BusinessApp.app_name as app_name, a.BusinessApp.namespace as namespace, a.BusinessApp.criticality as criticality, a.BusinessApp.environment as environment, a.BusinessApp.team as team, a.BusinessApp.business_unit as business_unit LIMIT 1`,
-		strconv.Quote(appName), strconv.Quote(namespace))
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace))
 	return s.queryBusinessAppByRawSQL(query)
 }
 
@@ -417,17 +421,18 @@ func extractBusinessAppName(labelsStr string) string {
 }
 
 func (s *BusinessTopologyService) queryBusinessApp(resourceUID string, hops int) interfaces.BusinessAppContext {
+	sanitizer := NewNGQLSanitizer()
 	if hops == 0 {
 		query := fmt.Sprintf(`
 			MATCH (r:K8sResource{uid: %s,is_deleted:false})-[:BelongsToApp]->(a:BusinessApp)
 			RETURN a.BusinessApp.uid as uid, a.BusinessApp.app_name as app_name, a.BusinessApp.namespace as namespace, a.BusinessApp.criticality as criticality, a.BusinessApp.environment as environment, a.BusinessApp.team as team, a.BusinessApp.business_unit as business_unit LIMIT 1`,
-			strconv.Quote(resourceUID))
+			sanitizer.QuoteString(resourceUID))
 		return s.queryBusinessAppByRawSQL(query)
 	}
 	query := fmt.Sprintf(`
 		MATCH (r:K8sResource{uid: %s,is_deleted:false})-[:OwnedBy*%d..%d]->(o:K8sResource{is_deleted:false})-[:BelongsToApp]->(a:BusinessApp)
 		RETURN a.BusinessApp.uid as uid, a.BusinessApp.app_name as app_name, a.BusinessApp.namespace as namespace, a.BusinessApp.criticality as criticality, a.BusinessApp.environment as environment, a.BusinessApp.team as team, a.BusinessApp.business_unit as business_unit LIMIT 1`,
-		strconv.Quote(resourceUID), hops, hops)
+		sanitizer.QuoteString(resourceUID), hops, hops)
 	return s.queryBusinessAppByRawSQL(query)
 }
 

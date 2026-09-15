@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +12,7 @@ import (
 
 	"gitee.com/tddh/mutong/config"
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"github.com/allegro/bigcache/v3"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
 	v1 "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -522,6 +522,8 @@ func (s *TraceTopologySyncer) resolvePeerFromAddress(rawPeer string) (appName, n
 }
 
 func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace string) (string, bool) {
+
+	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
 	cacheKey := "bizapp:" + namespace + ":" + appName
 	if cached, err := s.relationCache.Get(cacheKey); err == nil {
 		s.logger.Debug("BIZAPP_LOOKUP Cache hit",
@@ -534,7 +536,7 @@ func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace strin
 	if namespace != "" {
 		// Non-empty namespace: exact match (app_name + namespace)
 		query := fmt.Sprintf(`MATCH (v:BusinessApp) WHERE v.BusinessApp.app_name == %s AND v.BusinessApp.namespace == %s RETURN v.BusinessApp.uid as uid LIMIT 1`,
-			strconv.Quote(appName), strconv.Quote(namespace))
+			ngqlSanitizer.QuoteString(appName), ngqlSanitizer.QuoteString(namespace))
 		s.logger.Debug("BIZAPP_LOOKUP Querying with namespace",
 			zap.String("app_name", appName),
 			zap.String("namespace", namespace))
@@ -563,7 +565,7 @@ func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace strin
 	} else {
 		// Empty namespace: require exactly one match, otherwise fail.
 		query := fmt.Sprintf(`MATCH (v:BusinessApp) WHERE v.BusinessApp.app_name == %s RETURN v.BusinessApp.app_name as app_name, v.BusinessApp.namespace as namespace, v.BusinessApp.uid as uid`,
-			strconv.Quote(appName))
+			ngqlSanitizer.QuoteString(appName))
 		s.logger.Debug("BIZAPP_LOOKUP Querying without namespace",
 			zap.String("app_name", appName))
 
@@ -608,14 +610,14 @@ func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace strin
 	uid := s.buildTraceBusinessAppUID(appName, namespace)
 	insertQuery := fmt.Sprintf(
 		`INSERT VERTEX BusinessApp(uid, app_name, namespace, criticality, environment, team, business_unit) VALUES %s:(%s, %s, %s, %s, %s, %s, %s);`,
-		strconv.Quote(uid),
-		strconv.Quote(uid),
-		strconv.Quote(appName),
-		strconv.Quote(namespace),
-		strconv.Quote("medium"),
-		strconv.Quote(""),
-		strconv.Quote(""),
-		strconv.Quote(""),
+		ngqlSanitizer.QuoteString(uid),
+		ngqlSanitizer.QuoteString(uid),
+		ngqlSanitizer.QuoteString(appName),
+		ngqlSanitizer.QuoteString(namespace),
+		ngqlSanitizer.QuoteString("medium"),
+		ngqlSanitizer.QuoteString(""),
+		ngqlSanitizer.QuoteString(""),
+		ngqlSanitizer.QuoteString(""),
 	)
 
 	if _, err := s.graphDB.ExecuteAndCheck(insertQuery); err != nil {
@@ -682,6 +684,8 @@ func (s *TraceTopologySyncer) flushLoop() {
 }
 
 func (s *TraceTopologySyncer) flushBuffer() {
+
+	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
 	s.bufferMu.Lock()
 	if len(s.edgeBuffer) == 0 {
 		s.bufferMu.Unlock()
@@ -706,8 +710,8 @@ func (s *TraceTopologySyncer) flushBuffer() {
 		for _, edge := range chunk {
 			values = append(values, fmt.Sprintf(
 				"%s -> %s:()",
-				strconv.Quote(edge.from),
-				strconv.Quote(edge.to),
+				ngqlSanitizer.QuoteString(edge.from),
+				ngqlSanitizer.QuoteString(edge.to),
 			))
 		}
 

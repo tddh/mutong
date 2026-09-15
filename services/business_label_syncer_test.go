@@ -181,7 +181,7 @@ func TestSyncApp_LabelTakesPriorityOverNormalization(t *testing.T) {
 
 	found := false
 	for _, call := range calls {
-		if strHas(call, `"my-redis"`) && strHas(call, `bizapp-test-cluster-default-my-redis`) {
+		if strHas(call, `'my-redis'`) && strHas(call, `bizapp-test-cluster-default-my-redis`) {
 			found = true
 			break
 		}
@@ -245,7 +245,7 @@ func TestSyncApp_ControllerWritesOwner(t *testing.T) {
 	if strHas(vertexCall, "IF NOT EXISTS") {
 		t.Errorf("controller should use plain INSERT to overwrite owner, got: %s", vertexCall)
 	}
-	if !strHas(vertexCall, `"Deployment"`) {
+	if !strHas(vertexCall, `'Deployment'`) {
 		t.Errorf("controller insert should carry owner_kind Deployment, got: %s", vertexCall)
 	}
 }

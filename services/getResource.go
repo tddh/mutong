@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+
 	"strconv"
 	"strings"
 	"sync"
 
 	"gitee.com/tddh/mutong/interfaces"
 	"gitee.com/tddh/mutong/models"
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"github.com/valyala/fastjson"
 	nebula "github.com/vesoft-inc/nebula-go/v3/nebula"
 	"go.uber.org/zap"
@@ -112,13 +114,14 @@ func parseJSONString(s string) (string, error) {
 // GetAllResources 获取K8s资源节点列表（分页）
 // 用 GO FROM namespace REVERSELY 替代 LOOKUP，避免 storaged OOM
 func (d *K8sResoureService) countResourcesByKind(kind string) int {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if kind == "" || kind == "all" {
 		return d.countAllResources()
 	}
 	query := fmt.Sprintf(
 		`LOOKUP ON K8sResource WHERE K8sResource.kind == %s AND K8sResource.is_deleted == false
 		 YIELD K8sResource.name AS name | YIELD count(*) AS cnt`,
-		strconv.Quote(kind),
+		sanitizer.QuoteString(kind),
 	)
 	rs, err := d.graphDB.ExecuteAndCheck(query)
 	if err != nil || rs == nil || rs.GetRowSize() == 0 {
@@ -165,6 +168,7 @@ func (d *K8sResoureService) countAllResources() int {
 const clusterScopedNamespace = "__cluster__"
 
 func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (interface{}, error) {
+
 	traceID := reqCtx.TraceID
 
 	page := 1
@@ -353,6 +357,7 @@ func (d *K8sResoureService) GetAllResources(reqCtx interfaces.RequestContext) (i
 
 // SuggestResources 搜索建议：按名称/UID模糊匹配，返回匹配的前10条
 func (d *K8sResoureService) SuggestResources(reqCtx interfaces.RequestContext) (interface{}, error) {
+
 	traceID := reqCtx.TraceID
 	q := strings.ToLower(strings.TrimSpace(reqCtx.Query("q")))
 	if q == "" {
@@ -443,9 +448,10 @@ func (d *K8sResoureService) SuggestResources(reqCtx interfaces.RequestContext) (
 
 // getNamespaceVID 通过 MATCH 点查找 namespace 的 VID
 func (d *K8sResoureService) getNamespaceVID(namespace, traceID string) (string, error) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (v:K8sResource{kind:"Namespace",name:%s,is_deleted:false}) RETURN id(v) AS vid`,
-		strconv.Quote(namespace),
+		sanitizer.QuoteString(namespace),
 	)
 	resultSet, err := d.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -540,6 +546,7 @@ func (d *K8sResoureService) SearchResourceRelationship(reqCtx interfaces.Request
 
 // searchByResourceID 单节点模式：以指定节点为起点 N 跳双向 BFS 遍历
 func (d *K8sResoureService) searchByResourceID(resourceID string, depthStr string, targetKind string, traceID string) (interface{}, error) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	depth, err := strconv.Atoi(depthStr)
 	if err != nil {
 		depth = 1
@@ -578,7 +585,7 @@ func (d *K8sResoureService) searchByResourceID(resourceID string, depthStr strin
 
 			for _, dir := range directions {
 				goQuery := fmt.Sprintf("GO FROM %s OVER %s%s YIELD id($$) AS target, type(edge) AS etype | LIMIT 50",
-					strconv.Quote(srcUID), d.getTraversalEdgeTypes(), dir.suffix)
+					sanitizer.QuoteString(srcUID), d.getTraversalEdgeTypes(), dir.suffix)
 
 				resultSet, err := d.graphDB.ExecuteAndCheck(goQuery)
 				if err != nil {
@@ -741,6 +748,7 @@ func (d *K8sResoureService) searchByResourceID(resourceID string, depthStr strin
 
 // 将字符串切片转换为JSON数组格式，用于Nebula查询中的IN子句
 func listToJSON(list []string) string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if len(list) == 0 {
 		return "[]"
 	}
@@ -748,7 +756,7 @@ func listToJSON(list []string) string {
 	var result strings.Builder
 	result.WriteString("[")
 	for i, item := range list {
-		result.WriteString(strconv.Quote(item))
+		result.WriteString(sanitizer.QuoteString(item))
 		if i < len(list)-1 {
 			result.WriteString(", ")
 		}
@@ -825,12 +833,13 @@ func (d *K8sResoureService) invalidateMetadataCache() {
 
 // GetResourceDefine 按需获取单个资源的完整定义
 func (d *K8sResoureService) GetResourceDefine(reqCtx interfaces.RequestContext) (interface{}, error) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	traceID := reqCtx.TraceID
 	resourceID := reqCtx.Query("resourceId")
 	if resourceID == "" {
 		return nil, errors.New("resourceId is required")
 	}
-	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.resource_define AS resource_define`, strconv.Quote(resourceID))
+	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.resource_define AS resource_define`, sanitizer.QuoteString(resourceID))
 	d.logger.Debug("GetResourceDefine query", zap.String("X-Trace-ID", traceID), zap.String("query", query))
 	resultSet, err := d.graphDB.ExecuteAndCheck(query)
 	if err != nil {

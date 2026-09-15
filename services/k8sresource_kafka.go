@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -253,6 +252,7 @@ func (d *K8sResoureService) processKafkaMessageFromInterface(msg *interfaces.Mes
 }
 
 func (d *K8sResoureService) processKafkaMessage(unstructuredObj *unstructured.Unstructured, eventType string, group string, cluster string) bool {
+	sanitizer := NewNGQLSanitizer()
 	d.logger.Debug("Processing Kafka message",
 		zap.String("eventType", eventType),
 		zap.String("name", unstructuredObj.GetName()),
@@ -292,7 +292,7 @@ func (d *K8sResoureService) processKafkaMessage(unstructuredObj *unstructured.Un
 				zap.String("uid", resource.Uid), zap.String("name", resource.Name))
 		}
 
-		checkQuery := fmt.Sprintf(`GO FROM %s OVER * LIMIT 1`, strconv.Quote(string(unstructuredObj.GetUID())))
+		checkQuery := fmt.Sprintf(`GO FROM %s OVER * LIMIT 1`, sanitizer.QuoteString(string(unstructuredObj.GetUID())))
 		checkResult, err := d.graphDB.Execute(checkQuery)
 		if err != nil || checkResult == nil || len(checkResult.GetRows()) == 0 {
 			d.logger.Debug("CleanupAllOutgoingEdgesExcept - Skipped (no outgoing edges)",

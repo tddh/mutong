@@ -2,7 +2,7 @@ package diagnosis
 
 import (
 	"fmt"
-	"strconv"
+
 	"strings"
 
 	nebula "github.com/vesoft-inc/nebula-go/v3"
@@ -11,6 +11,7 @@ import (
 	"gitee.com/tddh/mutong/interfaces"
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 )
 
 type TopologyQuerier struct {
@@ -98,10 +99,11 @@ func isCoreKind(kind string) bool {
 }
 
 func (q *TopologyQuerier) parseEdges(snapshot *diagnosis.TopologySnapshot) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	// Build UID list for edge query
 	uids := make([]string, 0, len(snapshot.Nodes))
 	for _, n := range snapshot.Nodes {
-		uids = append(uids, strconv.Quote(n.UID))
+		uids = append(uids, sanitizer.QuoteString(n.UID))
 	}
 	uidList := fmt.Sprintf("[%s]", strings.Join(uids, ","))
 
@@ -157,6 +159,7 @@ func (q *TopologyQuerier) parseEdges(snapshot *diagnosis.TopologySnapshot) {
 }
 
 func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diagnosis.BusinessAppCalls {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	result := &diagnosis.BusinessAppCalls{
 		AppName:   appName,
 		Namespace: namespace,
@@ -169,7 +172,7 @@ func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diag
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(target:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN caller.app_name AS name, caller.team AS team, caller.criticality AS crit
 		 LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace),
 	)
 
 	if rs, err := q.graphDB.ExecuteAndCheck(upstreamQ); err == nil && rs != nil {
@@ -200,7 +203,7 @@ func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diag
 		`MATCH (target:BusinessApp{app_name:%s,namespace:%s})-[:CallsApp]->(callee:BusinessApp)
 		 RETURN callee.app_name AS name, callee.team AS team, callee.criticality AS crit
 		 LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace),
 	)
 
 	if rs, err := q.graphDB.ExecuteAndCheck(downstreamQ); err == nil && rs != nil {
@@ -231,6 +234,7 @@ func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diag
 }
 
 func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagnosis.WorkloadContext {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if podName == "" || namespace == "" {
 		return nil
 	}
@@ -240,7 +244,7 @@ func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagn
 		 WHERE owner.K8sResource.kind IN ["Deployment","StatefulSet","DaemonSet","CronJob"]
 		 RETURN owner.K8sResource.name AS name, owner.K8sResource.kind AS kind, owner.K8sResource.name_space AS ns
 		 LIMIT 1`,
-		strconv.Quote(podName), strconv.Quote(namespace),
+		sanitizer.QuoteString(podName), sanitizer.QuoteString(namespace),
 	)
 
 	rs, err := q.graphDB.ExecuteAndCheck(ownerQ)
@@ -260,7 +264,7 @@ func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagn
 		`MATCH (sibling:K8sResource{kind:"Pod",name_space:%s})-[:OwnedBy*1..2]->(owner:K8sResource{name:%s,kind:%s})
 		 RETURN sibling.K8sResource.name AS name, sibling.K8sResource.is_deleted AS deleted
 		 ORDER BY sibling.K8sResource.name`,
-		strconv.Quote(cns), strconv.Quote(cname), strconv.Quote(ckind),
+		sanitizer.QuoteString(cns), sanitizer.QuoteString(cname), sanitizer.QuoteString(ckind),
 	)
 
 	srs, err := q.graphDB.ExecuteAndCheck(siblingQ)
@@ -300,6 +304,7 @@ func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagn
 }
 
 func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namespace string) []diagnosis.ResourceRef {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	var resources []diagnosis.ResourceRef
 	seen := make(map[string]bool)
 
@@ -309,7 +314,7 @@ func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namesp
 			 WHERE other.K8sResource.uid <> %s
 			 RETURN other.K8sResource.uid, other.K8sResource.kind,
 					other.K8sResource.name, other.K8sResource.name_space`,
-			strconv.Quote(resourceUID), strconv.Quote(resourceUID),
+			sanitizer.QuoteString(resourceUID), sanitizer.QuoteString(resourceUID),
 		)
 
 		resultSet, err := q.graphDB.ExecuteAndCheck(query)
@@ -340,7 +345,7 @@ func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namesp
 			 WHERE other.K8sResource.uid <> %s
 			 RETURN other.K8sResource.uid, other.K8sResource.kind,
 					other.K8sResource.name, other.K8sResource.name_space`,
-			strconv.Quote(resourceUID), strconv.Quote(namespace), strconv.Quote(resourceUID),
+			sanitizer.QuoteString(resourceUID), sanitizer.QuoteString(namespace), sanitizer.QuoteString(resourceUID),
 		)
 
 		resultSet, err := q.graphDB.ExecuteAndCheck(query)
@@ -369,10 +374,11 @@ func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namesp
 }
 
 func (q *TopologyQuerier) FindAffectedServices(resourceUID string) []string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s})<-[:SvcToPods]-(svc:K8sResource)
 		 RETURN DISTINCT svc.K8sResource.name`,
-		strconv.Quote(resourceUID),
+		sanitizer.QuoteString(resourceUID),
 	)
 
 	resultSet, err := q.graphDB.ExecuteAndCheck(query)
@@ -393,10 +399,11 @@ func (q *TopologyQuerier) FindAffectedServices(resourceUID string) []string {
 }
 
 func (q *TopologyQuerier) FindAffectedIngresses(resourceUID string) []string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s})-[*1..2]-(ingress:K8sResource{kind:"Ingress"})
 		 RETURN DISTINCT ingress.K8sResource.name`,
-		strconv.Quote(resourceUID),
+		sanitizer.QuoteString(resourceUID),
 	)
 
 	resultSet, err := q.graphDB.ExecuteAndCheck(query)
@@ -426,12 +433,13 @@ func getStr(row *nebula.Record, idx int) string {
 }
 
 func (q *TopologyQuerier) queryResourceNode(resourceUID string) (diagnosis.TopologyNode, error) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s,is_deleted:false})
 		 RETURN n.K8sResource.uid, n.K8sResource.kind,
 		 		n.K8sResource.name, n.K8sResource.name_space,
 		 		n.K8sResource.is_deleted LIMIT 1`,
-		strconv.Quote(resourceUID),
+		sanitizer.QuoteString(resourceUID),
 	)
 
 	resultSet, err := q.graphDB.ExecuteAndCheck(query)
@@ -462,13 +470,14 @@ func (q *TopologyQuerier) queryResourceNode(resourceUID string) (diagnosis.Topol
 }
 
 func (q *TopologyQuerier) queryAdjacentResources(resourceUIDs []string, limit int) []diagnosis.ResourceRef {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if len(resourceUIDs) == 0 {
 		return nil
 	}
 
 	quoted := make([]string, 0, len(resourceUIDs))
 	for _, uid := range resourceUIDs {
-		quoted = append(quoted, strconv.Quote(uid))
+		quoted = append(quoted, sanitizer.QuoteString(uid))
 	}
 
 	query := fmt.Sprintf(
@@ -511,24 +520,25 @@ func (q *TopologyQuerier) queryAdjacentResources(resourceUIDs []string, limit in
 
 // ResolveUID 通过 kind + name + namespace 解析资源的 UID
 func (q *TopologyQuerier) ResolveUID(kind, name, namespace string) string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	var query string
 	if kind == "Node" {
 		query = fmt.Sprintf(
 			`MATCH (n:K8sResource{kind:'Node',name:%s})
 			 RETURN n.K8sResource.uid LIMIT 1`,
-			strconv.Quote(name),
+			sanitizer.QuoteString(name),
 		)
 	} else if namespace != "" {
 		query = fmt.Sprintf(
 			`MATCH (n:K8sResource{kind:%s,name:%s,name_space:%s})
 			 RETURN n.K8sResource.uid LIMIT 1`,
-			strconv.Quote(kind), strconv.Quote(name), strconv.Quote(namespace),
+			sanitizer.QuoteString(kind), sanitizer.QuoteString(name), sanitizer.QuoteString(namespace),
 		)
 	} else {
 		query = fmt.Sprintf(
 			`MATCH (n:K8sResource{kind:%s,name:%s})
 			 RETURN n.K8sResource.uid LIMIT 1`,
-			strconv.Quote(kind), strconv.Quote(name),
+			sanitizer.QuoteString(kind), sanitizer.QuoteString(name),
 		)
 	}
 
@@ -727,11 +737,12 @@ func (q *TopologyQuerier) BuildBusinessImpactContext(uid string, alertBizCtx ale
 
 // queryUpstreamBusinessApps 查询指定 BusinessApp 的上游调用方（谁调用它）
 func (q *TopologyQuerier) queryUpstreamBusinessApps(appName, namespace string) []downstreamAppRef {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	upstreamQ := fmt.Sprintf(
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(target:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN caller.BusinessApp.app_name AS name, caller.BusinessApp.team AS team, caller.BusinessApp.criticality AS crit
 		 LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace),
 	)
 
 	var result []downstreamAppRef
@@ -762,11 +773,12 @@ func (q *TopologyQuerier) queryUpstreamBusinessApps(appName, namespace string) [
 
 // queryDownstreamBusinessApps 查询指定 BusinessApp 的 1 跳下游
 func (q *TopologyQuerier) queryDownstreamBusinessApps(appName, namespace string) []downstreamAppRef {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	downstreamQ := fmt.Sprintf(
 		`MATCH (target:BusinessApp{app_name:%s,namespace:%s})-[:CallsApp]->(callee:BusinessApp)
 		 RETURN callee.BusinessApp.app_name AS name, callee.BusinessApp.team AS team, callee.BusinessApp.criticality AS crit
 		 LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace),
 	)
 
 	var result []downstreamAppRef
@@ -797,6 +809,7 @@ func (q *TopologyQuerier) queryDownstreamBusinessApps(appName, namespace string)
 
 // resolveDirectBusinessApps 从资源 UID 和告警富化的业务上下文中确定直接影响的业务应用
 func (q *TopologyQuerier) resolveDirectBusinessApps(uid string, alertBizCtx alert_models.BusinessContext) []BusinessAppMeta {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	var apps []BusinessAppMeta
 
 	// 优先使用告警富化阶段注入的业务上下文
@@ -817,7 +830,7 @@ func (q *TopologyQuerier) resolveDirectBusinessApps(uid string, alertBizCtx aler
 
 	query := fmt.Sprintf(
 		`MATCH (r:K8sResource{uid:%s})-[:BelongsToApp]->(biz:BusinessApp) RETURN biz.app_name AS name, biz.namespace AS ns, biz.criticality AS crit, biz.team AS team, biz.business_unit AS unit LIMIT 5`,
-		strconv.Quote(uid),
+		sanitizer.QuoteString(uid),
 	)
 
 	rs, err := q.graphDB.ExecuteAndCheck(query)
@@ -899,6 +912,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 	maxPerPath int,
 	flags ExpandPathFlags,
 ) []TopologyExpandResult {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if maxPerPath <= 0 {
 		maxPerPath = 20
 	}
@@ -920,7 +934,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			 WHERE pod.K8sResource.uid <> %s
 			 RETURN pod.K8sResource.uid AS uid, pod.K8sResource.kind AS kind, pod.K8sResource.name AS name, pod.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(nodeName), strconv.Quote(resourceUID), maxPerPath,
+			sanitizer.QuoteString(nodeName), sanitizer.QuoteString(resourceUID), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -941,7 +955,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			`MATCH (owner:K8sResource{kind:%s,name:%s,name_space:%s,is_deleted:false})<-[:OwnedBy*1..2]-(sibling:K8sResource{kind:'Pod',is_deleted:false})
 			 RETURN sibling.K8sResource.uid AS uid, sibling.K8sResource.kind AS kind, sibling.K8sResource.name AS name, sibling.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(ownerKind), strconv.Quote(ownerName), strconv.Quote(namespace), maxPerPath,
+			sanitizer.QuoteString(ownerKind), sanitizer.QuoteString(ownerName), sanitizer.QuoteString(namespace), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -965,7 +979,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			 WHERE peer.K8sResource.uid <> %s
 			 RETURN DISTINCT peer.K8sResource.uid AS uid, peer.K8sResource.kind AS kind, peer.K8sResource.name AS name, peer.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(resourceUID), strconv.Quote(resourceUID), maxPerPath,
+			sanitizer.QuoteString(resourceUID), sanitizer.QuoteString(resourceUID), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -987,7 +1001,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			 WHERE r.K8sResource.uid <> %s
 			 RETURN r.K8sResource.uid AS uid, r.K8sResource.kind AS kind, r.K8sResource.name AS name, r.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(businessAppName), strconv.Quote(businessAppNS), strconv.Quote(resourceUID), maxPerPath,
+			sanitizer.QuoteString(businessAppName), sanitizer.QuoteString(businessAppNS), sanitizer.QuoteString(resourceUID), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -1009,7 +1023,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			 MATCH (caller)<-[:BelongsToApp]-(r:K8sResource{is_deleted:false})
 			 RETURN r.K8sResource.uid AS uid, r.K8sResource.kind AS kind, r.K8sResource.name AS name, r.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(businessAppName), strconv.Quote(businessAppNS), maxPerPath,
+			sanitizer.QuoteString(businessAppName), sanitizer.QuoteString(businessAppNS), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -1031,7 +1045,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 			 MATCH (callee)<-[:BelongsToApp]-(r:K8sResource{is_deleted:false})
 			 RETURN r.K8sResource.uid AS uid, r.K8sResource.kind AS kind, r.K8sResource.name AS name, r.K8sResource.name_space AS ns
 			 LIMIT %d`,
-			strconv.Quote(businessAppName), strconv.Quote(businessAppNS), maxPerPath,
+			sanitizer.QuoteString(businessAppName), sanitizer.QuoteString(businessAppNS), maxPerPath,
 		)
 		if rs, err := q.graphDB.ExecuteAndCheck(query); err == nil && rs != nil {
 			for i := 0; i < rs.GetRowSize(); i++ {
@@ -1082,12 +1096,13 @@ func isServiceLevel(a *alert_models.ProcessedAlert) bool {
 
 // resolveDirectBusinessAppsViaOwner 沿 owner 链查找业务应用归属
 func (q *TopologyQuerier) resolveDirectBusinessAppsViaOwner(uid string) []BusinessAppMeta {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if uid == "" {
 		return nil
 	}
 	query := fmt.Sprintf(
 		`MATCH p=(r:K8sResource{uid:%s})-[:OwnedBy*0..5]->(owner:K8sResource)-[:BelongsToApp]->(biz:BusinessApp) RETURN biz.app_name AS name, biz.namespace AS ns, biz.criticality AS crit, biz.team AS team, biz.business_unit AS unit LIMIT 3`,
-		strconv.Quote(uid),
+		sanitizer.QuoteString(uid),
 	)
 	rs, err := q.graphDB.ExecuteAndCheck(query)
 	if err != nil || rs == nil {

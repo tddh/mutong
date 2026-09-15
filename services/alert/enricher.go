@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
+
 	"strings"
 	"time"
 
@@ -16,6 +16,8 @@ import (
 	alert_interfaces "gitee.com/tddh/mutong/interfaces/alert"
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
+
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 )
 
 // applyBusinessContext projects provider context into explicit BusinessContext + legacy EnrichTags.
@@ -129,6 +131,7 @@ func (e *AlertEnricher) Enrich(ctx context.Context, a *alert_models.Alert) (*ale
 }
 
 func (e *AlertEnricher) enrichByUID(ctx context.Context, enriched *alert_models.EnrichedAlert, k8sLabels alert_models.AlertLabels) error {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(`
 		MATCH (v:K8sResource{uid: %s})
 		OPTIONAL MATCH (v)-[:RunsOn]->(node:K8sResource{kind:'Node'})
@@ -140,7 +143,7 @@ func (e *AlertEnricher) enrichByUID(ctx context.Context, enriched *alert_models.
 			node.K8sResource.name as node_name,
 			owner.K8sResource.kind as owner_kind,
 			owner.K8sResource.name as owner_name
-	`, strconv.Quote(k8sLabels.ResourceUID))
+	`, sanitizer.QuoteString(k8sLabels.ResourceUID))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -201,6 +204,7 @@ func (e *AlertEnricher) enrichByUID(ctx context.Context, enriched *alert_models.
 }
 
 func (e *AlertEnricher) enrichFromPod(ctx context.Context, enriched *alert_models.EnrichedAlert, k8sLabels alert_models.AlertLabels) error {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	cacheKey := k8sLabels.Namespace + "/Pod/" + k8sLabels.Pod
 	if e.topologyCache != nil {
 		if cached, err := e.topologyCache.Get(cacheKey); err == nil {
@@ -223,7 +227,7 @@ func (e *AlertEnricher) enrichFromPod(ctx context.Context, enriched *alert_model
 			RETURN p.K8sResource.uid as uid, n.K8sResource.name as nodeName, d.K8sResource.kind as ownerKind, d.K8sResource.name as ownerName
 			ORDER BY uid DESC
 			LIMIT 1
-		`, strconv.Quote(k8sLabels.Pod), strconv.Quote(k8sLabels.Namespace))
+		`, sanitizer.QuoteString(k8sLabels.Pod), sanitizer.QuoteString(k8sLabels.Namespace))
 
 		resultSet, err := e.graphDB.ExecuteAndCheck(query)
 		if err != nil {
@@ -292,6 +296,7 @@ func (e *AlertEnricher) enrichFromPod(ctx context.Context, enriched *alert_model
 }
 
 func (e *AlertEnricher) enrichFromNode(ctx context.Context, enriched *alert_models.EnrichedAlert, k8sLabels alert_models.AlertLabels) error {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(`
 		MATCH (n:K8sResource{kind:'Node',name:%s,is_deleted:false})
 		OPTIONAL MATCH (p:K8sResource{kind:'Pod'})-[:RunsOn]->(n)
@@ -299,7 +304,7 @@ func (e *AlertEnricher) enrichFromNode(ctx context.Context, enriched *alert_mode
 		RETURN n.K8sResource.uid as uid, count(p) as podCount,
 			b.app_name as appName, b.criticality as criticality, b.team as team
 		LIMIT 1
-	`, strconv.Quote(k8sLabels.Node))
+	`, sanitizer.QuoteString(k8sLabels.Node))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -344,6 +349,7 @@ func (e *AlertEnricher) enrichFromNode(ctx context.Context, enriched *alert_mode
 }
 
 func (e *AlertEnricher) buildBusinessImpactFromNode(ctx context.Context, nodeName string) alert_models.BusinessImpact {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	impact := alert_models.BusinessImpact{}
 
 	query := fmt.Sprintf(`
@@ -351,7 +357,7 @@ func (e *AlertEnricher) buildBusinessImpactFromNode(ctx context.Context, nodeNam
 		MATCH (p:K8sResource{kind:'Pod'})-[:RunsOn]->(n)
 		MATCH (p)-[:BelongsToApp]->(b:BusinessApp)
 		RETURN distinct b.app_name as appName, b.criticality as criticality, b.team as team
-	`, strconv.Quote(nodeName))
+	`, sanitizer.QuoteString(nodeName))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -427,13 +433,14 @@ func (e *AlertEnricher) buildBusinessImpactFromBusinessContext(bc alert_models.B
 }
 
 func (e *AlertEnricher) enrichFromService(ctx context.Context, enriched *alert_models.EnrichedAlert, k8sLabels alert_models.AlertLabels) error {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	query := fmt.Sprintf(`
 		MATCH (s:K8sResource{kind:'Service',name:%s,name_space:%s,is_deleted:false})
 		OPTIONAL MATCH (s)-[:SvcToPods]->(p:K8sResource{kind:'Pod'})
 		RETURN s.K8sResource.uid as uid, count(p) as podCount
 		ORDER BY uid DESC
 		LIMIT 1
-	`, strconv.Quote(k8sLabels.Service), strconv.Quote(k8sLabels.Namespace))
+	`, sanitizer.QuoteString(k8sLabels.Service), sanitizer.QuoteString(k8sLabels.Namespace))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -554,12 +561,13 @@ func (e *AlertEnricher) addEnrichTags(enriched *alert_models.EnrichedAlert, k8sL
 }
 
 func (e *AlertEnricher) FindRelatedAlerts(ctx context.Context, resourceType, resourceName string) ([]string, error) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if resourceType == "Node" {
 		query := fmt.Sprintf(`
 			MATCH (n:K8sResource{kind:'Node',name:%s,is_deleted:false})
 			MATCH (p:K8sResource{kind:'Pod'})-[:RunsOn]->(n)
 			RETURN p.name as podName
-		`, strconv.Quote(resourceName))
+		`, sanitizer.QuoteString(resourceName))
 
 		resultSet, err := e.graphDB.ExecuteAndCheck(query)
 		if err != nil {
@@ -611,6 +619,7 @@ func ParseTopologyPath(path []string) []struct {
 }
 
 func (e *AlertEnricher) enrichBizCalls(enriched *alert_models.EnrichedAlert) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if enriched.BusinessContext.AppName == "" {
 		return
 	}
@@ -625,7 +634,7 @@ func (e *AlertEnricher) enrichBizCalls(enriched *alert_models.EnrichedAlert) {
 	upQ := fmt.Sprintf(
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(target:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN caller.BusinessApp.app_name AS name, caller.BusinessApp.team AS team, caller.BusinessApp.criticality AS crit LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(ns),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(ns),
 	)
 	if rs, err := e.graphDB.ExecuteAndCheck(upQ); err == nil && rs != nil {
 		for i := 0; i < rs.GetRowSize(); i++ {
@@ -644,7 +653,7 @@ func (e *AlertEnricher) enrichBizCalls(enriched *alert_models.EnrichedAlert) {
 	downQ := fmt.Sprintf(
 		`MATCH (target:BusinessApp{app_name:%s,namespace:%s})-[:CallsApp]->(callee:BusinessApp)
 		 RETURN callee.BusinessApp.app_name AS name, callee.BusinessApp.team AS team, callee.BusinessApp.criticality AS crit LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(ns),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(ns),
 	)
 	if rs, err := e.graphDB.ExecuteAndCheck(downQ); err == nil && rs != nil {
 		for i := 0; i < rs.GetRowSize(); i++ {
@@ -743,6 +752,7 @@ func (e *AlertEnricher) enrichStakeholders(enriched *alert_models.EnrichedAlert)
 }
 
 func (e *AlertEnricher) queryTeamsOnNode(nodeName string) []string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if nodeName == "" || e.graphDB == nil {
 		return nil
 	}
@@ -750,7 +760,7 @@ func (e *AlertEnricher) queryTeamsOnNode(nodeName string) []string {
 		`MATCH (n:K8sResource{kind:'Node',name:%s,is_deleted:false})<-[:RunsOn]-(p:K8sResource{kind:'Pod',is_deleted:false})
 		 MATCH (p)-[:BelongsToApp]->(b:BusinessApp)
 		 RETURN DISTINCT b.BusinessApp.team AS team LIMIT 20`,
-		strconv.Quote(nodeName),
+		sanitizer.QuoteString(nodeName),
 	)
 	rs, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil || rs == nil {
@@ -762,6 +772,7 @@ func (e *AlertEnricher) queryTeamsOnNode(nodeName string) []string {
 		row, _ := rs.GetRowValuesByIndex(i)
 		team := colStr(row, "team")
 		if team != "" && !seen[team] {
+
 			seen[team] = true
 			teams = append(teams, team)
 		}
@@ -770,13 +781,14 @@ func (e *AlertEnricher) queryTeamsOnNode(nodeName string) []string {
 }
 
 func (e *AlertEnricher) queryUpstreamTeams(appName, namespace string) []string {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	if appName == "" || e.graphDB == nil {
 		return nil
 	}
 	query := fmt.Sprintf(
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN DISTINCT caller.BusinessApp.team AS team LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		sanitizer.QuoteString(appName), sanitizer.QuoteString(namespace),
 	)
 	rs, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil || rs == nil {
@@ -825,6 +837,7 @@ func (e *AlertEnricher) EnrichFromExternal(ctx context.Context, enriched *alert_
 
 // enrichByNodeAffinity bridges via physical node: host → K8s Node → Pod → BusinessApp.
 func (e *AlertEnricher) enrichByNodeAffinity(ctx context.Context, enriched *alert_models.EnrichedAlert, source *alert_models.AlertSource) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	nodeName := enriched.Labels["node"]
 	if nodeName == "" {
 		e.logger.Warn("node_affinity strategy requires 'node' label",
@@ -850,7 +863,7 @@ func (e *AlertEnricher) enrichByNodeAffinity(ctx context.Context, enriched *aler
 			b.BusinessApp.environment AS environment,
 			b.BusinessApp.business_unit AS businessUnit
 		LIMIT 10
-	`, strconv.Quote(nodeName))
+	`, sanitizer.QuoteString(nodeName))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet.GetRowSize() == 0 {
@@ -906,6 +919,7 @@ func (e *AlertEnricher) enrichByNodeAffinity(ctx context.Context, enriched *aler
 
 // enrichByServiceGraph bridges via service topology: serviceName → BusinessApp → CallsApp.
 func (e *AlertEnricher) enrichByServiceGraph(ctx context.Context, enriched *alert_models.EnrichedAlert, source *alert_models.AlertSource) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	serviceName := enriched.Labels["serviceName"]
 	if serviceName == "" {
 		serviceName = enriched.Labels["appName"]
@@ -931,7 +945,7 @@ func (e *AlertEnricher) enrichByServiceGraph(ctx context.Context, enriched *aler
 			b.BusinessApp.environment AS environment,
 			b.BusinessApp.business_unit AS businessUnit
 		LIMIT 1
-	`, strconv.Quote(serviceName))
+	`, sanitizer.QuoteString(serviceName))
 
 	resultSet, err := e.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet.GetRowSize() == 0 {
@@ -980,6 +994,7 @@ func (e *AlertEnricher) enrichByServiceGraph(ctx context.Context, enriched *aler
 
 // enrichByDirectBusinessApp matches appName directly to BusinessApp.
 func (e *AlertEnricher) enrichByDirectBusinessApp(ctx context.Context, enriched *alert_models.EnrichedAlert, source *alert_models.AlertSource) {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	appName := enriched.Labels["appName"]
 	if appName == "" {
 		appName = source.BusinessMapping.AppName
@@ -1018,7 +1033,7 @@ func (e *AlertEnricher) enrichByDirectBusinessApp(ctx context.Context, enriched 
 			b.BusinessApp.namespace AS namespace,
 			b.BusinessApp.environment AS environment
 		LIMIT 1
-	`, strconv.Quote(appName))
+	`, sanitizer.QuoteString(appName))
 	if resultSet, err := e.graphDB.ExecuteAndCheck(query); err == nil && resultSet.GetRowSize() > 0 {
 		row, _ := resultSet.GetRowValuesByIndex(0)
 		bc.UID = colStr(row, "uid")

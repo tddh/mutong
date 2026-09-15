@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,8 +20,9 @@ func insertK8sResourceToNebula(resource models.K8sResource) string {
 	labelsJSON, _ := json.Marshal(resource.Labels)
 	resourceDefineJSON, _ := json.Marshal(resource.ResourceDefine)
 
-	escapedLabelsJSON := strconv.Quote(string(labelsJSON))
-	escapedResourceDefineJSON := strconv.Quote(string(resourceDefineJSON))
+	sanitizer := NewNGQLSanitizer()
+	escapedLabelsJSON := sanitizer.QuoteString(string(labelsJSON))
+	escapedResourceDefineJSON := sanitizer.QuoteString(string(resourceDefineJSON))
 
 	insertQuery := fmt.Sprintf(`
         INSERT VERTEX K8sResource(uid, name, api_group, labels, name_space, resource_define, kind, api_version, cluster, is_deleted, deleted_at) 
@@ -60,10 +60,11 @@ func (d *K8sResoureService) executenGQL(query string) ([]*nebula.Row, error) {
 }
 
 func (d *K8sResoureService) insertEdge(edgeType string, fromUID string, toUID string) error {
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf("INSERT EDGE %s () VALUES %s -> %s:();",
 		edgeType,
-		strconv.Quote(fromUID),
-		strconv.Quote(toUID))
+		sanitizer.QuoteString(fromUID),
+		sanitizer.QuoteString(toUID))
 	d.logger.Debug("Inserting edge", zap.String("nGQL", query))
 	_, err := d.graphDB.Execute(query)
 	if err != nil {
@@ -82,10 +83,11 @@ func (d *K8sResoureService) InsertEdgeWithCleanup(edgeType string, fromUID strin
 	}
 
 	// 然后插入新边
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf("INSERT EDGE %s () VALUES %s -> %s:@%d;",
 		edgeType,
-		strconv.Quote(fromUID),
-		strconv.Quote(toUID),
+		sanitizer.QuoteString(fromUID),
+		sanitizer.QuoteString(toUID),
 		rank)
 	d.logger.Debug("InsertEdgeWithCleanup - Inserting edge", zap.String("nGQL", query))
 	_, err = d.graphDB.Execute(query)
@@ -99,12 +101,13 @@ func (d *K8sResoureService) InsertEdgeWithCleanup(edgeType string, fromUID strin
 
 // CleanupOldEdges 清理指定边类型、源节点和目标节点的旧边，只保留最后N个版本
 func (d *K8sResoureService) CleanupOldEdges(edgeType string, fromUID string, toUID string, keepVersions int) error {
+	sanitizer := NewNGQLSanitizer()
 	// 查询该边的所有版本并在数据库层面进行排序（升序）
 	// 使用ORDER BY对rank进行升序排序，避免在应用层再次排序
 	query := fmt.Sprintf(`GO FROM %s OVER %s WHERE dst(edge) == %s YIELD rank(edge) as rank | ORDER BY $-.rank ASC;`,
-		strconv.Quote(fromUID),
+		sanitizer.QuoteString(fromUID),
 		edgeType,
-		strconv.Quote(toUID))
+		sanitizer.QuoteString(toUID))
 
 	d.logger.Debug("CleanupOldEdges - Querying edges", zap.String("nGQL", query))
 	resultSet, err := d.graphDB.Execute(query)
@@ -137,8 +140,8 @@ func (d *K8sResoureService) CleanupOldEdges(edgeType string, fromUID string, toU
 		var deleteEdges []string
 		for _, rank := range ranksToDelete {
 			deleteEdges = append(deleteEdges, fmt.Sprintf(`%s -> %s:@%d`,
-				strconv.Quote(fromUID),
-				strconv.Quote(toUID),
+				sanitizer.QuoteString(fromUID),
+				sanitizer.QuoteString(toUID),
 				rank))
 		}
 
@@ -166,8 +169,9 @@ func (d *K8sResoureService) CleanupOldEdges(edgeType string, fromUID string, toU
 
 // CleanupOutgoingEdgesByType 清理指定节点的指定类型出方向边
 func (d *K8sResoureService) CleanupOutgoingEdgesByType(uid string, edgeType string) {
+	sanitizer := NewNGQLSanitizer()
 	outgoingEdgesQuery := fmt.Sprintf(`GO FROM %s OVER %s YIELD dst(edge) as dst_id;`,
-		strconv.Quote(uid),
+		sanitizer.QuoteString(uid),
 		edgeType)
 
 	d.logger.Debug("CleanupOutgoingEdgesByType - Querying outgoing edges",
@@ -197,8 +201,8 @@ func (d *K8sResoureService) CleanupOutgoingEdgesByType(uid string, edgeType stri
 	for _, row := range rows {
 		dstUID := string(row.Values[0].GetSVal())
 		deleteEdges = append(deleteEdges, fmt.Sprintf(`%s -> %s`,
-			strconv.Quote(uid),
-			strconv.Quote(dstUID)))
+			sanitizer.QuoteString(uid),
+			sanitizer.QuoteString(dstUID)))
 	}
 
 	if len(deleteEdges) > 0 {
@@ -234,8 +238,9 @@ func (d *K8sResoureService) CleanupAllOutgoingEdgesExcept(uid string, excludeTyp
 }
 
 func (d *K8sResoureService) cleanupAllOutgoingEdgesWithExclusions(uid string, excludeTypes []string) {
+	sanitizer := NewNGQLSanitizer()
 	edgesQuery := fmt.Sprintf(`GO FROM %s OVER * YIELD dst(edge) as dst_id, type(edge) as edge_type`,
-		strconv.Quote(uid))
+		sanitizer.QuoteString(uid))
 
 	d.logger.Debug("CleanupAllOutgoingEdges - Querying all outgoing edges",
 		zap.String("node_uid", uid))
@@ -283,8 +288,8 @@ func (d *K8sResoureService) cleanupAllOutgoingEdgesWithExclusions(uid string, ex
 			var deleteEdges []string
 			for _, dstUID := range batch {
 				deleteEdges = append(deleteEdges, fmt.Sprintf("%s -> %s",
-					strconv.Quote(uid),
-					strconv.Quote(dstUID)))
+					sanitizer.QuoteString(uid),
+					sanitizer.QuoteString(dstUID)))
 			}
 
 			batchDeleteQuery := fmt.Sprintf(`DELETE EDGE %s %s;`,
@@ -417,7 +422,8 @@ func (d *K8sResoureService) ForceSyncResources() {
 }
 
 func (d *K8sResoureService) isAlreadyDeleted(uid string) bool {
-	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.is_deleted`, strconv.Quote(uid))
+	sanitizer := NewNGQLSanitizer()
+	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.is_deleted`, sanitizer.QuoteString(uid))
 	resultSet, err := d.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet == nil || resultSet.GetRowSize() == 0 {
 		return false
@@ -460,6 +466,7 @@ func (d *K8sResoureService) StartPeriodicCleanup(interval time.Duration, retenti
 }
 
 func (d *K8sResoureService) cleanupExpiredDeletedVertices(retentionDays int, batchSize int) {
+	sanitizer := NewNGQLSanitizer()
 	d.logger.Debug("Starting cleanup of expired deleted vertices",
 		zap.Int("retentionDays", retentionDays))
 
@@ -488,7 +495,7 @@ func (d *K8sResoureService) cleanupExpiredDeletedVertices(retentionDays int, bat
 		uids := make([]string, 0, len(rows))
 		for _, row := range rows {
 			if uid := string(row.Values[0].GetSVal()); uid != "" {
-				uids = append(uids, strconv.Quote(uid))
+				uids = append(uids, sanitizer.QuoteString(uid))
 			}
 		}
 

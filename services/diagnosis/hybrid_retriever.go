@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
+
 	"sync"
 
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
@@ -81,12 +82,13 @@ func (h *HybridRetriever) Search(
 }
 
 func (h *HybridRetriever) searchBySameOwner(uid, namespace string) []diagnosis.GraphCaseResult {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	ownerQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource)-[:OwnedBy]->(owner:K8sResource)
 		 WHERE id(pod) == %s
 		 RETURN owner.K8sResource.name AS owner_name, owner.K8sResource.kind AS owner_kind
 		 LIMIT 1`,
-		strconv.Quote(uid),
+		sanitizer.QuoteString(uid),
 	)
 	rs, err := h.topoQuerier.graphDB.ExecuteAndCheck(ownerQ)
 	if err != nil || rs == nil || rs.GetRowSize() == 0 {
@@ -106,8 +108,8 @@ func (h *HybridRetriever) searchBySameOwner(uid, namespace string) []diagnosis.G
 		 WHERE id(pod) != %s
 		 RETURN pod.K8sResource.name AS pod_name
 		 LIMIT 10`,
-		strconv.Quote(ownerKind), strconv.Quote(ownerName),
-		strconv.Quote(namespace), strconv.Quote(uid),
+		sanitizer.QuoteString(ownerKind), sanitizer.QuoteString(ownerName),
+		sanitizer.QuoteString(namespace), sanitizer.QuoteString(uid),
 	)
 	srs, err := h.topoQuerier.graphDB.ExecuteAndCheck(siblingQ)
 	if err != nil || srs == nil {
@@ -131,12 +133,13 @@ func (h *HybridRetriever) searchBySameOwner(uid, namespace string) []diagnosis.G
 }
 
 func (h *HybridRetriever) searchBySameNode(uid string) []diagnosis.GraphCaseResult {
+	sanitizer := sanitizer.NewNGQLSanitizer()
 	nodeQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource)-[:RunsOn]->(node:K8sResource)
 		 WHERE id(pod) == %s
 		 RETURN id(node) AS node_uid
 		 LIMIT 1`,
-		strconv.Quote(uid),
+		sanitizer.QuoteString(uid),
 	)
 	rs, err := h.topoQuerier.graphDB.ExecuteAndCheck(nodeQ)
 	if err != nil || rs == nil || rs.GetRowSize() == 0 {
@@ -154,7 +157,7 @@ func (h *HybridRetriever) searchBySameNode(uid string) []diagnosis.GraphCaseResu
 		 WHERE id(node) == %s AND id(pod) != %s
 		 RETURN pod.K8sResource.name AS pod_name
 		 LIMIT 10`,
-		strconv.Quote(nodeUID), strconv.Quote(uid),
+		sanitizer.QuoteString(nodeUID), sanitizer.QuoteString(uid),
 	)
 	srs, _ := h.topoQuerier.graphDB.ExecuteAndCheck(siblingQ)
 

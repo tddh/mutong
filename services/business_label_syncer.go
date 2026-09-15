@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -367,8 +366,9 @@ func (s *BusinessLabelSyncer) hashOwnerAttrs(ownerName, ownerKind string) string
 }
 
 func (s *BusinessLabelSyncer) hasBelongsToAppEdge(fromUID, toUID string) bool {
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf(`GO FROM %s OVER BelongsToApp YIELD dst(edge) AS dst`,
-		strconv.Quote(fromUID))
+		sanitizer.QuoteString(fromUID))
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet == nil {
 		return false
@@ -520,6 +520,7 @@ func (s *BusinessLabelSyncer) flushBuffers() {
 }
 
 func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem) bool {
+	sanitizer := NewNGQLSanitizer()
 	// 同一 bizUID 本批次去重：控制器项优先(写 owner)，并跳过与之重复的非控制器项。
 	controllerUIDs := make(map[string]bool)
 	for _, item := range items {
@@ -531,16 +532,16 @@ func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem)
 	buildRow := func(item blsVertexBatchItem) string {
 		return fmt.Sprintf(
 			`%s:(%s, %s, %s, %s, %s, %s, %s, %s, %s)`,
-			strconv.Quote(item.app.UID),
-			strconv.Quote(item.app.UID),
-			strconv.Quote(item.app.AppName),
-			strconv.Quote(item.app.Namespace),
-			strconv.Quote(item.app.Criticality),
-			strconv.Quote(item.app.Environment),
-			strconv.Quote(item.app.Team),
-			strconv.Quote(item.app.BusinessUnit),
-			strconv.Quote(item.app.OwnerName),
-			strconv.Quote(item.app.OwnerKind),
+			sanitizer.QuoteString(item.app.UID),
+			sanitizer.QuoteString(item.app.UID),
+			sanitizer.QuoteString(item.app.AppName),
+			sanitizer.QuoteString(item.app.Namespace),
+			sanitizer.QuoteString(item.app.Criticality),
+			sanitizer.QuoteString(item.app.Environment),
+			sanitizer.QuoteString(item.app.Team),
+			sanitizer.QuoteString(item.app.BusinessUnit),
+			sanitizer.QuoteString(item.app.OwnerName),
+			sanitizer.QuoteString(item.app.OwnerKind),
 		)
 	}
 
@@ -612,12 +613,13 @@ func (s *BusinessLabelSyncer) batchUpsertBusinessApp(items []blsVertexBatchItem)
 }
 
 func (s *BusinessLabelSyncer) batchUpsertBelongsToAppEdge(items []blsEdgeBatchItem) bool {
+	sanitizer := NewNGQLSanitizer()
 	values := make([]string, 0, len(items))
 	for _, item := range items {
 		values = append(values, fmt.Sprintf(
 			"%s -> %s:()",
-			strconv.Quote(item.fromUID),
-			strconv.Quote(item.toUID),
+			sanitizer.QuoteString(item.fromUID),
+			sanitizer.QuoteString(item.toUID),
 		))
 	}
 	query := fmt.Sprintf("INSERT EDGE IF NOT EXISTS BelongsToApp () VALUES %s;", strings.Join(values, ", "))
@@ -633,12 +635,13 @@ func (s *BusinessLabelSyncer) batchUpsertBelongsToAppEdge(items []blsEdgeBatchIt
 }
 
 func (s *BusinessLabelSyncer) batchDeleteBelongsToAppEdges(items []blsDeleteEdgeBatchItem) bool {
+	sanitizer := NewNGQLSanitizer()
 	values := make([]string, 0, len(items))
 	for _, item := range items {
 		values = append(values, fmt.Sprintf(
 			"%s -> %s",
-			strconv.Quote(item.fromUID),
-			strconv.Quote(item.toUID),
+			sanitizer.QuoteString(item.fromUID),
+			sanitizer.QuoteString(item.toUID),
 		))
 	}
 	query := fmt.Sprintf("DELETE EDGE BelongsToApp %s;", strings.Join(values, ", "))
@@ -772,11 +775,12 @@ func (s *BusinessLabelSyncer) getLabelValue(labels map[string]string, key string
 }
 
 func (s *BusinessLabelSyncer) countBelongsToAppEdges(bizUID string) int {
+	sanitizer := NewNGQLSanitizer()
 	if s.cntFn != nil {
 		return s.cntFn(bizUID)
 	}
 	query := fmt.Sprintf(`MATCH ()-[e:BelongsToApp]->(v:BusinessApp{uid: %s}) RETURN count(e) as cnt;`,
-		strconv.Quote(bizUID))
+		sanitizer.QuoteString(bizUID))
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet == nil {
 		return -1
@@ -800,7 +804,8 @@ func (s *BusinessLabelSyncer) countBelongsToAppEdges(bizUID string) int {
 }
 
 func (s *BusinessLabelSyncer) deleteBusinessAppVertex(bizUID string) {
-	query := fmt.Sprintf(`DELETE VERTEX %s;`, strconv.Quote(bizUID))
+	sanitizer := NewNGQLSanitizer()
+	query := fmt.Sprintf(`DELETE VERTEX %s;`, sanitizer.QuoteString(bizUID))
 	_, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil {
 		s.logger.Warn("Failed to delete BusinessApp vertex",

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -377,12 +376,12 @@ func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string
 
 	// schema 是统一的 K8sResource 顶点（kind 是属性），不是 per-kind tag。
 	// Step 1: 按 kind+name(+namespace) 定位种子节点 VID。
-	props := fmt.Sprintf(`kind:%s, name:%s, is_deleted:false`, strconv.Quote(resourceType), strconv.Quote(resourceName))
+	props := fmt.Sprintf(`kind:%s, name:%s, is_deleted:false`, sanitizer.QuoteString(resourceType), sanitizer.QuoteString(resourceName))
 	if namespace != "" {
 		if !isValidNamespace(namespace) {
 			return "", fmt.Errorf("invalid namespace: %s", namespace)
 		}
-		props += fmt.Sprintf(`, name_space:%s`, strconv.Quote(namespace))
+		props += fmt.Sprintf(`, name_space:%s`, sanitizer.QuoteString(namespace))
 	}
 	seedQuery := fmt.Sprintf(`MATCH (v:K8sResource{%s}) RETURN id(v) AS vid LIMIT 1`, props)
 	seedRes, err := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(seedQuery)
@@ -419,7 +418,7 @@ func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string
 		for _, srcUID := range currentLevel {
 			for _, suffix := range []string{"", " REVERSELY"} {
 				goQuery := fmt.Sprintf("GO FROM %s OVER *%s YIELD id($$) AS target, type(edge) AS etype | LIMIT 50",
-					strconv.Quote(srcUID), suffix)
+					sanitizer.QuoteString(srcUID), suffix)
 				rs, gerr := s.diagnosisEngine.GetGraphDB().ExecuteAndCheck(goQuery)
 				if gerr != nil || rs == nil {
 					continue
@@ -452,7 +451,7 @@ func (s *Server) handleQueryTopology(ctx context.Context, args map[string]string
 	// Step 3: 批量取邻居节点属性（kind/name/namespace/apiVersion），CRD 也在内。
 	quoted := make([]string, 0, len(relatedUIDs))
 	for _, u := range relatedUIDs {
-		quoted = append(quoted, strconv.Quote(u))
+		quoted = append(quoted, sanitizer.QuoteString(u))
 	}
 	propQuery := fmt.Sprintf(
 		`MATCH (v:K8sResource) WHERE id(v) IN [%s] AND v.K8sResource.is_deleted == false RETURN v.K8sResource.kind AS kind, v.K8sResource.name AS name, v.K8sResource.name_space AS ns, v.K8sResource.api_version AS apiVer LIMIT 60`,

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	scv1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"strconv"
 )
 
 func (d *K8sResoureService) unmarshalResourceDefine(resourceDefine string) (*unstructured.Unstructured, error) {
@@ -89,6 +89,7 @@ func (d *K8sResoureService) processLabelsRelationship(unstructuredObj *unstructu
 // MutatingWebhookConfiguration 和 ValidatingWebhookConfiguration
 // 遍历所有 webhooks，建立 WebhookRefSvc 边指向 clientConfig.service
 func (d *K8sResoureService) processWebhookConfigurationRelationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	obj := unstructuredObj.Object
 	webhooksRaw, ok := obj["webhooks"]
 	if !ok {
@@ -151,10 +152,10 @@ func (d *K8sResoureService) processWebhookConfigurationRelationship(unstructured
 
 		query := fmt.Sprintf(
 			"INSERT EDGE WebhookRefSvc(webhook_name, path, port) VALUES %s -> %s:(%s, %s, %d);",
-			strconv.Quote(string(unstructuredObj.GetUID())),
-			strconv.Quote(svcUID),
-			strconv.Quote(whName),
-			strconv.Quote(path),
+			sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+			sanitizer.QuoteString(svcUID),
+			sanitizer.QuoteString(whName),
+			sanitizer.QuoteString(path),
 			port,
 		)
 		d.logger.Debug("processWebhookConfigurationRelationship",
@@ -220,11 +221,12 @@ func (d *K8sResoureService) processNetworkPolicyPeer(npUID string, peer networki
 }
 
 func (d *K8sResoureService) addNpNamespaceEdge(npUID, labelKey, labelValue string) {
+	sanitizer := NewNGQLSanitizer()
 	labelUID := generateLabelUID(labelKey, labelValue)
 
 	query := fmt.Sprintf(
 		"GO FROM %s OVER BelongsToLabel REVERSELY YIELD dst(edge) AS resource_uid LIMIT 100;",
-		strconv.Quote(labelUID),
+		sanitizer.QuoteString(labelUID),
 	)
 
 	rows, err := d.executenGQL(query)
@@ -240,7 +242,7 @@ func (d *K8sResoureService) addNpNamespaceEdge(npUID, labelKey, labelValue strin
 
 		verifyQuery := fmt.Sprintf(
 			"FETCH PROP ON K8sResource %s YIELD properties(vertex).kind AS kind;",
-			strconv.Quote(resourceUID),
+			sanitizer.QuoteString(resourceUID),
 		)
 		verifyRows, err := d.executenGQL(verifyQuery)
 		if err != nil || len(verifyRows) == 0 {
@@ -253,6 +255,7 @@ func (d *K8sResoureService) addNpNamespaceEdge(npUID, labelKey, labelValue strin
 }
 
 func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	var obj policyv1.PodDisruptionBudget
 
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &obj); err != nil {
@@ -267,7 +270,7 @@ func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured
 		labelUID := generateLabelUID(key, value)
 
 		query := fmt.Sprintf("GO FROM %s OVER BelongsToLabel REVERSELY YIELD dst(edge) AS resource_uid;",
-			strconv.Quote(labelUID))
+			sanitizer.QuoteString(labelUID))
 
 		rows, err := d.executenGQL(query)
 		if err != nil {
@@ -297,7 +300,7 @@ func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured
 	for resourceUID := range matchedPodUIDs {
 		verifyQuery := fmt.Sprintf(
 			"FETCH PROP ON K8sResource %s YIELD properties(vertex).kind AS kind, properties(vertex).name_space AS ns;",
-			strconv.Quote(resourceUID),
+			sanitizer.QuoteString(resourceUID),
 		)
 		verifyRows, err := d.executenGQL(verifyQuery)
 		if err != nil || len(verifyRows) == 0 {
@@ -323,8 +326,8 @@ func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured
 	var edgeInserts []string
 	for _, podUID := range podUIDs {
 		edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-			strconv.Quote(string(unstructuredObj.GetUID())),
-			strconv.Quote(podUID)))
+			sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+			sanitizer.QuoteString(podUID)))
 	}
 
 	insertQuery := fmt.Sprintf("INSERT EDGE PdbToPod () VALUES %s;", strings.Join(edgeInserts, ", "))
@@ -336,6 +339,7 @@ func (d *K8sResoureService) processPDBRelationship(unstructuredObj *unstructured
 }
 
 func (d *K8sResoureService) processHPARelationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	var hpa autoscalingv2.HorizontalPodAutoscaler
 
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &hpa); err != nil {
@@ -363,10 +367,10 @@ func (d *K8sResoureService) processHPARelationship(unstructuredObj *unstructured
 
 	query := fmt.Sprintf(
 		"INSERT EDGE AutoScales(scale_target_kind, scale_target_name, min_replicas, max_replicas, current_replicas) VALUES %s -> %s:(%s, %s, %d, %d, %d);",
-		strconv.Quote(string(unstructuredObj.GetUID())),
-		strconv.Quote(targetUID),
-		strconv.Quote(scaleTarget.Kind),
-		strconv.Quote(scaleTarget.Name),
+		sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+		sanitizer.QuoteString(targetUID),
+		sanitizer.QuoteString(scaleTarget.Kind),
+		sanitizer.QuoteString(scaleTarget.Name),
 		minReplicas,
 		hpa.Spec.MaxReplicas,
 		hpa.Status.CurrentReplicas,
@@ -379,6 +383,7 @@ func (d *K8sResoureService) processHPARelationship(unstructuredObj *unstructured
 }
 
 func (d *K8sResoureService) processSecretTokenRelationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	var secret corev1.Secret
 
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &secret); err != nil {
@@ -407,8 +412,8 @@ func (d *K8sResoureService) processSecretTokenRelationship(unstructuredObj *unst
 
 	// 复用 MountsSecret 边：SA → Secret
 	query := fmt.Sprintf("INSERT EDGE MountsSecret () VALUES %s -> %s:();",
-		strconv.Quote(saUID),
-		strconv.Quote(string(unstructuredObj.GetUID())))
+		sanitizer.QuoteString(saUID),
+		sanitizer.QuoteString(string(unstructuredObj.GetUID())))
 	d.logger.Debug("processSecretTokenRelationship",
 		zap.String("sa", saName),
 		zap.String("secret", secret.Name))
@@ -585,6 +590,7 @@ func (d *K8sResoureService) processCiliumEndpointRelationship(obj *unstructured.
 // processCustomResourceDefinitionRelationship 建 CRD → 其定义的 CR 实例 的边（DefinesResource）。
 // 按 spec.group + spec.names.kind 匹配存活的 K8sResource(api_group==group && kind==kind)。
 func (d *K8sResoureService) processCustomResourceDefinitionRelationship(obj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	uid := string(obj.GetUID())
 	group, _, _ := unstructured.NestedString(obj.Object, "spec", "group")
 	kind, _, _ := unstructured.NestedString(obj.Object, "spec", "names", "kind")
@@ -594,7 +600,7 @@ func (d *K8sResoureService) processCustomResourceDefinitionRelationship(obj *uns
 
 	d.CleanupOutgoingEdgesByType(uid, "DefinesResource")
 
-	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == " + strconv.Quote(kind) +
+	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == " + sanitizer.QuoteString(kind) +
 		" AND K8sResource.is_deleted == false YIELD id(vertex) AS uid, K8sResource.api_group AS grp;"
 	rows, err := d.executenGQL(query)
 	if err != nil {
@@ -611,7 +617,7 @@ func (d *K8sResoureService) processCustomResourceDefinitionRelationship(obj *uns
 		if crUID == "" || crUID == uid || crGroup != group {
 			continue
 		}
-		values = append(values, fmt.Sprintf("%s -> %s:()", strconv.Quote(uid), strconv.Quote(crUID)))
+		values = append(values, fmt.Sprintf("%s -> %s:()", sanitizer.QuoteString(uid), sanitizer.QuoteString(crUID)))
 	}
 
 	const batchSize = 500
@@ -634,6 +640,7 @@ func (d *K8sResoureService) processCustomResourceDefinitionRelationship(obj *uns
 //
 // Local 型（内置 group，如 v1.apps）既无 spec.service 也无对应 CRD，跳过（天然孤立）。
 func (d *K8sResoureService) processAPIServiceRelationship(obj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	uid := string(obj.GetUID())
 
 	// 聚合型 → Service
@@ -670,7 +677,7 @@ func (d *K8sResoureService) processAPIServiceRelationship(obj *unstructured.Unst
 		if i < 0 || i+1 >= len(crdName) || crdName[i+1:] != group {
 			continue
 		}
-		values = append(values, fmt.Sprintf("%s -> %s:()", strconv.Quote(uid), strconv.Quote(crdUID)))
+		values = append(values, fmt.Sprintf("%s -> %s:()", sanitizer.QuoteString(uid), sanitizer.QuoteString(crdUID)))
 	}
 	if len(values) > 0 {
 		q := fmt.Sprintf("INSERT EDGE ServesCRD () VALUES %s;", strings.Join(values, ", "))
@@ -682,6 +689,7 @@ func (d *K8sResoureService) processAPIServiceRelationship(obj *unstructured.Unst
 }
 
 func (d *K8sResoureService) processEventV1Relationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	var obj corev1.Event
 
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &obj); err != nil {
@@ -690,14 +698,14 @@ func (d *K8sResoureService) processEventV1Relationship(unstructuredObj *unstruct
 	}
 
 	query := fmt.Sprintf("INSERT EDGE Events(eventTime, note, reason, reportingController, type) VALUES %s -> %s:(timestamp(%s), %s, %s, %s, %s, %s);",
-		strconv.Quote(string(unstructuredObj.GetUID())),
-		strconv.Quote(string(obj.InvolvedObject.UID)),
+		sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+		sanitizer.QuoteString(string(obj.InvolvedObject.UID)),
 		strconv.FormatInt(d.StringToInt64(obj.ResourceVersion), 10),
-		strconv.Quote(string(obj.GetCreationTimestamp().Format(time.DateTime))),
-		strconv.Quote(string(obj.Message)),
-		strconv.Quote(string(obj.Reason)),
-		strconv.Quote(string(obj.ReportingController)),
-		strconv.Quote(string(obj.Type)))
+		sanitizer.QuoteString(string(obj.GetCreationTimestamp().Format(time.DateTime))),
+		sanitizer.QuoteString(string(obj.Message)),
+		sanitizer.QuoteString(string(obj.Reason)),
+		sanitizer.QuoteString(string(obj.ReportingController)),
+		sanitizer.QuoteString(string(obj.Type)))
 
 	d.logger.Debug("processEventV1Relationship", zap.String("nGQL", query))
 	_, err := d.graphDB.ExecuteAndCheck(query)
@@ -707,6 +715,7 @@ func (d *K8sResoureService) processEventV1Relationship(unstructuredObj *unstruct
 }
 
 func (d *K8sResoureService) processEventIoV1Relationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	var obj eventsv1.Event
 
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredObj.Object, &obj); err != nil {
@@ -715,14 +724,14 @@ func (d *K8sResoureService) processEventIoV1Relationship(unstructuredObj *unstru
 	}
 
 	query := fmt.Sprintf("INSERT EDGE Events(eventTime, note, reason, reportingController, type) VALUES %s -> %s:(timestamp(%s), %s, %s, %s,%s);",
-		strconv.Quote(string(unstructuredObj.GetUID())),
-		strconv.Quote(string(obj.Regarding.UID)),
+		sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+		sanitizer.QuoteString(string(obj.Regarding.UID)),
 		// d.StringToInt64(unstructuredObj.GetResourceVersion()),
-		strconv.Quote(string(obj.GetCreationTimestamp().Format(time.DateTime))),
-		strconv.Quote(string(obj.Note)),
-		strconv.Quote(string(obj.Reason)),
-		strconv.Quote(string(obj.ReportingController)),
-		strconv.Quote(string(obj.Type)))
+		sanitizer.QuoteString(string(obj.GetCreationTimestamp().Format(time.DateTime))),
+		sanitizer.QuoteString(string(obj.Note)),
+		sanitizer.QuoteString(string(obj.Reason)),
+		sanitizer.QuoteString(string(obj.ReportingController)),
+		sanitizer.QuoteString(string(obj.Type)))
 
 	d.logger.Debug("processEventIoV1Relationship", zap.String("nGQL", query))
 	_, err := d.graphDB.ExecuteAndCheck(query)
@@ -775,6 +784,7 @@ func (d *K8sResoureService) processCSINodeToNodeRelationship(unstructuredObj *un
 }
 
 func (d *K8sResoureService) processOwnerReferences(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	ownerReferences := unstructuredObj.GetOwnerReferences()
 	if len(ownerReferences) == 0 {
 		return
@@ -783,13 +793,13 @@ func (d *K8sResoureService) processOwnerReferences(unstructuredObj *unstructured
 	var values []string
 	for _, ownerReference := range ownerReferences {
 		values = append(values, fmt.Sprintf("%s -> %s:(%s, %s, %s, %t, %s)",
-			strconv.Quote(string(unstructuredObj.GetUID())),
-			strconv.Quote(string(ownerReference.UID)),
-			strconv.Quote(ownerReference.Kind),
-			strconv.Quote(string(ownerReference.UID)),
-			strconv.Quote(ownerReference.APIVersion),
+			sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+			sanitizer.QuoteString(string(ownerReference.UID)),
+			sanitizer.QuoteString(ownerReference.Kind),
+			sanitizer.QuoteString(string(ownerReference.UID)),
+			sanitizer.QuoteString(ownerReference.APIVersion),
 			convertPointerToBool(ownerReference.Controller),
-			strconv.Quote(ownerReference.Name)))
+			sanitizer.QuoteString(ownerReference.Name)))
 	}
 
 	query := fmt.Sprintf("INSERT EDGE OwnedBy(owner_kind, owner_uid, api_version, controller_type, owner_name) VALUES %s;",
@@ -802,11 +812,12 @@ func (d *K8sResoureService) processOwnerReferences(unstructuredObj *unstructured
 }
 
 func (d *K8sResoureService) processNamespaceRelationship(unstructuredObj *unstructured.Unstructured) {
+	sanitizer := NewNGQLSanitizer()
 	if unstructuredObj.GetNamespace() != "" {
 		if uid, found := d.lookupUID("Namespace", "", unstructuredObj.GetNamespace()); found {
 			query := fmt.Sprintf("INSERT EDGE BelongsTo () VALUES %s -> %s:();",
-				strconv.Quote(string(unstructuredObj.GetUID())),
-				strconv.Quote(uid))
+				sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+				sanitizer.QuoteString(uid))
 			d.logger.Debug("processNamespaceRelationship", zap.String("nGQL", query))
 			_, err := d.graphDB.Execute(query)
 			if err != nil {
@@ -851,10 +862,11 @@ func (d *K8sResoureService) processRuntimeClassRelationship(pod *corev1.Pod) {
 }
 
 func (d *K8sResoureService) processServiceAccountRelationship(unstructuredObj *unstructured.Unstructured, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	if uid, found := d.lookupUID("ServiceAccount", pod.Namespace, pod.Spec.ServiceAccountName); found {
 		query := fmt.Sprintf("INSERT EDGE ServiceAccount () VALUES %s -> %s:();",
-			strconv.Quote(string(unstructuredObj.GetUID())),
-			strconv.Quote(uid))
+			sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+			sanitizer.QuoteString(uid))
 		_, err := d.graphDB.Execute(query)
 		if err != nil {
 			d.logger.Error("processServiceAccountRelationship", zap.Error(err))
@@ -863,11 +875,12 @@ func (d *K8sResoureService) processServiceAccountRelationship(unstructuredObj *u
 }
 
 func (d *K8sResoureService) processNodeRelationship(unstructuredObj *unstructured.Unstructured, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	if pod.Spec.NodeName != "" {
 		if uid, found := d.lookupUID("Node", "", pod.Spec.NodeName); found {
 			query := fmt.Sprintf("INSERT EDGE RunsOn () VALUES %s -> %s:();",
-				strconv.Quote(string(unstructuredObj.GetUID())),
-				strconv.Quote(uid))
+				sanitizer.QuoteString(string(unstructuredObj.GetUID())),
+				sanitizer.QuoteString(uid))
 			_, err := d.graphDB.Execute(query)
 			if err != nil {
 				d.logger.Error("processNodeRelationship", zap.Error(err))
@@ -926,6 +939,7 @@ func (d *K8sResoureService) processVolumeRelationships(pod *corev1.Pod) {
 }
 
 func (d *K8sResoureService) processProjectedVolumes(source *corev1.VolumeSource, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	if source.Projected != nil {
 		var configMapNames []string
 		var secretNames []string
@@ -950,8 +964,8 @@ func (d *K8sResoureService) processProjectedVolumes(source *corev1.VolumeSource,
 			for _, name := range configMapNames {
 				if uid, found := d.lookupUID("ConfigMap", pod.Namespace, name); found {
 					edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-						strconv.Quote(string(pod.UID)),
-						strconv.Quote(uid)))
+						sanitizer.QuoteString(string(pod.UID)),
+						sanitizer.QuoteString(uid)))
 				}
 			}
 			if len(edgeInserts) > 0 {
@@ -970,8 +984,8 @@ func (d *K8sResoureService) processProjectedVolumes(source *corev1.VolumeSource,
 			for _, name := range secretNames {
 				if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 					edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-						strconv.Quote(string(pod.UID)),
-						strconv.Quote(uid)))
+						sanitizer.QuoteString(string(pod.UID)),
+						sanitizer.QuoteString(uid)))
 				}
 			}
 			if len(edgeInserts) > 0 {
@@ -988,12 +1002,13 @@ func (d *K8sResoureService) processProjectedVolumes(source *corev1.VolumeSource,
 }
 
 func (d *K8sResoureService) processConfigMapVolumes(source *corev1.VolumeSource, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	if source.ConfigMap != nil {
 		d.logger.Debug("processConfigMapVolumes", zap.String("name", source.ConfigMap.Name))
 		if uid, found := d.lookupUID("ConfigMap", pod.Namespace, source.ConfigMap.Name); found {
 			query := fmt.Sprintf("INSERT EDGE MountsConfig () VALUES %s -> %s:();",
-				strconv.Quote(string(pod.UID)),
-				strconv.Quote(uid))
+				sanitizer.QuoteString(string(pod.UID)),
+				sanitizer.QuoteString(uid))
 			d.logger.Debug("processConfigMapVolumes", zap.String("nGQL", query))
 			_, err := d.graphDB.Execute(query)
 			if err != nil {
@@ -1004,12 +1019,13 @@ func (d *K8sResoureService) processConfigMapVolumes(source *corev1.VolumeSource,
 }
 
 func (d *K8sResoureService) processSecretVolumes(source *corev1.VolumeSource, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	if source.Secret != nil {
 		d.logger.Debug("processSecretVolumes", zap.String("name", source.Secret.SecretName))
 		if uid, found := d.lookupUID("Secret", pod.Namespace, source.Secret.SecretName); found {
 			query := fmt.Sprintf("INSERT EDGE MountsSecret () VALUES %s -> %s:();",
-				strconv.Quote(string(pod.UID)),
-				strconv.Quote(uid))
+				sanitizer.QuoteString(string(pod.UID)),
+				sanitizer.QuoteString(uid))
 			d.logger.Debug("processSecretVolumes", zap.String("nGQL", query))
 			_, err := d.graphDB.Execute(query)
 			if err != nil {
@@ -1020,6 +1036,7 @@ func (d *K8sResoureService) processSecretVolumes(source *corev1.VolumeSource, po
 }
 
 func (d *K8sResoureService) processContainerEnvFrom(container corev1.Container, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 	var configMapNames []string
 
@@ -1041,7 +1058,7 @@ func (d *K8sResoureService) processContainerEnvFrom(container corev1.Container, 
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1059,8 +1076,8 @@ func (d *K8sResoureService) processContainerEnvFrom(container corev1.Container, 
 		for _, name := range configMapNames {
 			if uid, found := d.lookupUID("ConfigMap", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)),
-					strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)),
+					sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1075,6 +1092,7 @@ func (d *K8sResoureService) processContainerEnvFrom(container corev1.Container, 
 }
 
 func (d *K8sResoureService) processContainerEnv(container corev1.Container, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 	var configMapNames []string
 
@@ -1092,7 +1110,7 @@ func (d *K8sResoureService) processContainerEnv(container corev1.Container, pod 
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1110,8 +1128,8 @@ func (d *K8sResoureService) processContainerEnv(container corev1.Container, pod 
 		for _, name := range configMapNames {
 			if uid, found := d.lookupUID("ConfigMap", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)),
-					strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)),
+					sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1126,6 +1144,7 @@ func (d *K8sResoureService) processContainerEnv(container corev1.Container, pod 
 }
 
 func (d *K8sResoureService) processImagePullSecrets(container corev1.Container, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 
 	for _, reference := range pod.Spec.ImagePullSecrets {
@@ -1137,7 +1156,7 @@ func (d *K8sResoureService) processImagePullSecrets(container corev1.Container, 
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1152,6 +1171,7 @@ func (d *K8sResoureService) processImagePullSecrets(container corev1.Container, 
 }
 
 func (d *K8sResoureService) processEphemeralContainerEnvFrom(container corev1.EphemeralContainer, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 	var configMapNames []string
 
@@ -1173,7 +1193,7 @@ func (d *K8sResoureService) processEphemeralContainerEnvFrom(container corev1.Ep
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1193,8 +1213,8 @@ func (d *K8sResoureService) processEphemeralContainerEnvFrom(container corev1.Ep
 		for _, name := range configMapNames {
 			if uid, found := d.lookupUID("ConfigMap", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)),
-					strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)),
+					sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1211,6 +1231,7 @@ func (d *K8sResoureService) processEphemeralContainerEnvFrom(container corev1.Ep
 }
 
 func (d *K8sResoureService) processEphemeralContainerEnv(container corev1.EphemeralContainer, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 	var configMapNames []string
 
@@ -1228,7 +1249,7 @@ func (d *K8sResoureService) processEphemeralContainerEnv(container corev1.Epheme
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1246,8 +1267,8 @@ func (d *K8sResoureService) processEphemeralContainerEnv(container corev1.Epheme
 		for _, name := range configMapNames {
 			if uid, found := d.lookupUID("ConfigMap", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)),
-					strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)),
+					sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1262,6 +1283,7 @@ func (d *K8sResoureService) processEphemeralContainerEnv(container corev1.Epheme
 }
 
 func (d *K8sResoureService) processEphemeralImagePullSecrets(container corev1.EphemeralContainer, pod *corev1.Pod) {
+	sanitizer := NewNGQLSanitizer()
 	var secretNames []string
 
 	for _, reference := range pod.Spec.ImagePullSecrets {
@@ -1273,7 +1295,7 @@ func (d *K8sResoureService) processEphemeralImagePullSecrets(container corev1.Ep
 		for _, name := range secretNames {
 			if uid, found := d.lookupUID("Secret", pod.Namespace, name); found {
 				edgeInserts = append(edgeInserts, fmt.Sprintf("%s->%s:()",
-					strconv.Quote(string(pod.UID)), strconv.Quote(uid)))
+					sanitizer.QuoteString(string(pod.UID)), sanitizer.QuoteString(uid)))
 			}
 		}
 		if len(edgeInserts) > 0 {
@@ -1398,6 +1420,7 @@ func (d *K8sResoureService) processVolumeAttachmentRelationship(unstructuredObj 
 // lookupUID queries the UID of a K8sResource by kind, namespace and name.
 // Uses BigCache (key: "uid:{kind}:{ns}:{name}") for fast path; fallback to LOOKUP ON.
 func (d *K8sResoureService) lookupUID(kind, ns, name string) (string, bool) {
+	sanitizer := NewNGQLSanitizer()
 	if name == "" {
 		return "", false
 	}
@@ -1407,9 +1430,9 @@ func (d *K8sResoureService) lookupUID(kind, ns, name string) (string, bool) {
 	}
 
 	// Cache miss: query Nebula with LOOKUP ON
-	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == '" + kind + "' AND K8sResource.name == " + strconv.Quote(name)
+	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == '" + kind + "' AND K8sResource.name == " + sanitizer.QuoteString(name)
 	if ns != "" {
-		query += " AND K8sResource.name_space == " + strconv.Quote(ns)
+		query += " AND K8sResource.name_space == " + sanitizer.QuoteString(ns)
 	}
 	query += " YIELD properties(vertex).uid AS uid;"
 
@@ -1425,6 +1448,7 @@ func (d *K8sResoureService) lookupUID(kind, ns, name string) (string, bool) {
 // lookupResourceDefine returns uid and resource_define for a K8sResource.
 // Uses BigCache (key: "rd:{kind}:{ns}:{name}") with fallback to LOOKUP ON.
 func (d *K8sResoureService) lookupResourceDefine(kind, ns, name string) (uid, resourceDefine string, found bool) {
+	sanitizer := NewNGQLSanitizer()
 	if name == "" {
 		return "", "", false
 	}
@@ -1437,9 +1461,9 @@ func (d *K8sResoureService) lookupResourceDefine(kind, ns, name string) (uid, re
 		}
 	}
 
-	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == '" + kind + "' AND K8sResource.name == " + strconv.Quote(name)
+	query := "LOOKUP ON K8sResource WHERE K8sResource.kind == '" + kind + "' AND K8sResource.name == " + sanitizer.QuoteString(name)
 	if ns != "" {
-		query += " AND K8sResource.name_space == " + strconv.Quote(ns)
+		query += " AND K8sResource.name_space == " + sanitizer.QuoteString(ns)
 	}
 	query += " YIELD properties(vertex).uid AS uid, properties(vertex).resource_define AS resource_define;"
 

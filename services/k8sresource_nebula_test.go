@@ -220,7 +220,7 @@ func TestInsertEdge_GeneratesCorrectQuery(t *testing.T) {
 		t.Fatalf("Expected 1 call, got %d", len(mockDB.calls))
 	}
 
-	expected := `INSERT EDGE BelongsTo () VALUES "uid-a" -> "uid-b":();`
+	expected := `INSERT EDGE BelongsTo () VALUES 'uid-a' -> 'uid-b':();`
 	if mockDB.calls[0] != expected {
 		t.Errorf("Expected query %q, got %q", expected, mockDB.calls[0])
 	}

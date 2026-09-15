@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
 	"gitee.com/tddh/mutong/models/retrospective"
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 	diagnosis_svc "gitee.com/tddh/mutong/services/diagnosis"
 )
 
@@ -918,12 +918,14 @@ func (s *Service) enrichBusinessCallsFromNebula(report *retrospective.Postmortem
 		return
 	}
 
+	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+
 	result := &retrospective.BusinessReportCalls{AppName: appName}
 
 	upstreamQ := fmt.Sprintf(
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(target:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN caller.app_name AS name, caller.team AS team, caller.criticality AS crit LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		ngqlSanitizer.QuoteString(appName), ngqlSanitizer.QuoteString(namespace),
 	)
 
 	if rs, err := s.graphDB.ExecuteAndCheck(upstreamQ); err == nil && rs != nil {
@@ -947,7 +949,7 @@ func (s *Service) enrichBusinessCallsFromNebula(report *retrospective.Postmortem
 	downstreamQ := fmt.Sprintf(
 		`MATCH (target:BusinessApp{app_name:%s,namespace:%s})-[:CallsApp]->(callee:BusinessApp)
 		 RETURN callee.app_name AS name, callee.team AS team, callee.criticality AS crit LIMIT 20`,
-		strconv.Quote(appName), strconv.Quote(namespace),
+		ngqlSanitizer.QuoteString(appName), ngqlSanitizer.QuoteString(namespace),
 	)
 
 	if rs, err := s.graphDB.ExecuteAndCheck(downstreamQ); err == nil && rs != nil {
@@ -978,12 +980,14 @@ func (s *Service) enrichWorkloadContext(report *retrospective.PostmortemReport, 
 		return
 	}
 
+	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+
 	ownerQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource{kind:"Pod",name:%s,name_space:%s})-[:OwnedBy*1..2]->(owner:K8sResource)
 		 WHERE owner.K8sResource.kind IN ["Deployment","StatefulSet","DaemonSet","CronJob"]
 		 RETURN owner.K8sResource.name AS name, owner.K8sResource.kind AS kind, owner.K8sResource.name_space AS ns
 		 LIMIT 1`,
-		strconv.Quote(podName), strconv.Quote(namespace),
+		ngqlSanitizer.QuoteString(podName), ngqlSanitizer.QuoteString(namespace),
 	)
 
 	rs, err := s.graphDB.ExecuteAndCheck(ownerQ)
@@ -1003,7 +1007,7 @@ func (s *Service) enrichWorkloadContext(report *retrospective.PostmortemReport, 
 		`MATCH (sibling:K8sResource{kind:"Pod",name_space:%s})-[:OwnedBy*1..2]->(owner:K8sResource{name:%s,kind:%s})
 		 RETURN sibling.K8sResource.name AS name, sibling.K8sResource.is_deleted AS deleted
 		 ORDER BY sibling.K8sResource.name`,
-		strconv.Quote(cns), strconv.Quote(cname), strconv.Quote(ckind),
+		ngqlSanitizer.QuoteString(cns), ngqlSanitizer.QuoteString(cname), ngqlSanitizer.QuoteString(ckind),
 	)
 
 	srs, err := s.graphDB.ExecuteAndCheck(siblingQ)

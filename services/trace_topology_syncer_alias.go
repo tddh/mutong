@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"net"
 	"regexp"
-	"strconv"
 	"strings"
 
+	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"go.uber.org/zap"
 )
 
@@ -68,6 +68,8 @@ func (s *TraceTopologySyncer) lookupByOwnerName(ownerName, namespace string) (bu
 	if ownerName == "" || namespace == "" {
 		return businessAppRef{}, false
 	}
+
+	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
 	cacheKey := "bizowner:" + namespace + ":" + ownerName
 	if cached, err := s.relationCache.Get(cacheKey); err == nil {
 		parts := strings.SplitN(string(cached), "|", 2)
@@ -79,7 +81,7 @@ func (s *TraceTopologySyncer) lookupByOwnerName(ownerName, namespace string) (bu
 
 	query := fmt.Sprintf(
 		`MATCH (v:BusinessApp) WHERE v.BusinessApp.owner_name == %s AND v.BusinessApp.namespace == %s RETURN v.BusinessApp.uid as uid, v.BusinessApp.app_name as app_name LIMIT 1`,
-		strconv.Quote(ownerName), strconv.Quote(namespace),
+		ngqlSanitizer.QuoteString(ownerName), ngqlSanitizer.QuoteString(namespace),
 	)
 	resultSet, err := s.graphDB.ExecuteAndCheck(query)
 	if err != nil || resultSet == nil || resultSet.GetRowSize() == 0 {

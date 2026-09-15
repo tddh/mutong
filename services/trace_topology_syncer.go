@@ -12,7 +12,6 @@ import (
 
 	"gitee.com/tddh/mutong/config"
 	"gitee.com/tddh/mutong/interfaces"
-	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"github.com/allegro/bigcache/v3"
 	nebula "github.com/vesoft-inc/nebula-go/v3"
 	v1 "go.opentelemetry.io/proto/otlp/trace/v1"
@@ -523,7 +522,7 @@ func (s *TraceTopologySyncer) resolvePeerFromAddress(rawPeer string) (appName, n
 
 func (s *TraceTopologySyncer) lookupOrInsertBusinessApp(appName, namespace string) (string, bool) {
 
-	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+	ngqlSanitizer := NewNGQLSanitizer()
 	cacheKey := "bizapp:" + namespace + ":" + appName
 	if cached, err := s.relationCache.Get(cacheKey); err == nil {
 		s.logger.Debug("BIZAPP_LOOKUP Cache hit",
@@ -685,7 +684,7 @@ func (s *TraceTopologySyncer) flushLoop() {
 
 func (s *TraceTopologySyncer) flushBuffer() {
 
-	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+	ngqlSanitizer := NewNGQLSanitizer()
 	s.bufferMu.Lock()
 	if len(s.edgeBuffer) == 0 {
 		s.bufferMu.Unlock()

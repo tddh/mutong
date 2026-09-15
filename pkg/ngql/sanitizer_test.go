@@ -1,11 +1,12 @@
-package services
+package ngql
 
 import (
+	"strings"
 	"testing"
 )
 
-func TestNGQLSanitizer_EscapeString(t *testing.T) {
-	s := NewNGQLSanitizer()
+func TestSanitizer_EscapeString(t *testing.T) {
+	s := NewSanitizer()
 
 	tests := []struct {
 		name     string
@@ -33,8 +34,8 @@ func TestNGQLSanitizer_EscapeString(t *testing.T) {
 	}
 }
 
-func TestNGQLSanitizer_QuoteString(t *testing.T) {
-	s := NewNGQLSanitizer()
+func TestSanitizer_QuoteString(t *testing.T) {
+	s := NewSanitizer()
 
 	tests := []struct {
 		name     string
@@ -57,8 +58,8 @@ func TestNGQLSanitizer_QuoteString(t *testing.T) {
 	}
 }
 
-func TestNGQLSanitizer_ValidateIdentifier(t *testing.T) {
-	s := NewNGQLSanitizer()
+func TestSanitizer_ValidateIdentifier(t *testing.T) {
+	s := NewSanitizer()
 
 	tests := []struct {
 		name     string
@@ -73,7 +74,7 @@ func TestNGQLSanitizer_ValidateIdentifier(t *testing.T) {
 		{"special_chars", "my-tag", false},
 		{"reserved_word", "MATCH", false},
 		{"reserved_word_lower", "match", false},
-		{"too_long", string(make([]byte, 257)), false},
+		{"too_long", strings.Repeat("a", 257), false},
 	}
 
 	for _, tt := range tests {
@@ -97,6 +98,8 @@ func TestWhitelistKind(t *testing.T) {
 		{"valid_node", "Node", "Node", true},
 		{"valid_service", "Service", "Service", true},
 		{"valid_deployment", "Deployment", "Deployment", true},
+		{"pvc_maps_to_full_name", "PVC", "PersistentVolumeClaim", true},
+		{"pv_maps_to_full_name", "PV", "PersistentVolume", true},
 		{"invalid", "MaliciousKind", "", false},
 		{"injection_attempt", "Pod'; DROP TAG--", "", false},
 	}

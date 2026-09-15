@@ -2,7 +2,6 @@ package diagnosis
 
 import (
 	"fmt"
-
 	"strings"
 
 	nebula "github.com/vesoft-inc/nebula-go/v3"
@@ -11,7 +10,7 @@ import (
 	"gitee.com/tddh/mutong/interfaces"
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
-	"gitee.com/tddh/mutong/pkg/sanitizer"
+	"gitee.com/tddh/mutong/pkg/ngql"
 )
 
 type TopologyQuerier struct {
@@ -99,7 +98,7 @@ func isCoreKind(kind string) bool {
 }
 
 func (q *TopologyQuerier) parseEdges(snapshot *diagnosis.TopologySnapshot) {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	// Build UID list for edge query
 	uids := make([]string, 0, len(snapshot.Nodes))
 	for _, n := range snapshot.Nodes {
@@ -159,7 +158,7 @@ func (q *TopologyQuerier) parseEdges(snapshot *diagnosis.TopologySnapshot) {
 }
 
 func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diagnosis.BusinessAppCalls {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	result := &diagnosis.BusinessAppCalls{
 		AppName:   appName,
 		Namespace: namespace,
@@ -234,7 +233,7 @@ func (q *TopologyQuerier) QueryBusinessAppCalls(appName, namespace string) *diag
 }
 
 func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagnosis.WorkloadContext {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	if podName == "" || namespace == "" {
 		return nil
 	}
@@ -304,7 +303,7 @@ func (q *TopologyQuerier) QueryWorkloadContext(podName, namespace string) *diagn
 }
 
 func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namespace string) []diagnosis.ResourceRef {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	var resources []diagnosis.ResourceRef
 	seen := make(map[string]bool)
 
@@ -374,7 +373,7 @@ func (q *TopologyQuerier) QuerySameNodeOrNamespace(resourceUID, nodeName, namesp
 }
 
 func (q *TopologyQuerier) FindAffectedServices(resourceUID string) []string {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s})<-[:SvcToPods]-(svc:K8sResource)
 		 RETURN DISTINCT svc.K8sResource.name`,
@@ -399,7 +398,7 @@ func (q *TopologyQuerier) FindAffectedServices(resourceUID string) []string {
 }
 
 func (q *TopologyQuerier) FindAffectedIngresses(resourceUID string) []string {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s})-[*1..2]-(ingress:K8sResource{kind:"Ingress"})
 		 RETURN DISTINCT ingress.K8sResource.name`,
@@ -433,7 +432,7 @@ func getStr(row *nebula.Record, idx int) string {
 }
 
 func (q *TopologyQuerier) queryResourceNode(resourceUID string) (diagnosis.TopologyNode, error) {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (n:K8sResource{uid:%s,is_deleted:false})
 		 RETURN n.K8sResource.uid, n.K8sResource.kind,
@@ -470,7 +469,7 @@ func (q *TopologyQuerier) queryResourceNode(resourceUID string) (diagnosis.Topol
 }
 
 func (q *TopologyQuerier) queryAdjacentResources(resourceUIDs []string, limit int) []diagnosis.ResourceRef {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	if len(resourceUIDs) == 0 {
 		return nil
 	}
@@ -520,7 +519,7 @@ func (q *TopologyQuerier) queryAdjacentResources(resourceUIDs []string, limit in
 
 // ResolveUID 通过 kind + name + namespace 解析资源的 UID
 func (q *TopologyQuerier) ResolveUID(kind, name, namespace string) string {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	var query string
 	if kind == "Node" {
 		query = fmt.Sprintf(
@@ -737,7 +736,7 @@ func (q *TopologyQuerier) BuildBusinessImpactContext(uid string, alertBizCtx ale
 
 // queryUpstreamBusinessApps 查询指定 BusinessApp 的上游调用方（谁调用它）
 func (q *TopologyQuerier) queryUpstreamBusinessApps(appName, namespace string) []downstreamAppRef {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	upstreamQ := fmt.Sprintf(
 		`MATCH (caller:BusinessApp)-[:CallsApp]->(target:BusinessApp{app_name:%s,namespace:%s})
 		 RETURN caller.BusinessApp.app_name AS name, caller.BusinessApp.team AS team, caller.BusinessApp.criticality AS crit
@@ -773,7 +772,7 @@ func (q *TopologyQuerier) queryUpstreamBusinessApps(appName, namespace string) [
 
 // queryDownstreamBusinessApps 查询指定 BusinessApp 的 1 跳下游
 func (q *TopologyQuerier) queryDownstreamBusinessApps(appName, namespace string) []downstreamAppRef {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	downstreamQ := fmt.Sprintf(
 		`MATCH (target:BusinessApp{app_name:%s,namespace:%s})-[:CallsApp]->(callee:BusinessApp)
 		 RETURN callee.BusinessApp.app_name AS name, callee.BusinessApp.team AS team, callee.BusinessApp.criticality AS crit
@@ -809,7 +808,7 @@ func (q *TopologyQuerier) queryDownstreamBusinessApps(appName, namespace string)
 
 // resolveDirectBusinessApps 从资源 UID 和告警富化的业务上下文中确定直接影响的业务应用
 func (q *TopologyQuerier) resolveDirectBusinessApps(uid string, alertBizCtx alert_models.BusinessContext) []BusinessAppMeta {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	var apps []BusinessAppMeta
 
 	// 优先使用告警富化阶段注入的业务上下文
@@ -912,7 +911,7 @@ func (q *TopologyQuerier) ExpandRelatedResourceUIDs(
 	maxPerPath int,
 	flags ExpandPathFlags,
 ) []TopologyExpandResult {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	if maxPerPath <= 0 {
 		maxPerPath = 20
 	}
@@ -1096,7 +1095,7 @@ func isServiceLevel(a *alert_models.ProcessedAlert) bool {
 
 // resolveDirectBusinessAppsViaOwner 沿 owner 链查找业务应用归属
 func (q *TopologyQuerier) resolveDirectBusinessAppsViaOwner(uid string) []BusinessAppMeta {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	if uid == "" {
 		return nil
 	}

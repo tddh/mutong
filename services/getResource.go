@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-
 	"strconv"
 	"strings"
 	"sync"
 
 	"gitee.com/tddh/mutong/interfaces"
 	"gitee.com/tddh/mutong/models"
-	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"github.com/valyala/fastjson"
 	nebula "github.com/vesoft-inc/nebula-go/v3/nebula"
 	"go.uber.org/zap"
@@ -114,7 +112,7 @@ func parseJSONString(s string) (string, error) {
 // GetAllResources 获取K8s资源节点列表（分页）
 // 用 GO FROM namespace REVERSELY 替代 LOOKUP，避免 storaged OOM
 func (d *K8sResoureService) countResourcesByKind(kind string) int {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := NewNGQLSanitizer()
 	if kind == "" || kind == "all" {
 		return d.countAllResources()
 	}
@@ -448,7 +446,7 @@ func (d *K8sResoureService) SuggestResources(reqCtx interfaces.RequestContext) (
 
 // getNamespaceVID 通过 MATCH 点查找 namespace 的 VID
 func (d *K8sResoureService) getNamespaceVID(namespace, traceID string) (string, error) {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := NewNGQLSanitizer()
 	query := fmt.Sprintf(
 		`MATCH (v:K8sResource{kind:"Namespace",name:%s,is_deleted:false}) RETURN id(v) AS vid`,
 		sanitizer.QuoteString(namespace),
@@ -546,7 +544,7 @@ func (d *K8sResoureService) SearchResourceRelationship(reqCtx interfaces.Request
 
 // searchByResourceID 单节点模式：以指定节点为起点 N 跳双向 BFS 遍历
 func (d *K8sResoureService) searchByResourceID(resourceID string, depthStr string, targetKind string, traceID string) (interface{}, error) {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := NewNGQLSanitizer()
 	depth, err := strconv.Atoi(depthStr)
 	if err != nil {
 		depth = 1
@@ -748,7 +746,7 @@ func (d *K8sResoureService) searchByResourceID(resourceID string, depthStr strin
 
 // 将字符串切片转换为JSON数组格式，用于Nebula查询中的IN子句
 func listToJSON(list []string) string {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := NewNGQLSanitizer()
 	if len(list) == 0 {
 		return "[]"
 	}
@@ -833,7 +831,7 @@ func (d *K8sResoureService) invalidateMetadataCache() {
 
 // GetResourceDefine 按需获取单个资源的完整定义
 func (d *K8sResoureService) GetResourceDefine(reqCtx interfaces.RequestContext) (interface{}, error) {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := NewNGQLSanitizer()
 	traceID := reqCtx.TraceID
 	resourceID := reqCtx.Query("resourceId")
 	if resourceID == "" {

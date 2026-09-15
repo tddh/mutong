@@ -18,7 +18,7 @@ import (
 	alert_models "gitee.com/tddh/mutong/models/alert"
 	"gitee.com/tddh/mutong/models/diagnosis"
 	"gitee.com/tddh/mutong/models/retrospective"
-	"gitee.com/tddh/mutong/pkg/sanitizer"
+	"gitee.com/tddh/mutong/pkg/ngql"
 	diagnosis_svc "gitee.com/tddh/mutong/services/diagnosis"
 )
 
@@ -918,7 +918,7 @@ func (s *Service) enrichBusinessCallsFromNebula(report *retrospective.Postmortem
 		return
 	}
 
-	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+	ngqlSanitizer := ngql.NewSanitizer()
 
 	result := &retrospective.BusinessReportCalls{AppName: appName}
 
@@ -980,7 +980,7 @@ func (s *Service) enrichWorkloadContext(report *retrospective.PostmortemReport, 
 		return
 	}
 
-	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+	ngqlSanitizer := ngql.NewSanitizer()
 
 	ownerQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource{kind:"Pod",name:%s,name_space:%s})-[:OwnedBy*1..2]->(owner:K8sResource)

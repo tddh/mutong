@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sort"
-
 	"sync"
 
-	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"gitee.com/tddh/mutong/interfaces"
 	"gitee.com/tddh/mutong/models/diagnosis"
+	"gitee.com/tddh/mutong/pkg/ngql"
 )
 
 type HybridRetriever struct {
@@ -82,7 +81,7 @@ func (h *HybridRetriever) Search(
 }
 
 func (h *HybridRetriever) searchBySameOwner(uid, namespace string) []diagnosis.GraphCaseResult {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	ownerQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource)-[:OwnedBy]->(owner:K8sResource)
 		 WHERE id(pod) == %s
@@ -133,7 +132,7 @@ func (h *HybridRetriever) searchBySameOwner(uid, namespace string) []diagnosis.G
 }
 
 func (h *HybridRetriever) searchBySameNode(uid string) []diagnosis.GraphCaseResult {
-	sanitizer := sanitizer.NewNGQLSanitizer()
+	sanitizer := ngql.NewSanitizer()
 	nodeQ := fmt.Sprintf(
 		`MATCH (pod:K8sResource)-[:RunsOn]->(node:K8sResource)
 		 WHERE id(pod) == %s

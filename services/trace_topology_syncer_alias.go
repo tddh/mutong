@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"gitee.com/tddh/mutong/pkg/sanitizer"
 	"go.uber.org/zap"
 )
 
@@ -69,7 +68,7 @@ func (s *TraceTopologySyncer) lookupByOwnerName(ownerName, namespace string) (bu
 		return businessAppRef{}, false
 	}
 
-	ngqlSanitizer := sanitizer.NewNGQLSanitizer()
+	ngqlSanitizer := NewNGQLSanitizer()
 	cacheKey := "bizowner:" + namespace + ":" + ownerName
 	if cached, err := s.relationCache.Get(cacheKey); err == nil {
 		parts := strings.SplitN(string(cached), "|", 2)

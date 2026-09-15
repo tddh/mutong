@@ -9,7 +9,6 @@ import (
 
 	"gitee.com/tddh/mutong/config"
 	"gitee.com/tddh/mutong/models"
-	"gitee.com/tddh/mutong/pkg/ngql"
 	"github.com/allegro/bigcache/v3"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
@@ -46,7 +45,7 @@ func (d *K8sResoureService) Relationship(uid string) {
 	query := `match (v:K8sResource) RETURN v.K8sResource.api_version as api_version,v.K8sResource.api_group as group ,v.K8sResource.labels as labels,v.K8sResource.name as name ,v.K8sResource.name_space as name_space,v.K8sResource.resource_define as resource_define ,v.K8sResource.kind as kind ,v.K8sResource.uid as uid ;`
 
 	if uid != "" {
-		sanitizer := ngql.NewSanitizer()
+		sanitizer := NewNGQLSanitizer()
 		// 使用 FETCH PROP ON 按 VID 直查存储层，不依赖 TAG INDEX，
 		// 避免 INSERT 后因索引异步更新导致 MATCH {uid:xxx} 返回空结果。
 		query = fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD properties(vertex).uid AS uid, properties(vertex).name AS name, properties(vertex).api_group AS `+"group"+`, properties(vertex).labels AS labels, properties(vertex).name_space AS name_space, properties(vertex).resource_define AS resource_define, properties(vertex).kind AS kind, properties(vertex).api_version AS api_version;`, sanitizer.QuoteString(uid))
@@ -189,7 +188,7 @@ func (d *K8sResoureService) Relationship(uid string) {
 // 幂等：各 process 函数重建前先清理同类型出边。
 func (d *K8sResoureService) BackfillRelationshipsByKinds(kinds []string) {
 	for _, kind := range kinds {
-		sanitizer := ngql.NewSanitizer()
+		sanitizer := NewNGQLSanitizer()
 		query := "LOOKUP ON K8sResource WHERE K8sResource.kind == " + sanitizer.QuoteString(kind) +
 			" AND K8sResource.is_deleted == false YIELD id(vertex) AS uid;"
 		rows, err := d.executenGQL(query)

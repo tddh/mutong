@@ -621,7 +621,7 @@
   padding-inline: var(--shell-pad);
 }
 :where(.nav-brand) {
-  font-size: var(--fs-500);
+  font-size: var(--fs-600);
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--text-primary);
@@ -641,13 +641,13 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px var(--sp-3);
+  padding: 7px var(--sp-4);
   border-radius: var(--r-2);
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font-family: inherit;
-  font-size: var(--fs-400);
+  font-size: var(--fs-450);
   line-height: 1.4;
   text-decoration: none;
   white-space: nowrap;
@@ -677,29 +677,50 @@
   position: relative;
   display: inline-flex;
 }
+/* 面板常驻 DOM，开合交给 .is-open：原先 display:none + :hover 的组合里，
+   top: calc(100% + 6px) 留出的缝隙会让鼠标下移时 :hover 当场断裂，菜单还没
+   碰到就消失；且 display 无法过渡，也就做不了延迟关闭。 */
 :where(.nav-pop) {
-  display: none;
   position: absolute;
-  top: calc(100% + 6px);
+  top: 100%;
   left: 0;
-  min-width: 148px;
+  margin-top: 6px;
+  min-width: 168px;
   padding: var(--sp-1);
+  display: flex;
   flex-direction: column;
   background: var(--surface-card);
   border: 1px solid var(--border-default);
   border-radius: var(--r-3);
   box-shadow: var(--elev-3);
   z-index: var(--z-float);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity var(--dur-1) var(--ease), transform var(--dur-1) var(--ease),
+    visibility 0s linear var(--dur-1);
 }
-:where(.nav-more:hover .nav-pop),
+/* 透明桥接条盖住 margin-top 那段间距，鼠标从按钮移向面板时 hover 不会断 */
+:where(.nav-pop)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 8px;
+}
+:where(.nav-more.is-open .nav-pop),
 :where(.nav-more:focus-within .nav-pop) {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition-delay: 0s;
 }
 :where(.nav-pop a) {
   margin-left: 0;
   border-radius: var(--r-2);
   padding: var(--sp-2) var(--sp-3);
-  font-size: var(--fs-300);
+  font-size: var(--fs-400);
 }
 :where(.nav-actions) {
   display: flex;
@@ -709,9 +730,9 @@
 }
 :where(.nav-actions > a) {
   color: var(--text-secondary);
-  font-size: var(--fs-400);
+  font-size: var(--fs-450);
   text-decoration: none;
-  padding: 6px var(--sp-2);
+  padding: 7px var(--sp-3);
   border-radius: var(--r-2);
 }
 :where(.nav-actions > a:hover) {

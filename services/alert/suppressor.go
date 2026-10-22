@@ -219,10 +219,11 @@ func (s *AlertSuppressor) getParentAlerts(resourceType, resourceName string) []*
 func (s *AlertSuppressor) updateActiveAlerts(a *alert_models.EnrichedAlert) {
 	s.activeMu.Lock()
 	defer s.activeMu.Unlock()
-	if a.Status == "firing" {
+	switch a.Status {
+	case "firing":
 		s.activeAlerts[a.Fingerprint] = a
 		s.indexByBusinessApp(a)
-	} else if a.Status == "resolved" {
+	case "resolved":
 		s.removeFromBizAppIndex(a)
 		delete(s.activeAlerts, a.Fingerprint)
 	}

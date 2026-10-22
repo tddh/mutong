@@ -16,7 +16,7 @@ func NewRoleController(roleSvc interfaces.RoleInterface) *RoleController {
 }
 
 func (rc *RoleController) RegisterRoutes(app *gin.Engine) {
-	app.GET("/roles", rc.Get)
+	app.GET("/api/v1/roles", rc.Get)
 }
 
 func (rc *RoleController) Get(ctx *gin.Context) {

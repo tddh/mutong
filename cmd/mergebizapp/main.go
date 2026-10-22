@@ -108,7 +108,9 @@ func migrateEdge(sess *nebula.Session, fromUID, toUID, edgeType string) {
 		}
 		parts[1] = strings.TrimSuffix(parts[1], "@0")
 		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, strconv.Quote(fromUID), strconv.Quote(parts[1]))
-		sess.Execute(delQuery)
+		if _, err := sess.Execute(delQuery); err != nil {
+			log.Printf("delete edge %s failed: %v", edgeType, err)
+		}
 
 		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, strconv.Quote(toUID), strconv.Quote(parts[1]))
 		if _, err := sess.Execute(insQuery); err != nil {
@@ -132,7 +134,9 @@ func migrateEdge(sess *nebula.Session, fromUID, toUID, edgeType string) {
 			continue
 		}
 		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, strconv.Quote(parts[0]), strconv.Quote(fromUID))
-		sess.Execute(delQuery)
+		if _, err := sess.Execute(delQuery); err != nil {
+			log.Printf("delete edge %s failed: %v", edgeType, err)
+		}
 
 		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, strconv.Quote(parts[0]), strconv.Quote(toUID))
 		if _, err := sess.Execute(insQuery); err != nil {

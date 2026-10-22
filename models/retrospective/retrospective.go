@@ -36,8 +36,8 @@ type ExecutionActionRecord struct {
 	Action       string    `json:"action"`
 	Target       string    `json:"target"`
 	Risk         string    `json:"risk,omitempty"`
-	ApprovedBy   string    `json:"approved_by,omitempty"`   // 审批人；空表示未审批（待审批或自动执行）
-	AutoExecuted bool      `json:"auto_executed"`           // 是否自动模式执行
+	ApprovedBy   string    `json:"approved_by,omitempty"` // 审批人；空表示未审批（待审批或自动执行）
+	AutoExecuted bool      `json:"auto_executed"`         // 是否自动模式执行
 	Success      bool      `json:"success"`
 	Message      string    `json:"message,omitempty"`
 	Reason       string    `json:"reason,omitempty"`

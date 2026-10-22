@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"gitee.com/tddh/mutong/interfaces"
+	"gitee.com/tddh/mutong/pkg/safe"
 	"gitee.com/tddh/mutong/services"
 )
 
@@ -85,7 +86,7 @@ func (c *StatsController) getResourceCounts() map[string]int {
 func (c *StatsController) SyncResources(ctx *gin.Context) {
 	c.logger.Info("Manual DB sync triggered")
 	if c.svc != nil {
-		go c.svc.ForceSyncResources()
+		safe.Go(c.logger, func() { c.svc.ForceSyncResources() })
 		ctx.JSON(http.StatusOK, map[string]string{"status": "sync started"})
 	} else {
 		ctx.JSON(http.StatusOK, map[string]string{"status": "error"})
@@ -95,7 +96,9 @@ func (c *StatsController) SyncResources(ctx *gin.Context) {
 func (c *StatsController) BackfillRelationships(ctx *gin.Context) {
 	c.logger.Info("Manual relationship backfill triggered")
 	if c.svc != nil {
-		go c.svc.BackfillRelationshipsByKinds([]string{"FlowSchema", "CiliumEndpoint", "CustomResourceDefinition", "APIService"})
+		safe.Go(c.logger, func() {
+			c.svc.BackfillRelationshipsByKinds([]string{"FlowSchema", "CiliumEndpoint", "CustomResourceDefinition", "APIService"})
+		})
 		ctx.JSON(http.StatusOK, map[string]string{"status": "backfill started"})
 	} else {
 		ctx.JSON(http.StatusOK, map[string]string{"status": "error"})

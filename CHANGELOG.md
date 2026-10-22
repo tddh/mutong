@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Security
+
+- 鉴权改为默认拒绝：`/api/v1/k8s/resources/**`、`/api/v1/users`、`/api/v1/roles` 全部需要登录；旧路径 `301` 到新路径
+- 删除 `mutong_session` 的 UUID 回退分支：cookie 只接受 HMAC 验签通过的会话，伪造 UUID 不再能登录
+- 会话 Cookie 显式 `SameSite=Lax` + `HttpOnly`，`Secure` 支持 `X-Forwarded-Proto`/`MUTONG_COOKIE_SECURE`
+- Casbin RBAC 真正挂载；启动时同步所有活跃用户角色；新增 `auth.rbac_mode`（`enforce`/`shadow`/`off`）
+- 执行器危险操作在 `MUTONG_ADMIN_KEY` 未配置时返回 503；密钥比较改为常量时间
+- 告警 webhook 挂载签名校验 + 时间戳窗口 + 重放拒绝；未配置 secret 时默认拒绝（可用 `MUTONG_WEBHOOK_ALLOW_UNSIGNED=true` 显式放行）
+- 外部告警源需要 `X-Alert-Token` 或受信 IP；两者都未配置时拒绝
+- Secret 的 `data`/`stringData` 在资源详情与图谱接口返回前脱敏
+- `/device` 页面与诊断 Markdown 输出做 HTML 转义/DOMPurify 清洗
+- LLM 建议不再标记为可自动修复；MCP 执行工具只生成待审批提案，不再自动执行
+- Swagger 默认关闭（`server.enableSwagger`）；`/metrics` 默认需要鉴权（`MUTONG_METRICS_PUBLIC=true` 放行）
+- CORS 默认拒绝跨域；`MUTONG_ALLOWED_ORIGINS` 中的 `*` 被忽略
+- 默认只信任本机回环代理；跨机反代需通过 `MUTONG_TRUSTED_PROXIES` 显式配置，避免 `X-Forwarded-For` 伪造
+
+### Changed (defaults)
+
+- `MUTONG_TRUSTED_PROXIES` 未配置时默认信任本机回环 `127.0.0.1/32,::1/128`
+- `MUTONG_SESSION_SECRET` 未配置且 `auth.global_secret` 为空时，自动生成 32 字节密钥并持久化到 `data/session_secret`（0600）；可用 `MUTONG_SESSION_SECRET_FILE` 指定路径。多副本部署必须通过环境变量共享同一密钥
+- `MUTONG_ADMIN_KEY` 未配置时，执行器危险操作回退为要求 `admin` 角色（不再返回 503）
+
+### Changed (breaking)
+
+- K8s 资源 API 从 `/k8s/resources/**` 迁移到 `/api/v1/k8s/resources/**`（旧路径 301）
+- 用户/角色 API 从 `/users`、`/roles` 迁移到 `/api/v1/users`、`/api/v1/roles`（旧路径 301）
+- 本地登录要求配置 `MUTONG_SESSION_SECRET` 或 `auth.global_secret`，否则返回 503；升级后需要重新登录
+- 告警 webhook 需要配置 `MUTONG_WEBHOOK_SECRET` 并发送签名/时间戳头
+- `MUTONG_INIT_ADMIN_PASSWORD` 只在管理员不存在时创建账号，不再每次启动重置密码
+
+### Fixed
+
+- 终端 WebSocket 会话关闭时回收 K8s exec 流与 goroutine；所有写操作串行化
+- 告警聚合器 `Stop()` 与刷新协程的 ticker 竞态（可导致 nil panic）
+- 告警投递与执行审计失败不再被静默丢弃
+- 业务拓扑接口错误时返回真实 500，而不是 `200 + {"error": ...}`
+- 配置加载失败返回 error，不再从库代码 `os.Exit(1)`/`panic`
+- `/api/v1/k8s/resources/:name` 读取 8 列导致的索引越界
+- 前端 G6 拆分为独立 chunk，首屏包体不再包含 1.4MB 图库
+
 ### Added
 - AI 诊断聊天会话持久化：`chat_sessions` 表新增 `user_id`/`title` 字段，`chat/ask` 自动创建/续接会话
 - 会话历史 API：`GET /chat/sessions`（当前用户列表）、`GET /chat/sessions/:id`（详情）、`DELETE /chat/sessions/:id`（软删除）

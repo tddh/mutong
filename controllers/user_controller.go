@@ -16,7 +16,7 @@ func NewUserController(userSvc interfaces.UserInterface) *UserController {
 }
 
 func (uc *UserController) RegisterRoutes(app *gin.Engine) {
-	app.GET("/users", uc.GetUserByID)
+	app.GET("/api/v1/users", uc.GetUserByID)
 }
 
 func (uc *UserController) GetUserByID(ctx *gin.Context) {

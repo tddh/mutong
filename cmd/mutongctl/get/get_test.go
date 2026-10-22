@@ -114,7 +114,7 @@ func TestGetPodRunURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getPodRun error: %v", err)
 	}
-	expected := "/k8s/resources/graph/nodes?kind=Pod&namespace=kube-system"
+	expected := "/api/v1/k8s/resources/graph/nodes?kind=Pod&namespace=kube-system"
 	if reqURL != expected {
 		t.Errorf("expected URL %q, got %q", expected, reqURL)
 	}

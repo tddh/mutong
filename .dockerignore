@@ -1,0 +1,40 @@
+# Version control and local tooling
+.git
+.gitignore
+.idea
+.obsidian
+.opencode
+.omo
+.qoder
+.sisyphus
+.workbuddy
+.worktrees
+.zvec-grep
+docs/superpowers
+
+# Secrets and local configuration: images must only contain *.example files
+configs/config.*.yaml
+!configs/config.*.yaml.example
+kubeconfig
+kubeconfig-*
+.envrc.local
+agent.yaml
+
+# Build artifacts and local runtime output
+artifacts/
+data/
+dist/
+view/dist/
+view/node_modules/
+node_modules/
+*.log
+coverage.out
+coverage.html
+mutong
+mutongctl
+mergebizapp
+mutong-*-amd64
+mutong-*-arm64
+*.tar.gz
+*.bak
+tmp_*

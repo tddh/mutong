@@ -3,6 +3,7 @@ package oauth2
 import (
 	"crypto/rand"
 	"fmt"
+	"html"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -215,12 +216,11 @@ func devicePageHTML(message string, code string, isError bool) []byte {
 				return "#fff2e8;color:#d4380d;border:1px solid #ffd591"
 			}
 			return "#f6ffed;color:#389e0d;border:1px solid #b7eb8f"
-		}() + `;">` + message + `</div>`
+		}() + `;">` + html.EscapeString(message) + `</div>`
 	}
-	codeValue := code
-	if codeValue == "" {
-		codeValue = ``
-	}
+	// The code is attacker-controllable via the query string and is embedded
+	// in an HTML attribute, so escape it (quotes included).
+	codeValue := html.EscapeString(code)
 	return []byte(`<!DOCTYPE html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">

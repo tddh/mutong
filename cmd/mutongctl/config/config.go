@@ -74,7 +74,7 @@ func saveConfigFile(cfg *configFile) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 	data, err := yaml.Marshal(cfg)
@@ -94,18 +94,18 @@ func newCmdConfigGet(f *Factory) *cobra.Command {
 				return err
 			}
 			if cfg.CurrentContext == "" {
-				fmt.Fprintln(f.IO.Out, "No current context set. Use 'mutongctl config use-context <name>'")
+				_, _ = fmt.Fprintln(f.IO.Out, "No current context set. Use 'mutongctl config use-context <name>'")
 				return nil
 			}
 			ctx, ok := cfg.Contexts[cfg.CurrentContext]
 			if !ok {
-				fmt.Fprintf(f.IO.Out, "Current context '%s' not found in config\n", cfg.CurrentContext)
+				_, _ = fmt.Fprintf(f.IO.Out, "Current context '%s' not found in config\n", cfg.CurrentContext)
 				return nil
 			}
-			fmt.Fprintf(f.IO.Out, "Context: %s\n", cfg.CurrentContext)
-			fmt.Fprintf(f.IO.Out, "  server:    %s\n", ctx.Server)
+			_, _ = fmt.Fprintf(f.IO.Out, "Context: %s\n", cfg.CurrentContext)
+			_, _ = fmt.Fprintf(f.IO.Out, "  server:    %s\n", ctx.Server)
 			if ctx.Namespace != "" {
-				fmt.Fprintf(f.IO.Out, "  namespace: %s\n", ctx.Namespace)
+				_, _ = fmt.Fprintf(f.IO.Out, "  namespace: %s\n", ctx.Namespace)
 			}
 			return nil
 		},
@@ -136,7 +136,7 @@ func newCmdConfigSet(f *Factory) *cobra.Command {
 			if err := saveConfigFile(cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(f.IO.Out, "Updated context '%s'\n", cfg.CurrentContext)
+			_, _ = fmt.Fprintf(f.IO.Out, "Updated context '%s'\n", cfg.CurrentContext)
 			return nil
 		},
 	}
@@ -155,7 +155,7 @@ func newCmdConfigContexts(f *Factory) *cobra.Command {
 				return err
 			}
 			if len(cfg.Contexts) == 0 {
-				fmt.Fprintln(f.IO.Out, "No contexts configured")
+				_, _ = fmt.Fprintln(f.IO.Out, "No contexts configured")
 				return nil
 			}
 			for name, ctx := range cfg.Contexts {
@@ -163,7 +163,7 @@ func newCmdConfigContexts(f *Factory) *cobra.Command {
 				if name == cfg.CurrentContext {
 					current = "*"
 				}
-				fmt.Fprintf(f.IO.Out, "%s %s\t%s\n", current, name, ctx.Server)
+				_, _ = fmt.Fprintf(f.IO.Out, "%s %s\t%s\n", current, name, ctx.Server)
 			}
 			return nil
 		},
@@ -188,7 +188,7 @@ func newCmdConfigUseContext(f *Factory) *cobra.Command {
 			if err := saveConfigFile(cfg); err != nil {
 				return err
 			}
-			fmt.Fprintf(f.IO.Out, "Switched to context '%s'\n", name)
+			_, _ = fmt.Fprintf(f.IO.Out, "Switched to context '%s'\n", name)
 			return nil
 		},
 	}

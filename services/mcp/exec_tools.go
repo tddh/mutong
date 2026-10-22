@@ -125,63 +125,26 @@ func execToolDefs() []diagnosis.ToolDefinition {
 // planAndSubmit 构造执行计划并交给 executor 的门禁链路（autoMode + 置信度阈值 + 审计）。
 // 没有诊断结果支撑的调用直接拒绝，防止凭空执行。
 func (s *Server) planAndSubmit(ctx context.Context, action ex.ActionType, risk ex.RiskLevel, namespace, resourceName, fingerprint, reason string, apply func(p *ex.ExecutionPlan)) (string, error) {
-	if s.executor == nil {
-		return "", fmt.Errorf("自愈执行器未启用（executor 未配置）")
-	}
-
-	// 同指纹同动作已有待审批计划时去重，避免审批列表堆重复项
-	if pendingID := s.findPendingPlan(ctx, fingerprint, action); pendingID != "" {
-		return fmt.Sprintf("该告警已有一个待审批的执行计划（审计ID: %s，动作: %s），请直接到执行记录中审批，不重复创建", pendingID, action), nil
-	}
-
-	var confidence float64
-	if s.diagReader != nil && fingerprint != "" {
-		if res, err := s.diagReader.GetCachedDiagnosisResult(ctx, fingerprint); err == nil && res != nil {
-			confidence = maxConf(res.RootCauses)
-			if reason == "" {
-				reason = res.Summary
-			}
-		}
-	}
-	if confidence <= 0 {
-		return "", fmt.Errorf("未找到指纹 %s 的诊断结果（可能已过期），无法为执行提议提供置信度依据，拒绝执行", fingerprint)
-	}
-	if reason == "" {
-		reason = "AI 诊断建议执行 " + string(action)
-	}
-
-	target := resourceName
-	if namespace != "" {
-		target = namespace + "/" + resourceName
-	}
-	plan := &ex.ExecutionPlan{
-		ID:           uuid.New().String(),
-		Action:       action,
-		Target:       target,
-		Namespace:    namespace,
-		ResourceName: resourceName,
-		Reason:       reason,
-		Confidence:   confidence,
-		Risk:         risk,
-		Fingerprint:  fingerprint,
-		CreatedAt:    time.Now(),
-	}
-	if apply != nil {
-		apply(plan)
-	}
-
-	result, err := s.executor.Execute(ctx, *plan)
-	if err != nil {
-		return "", fmt.Errorf("执行失败: %w", err)
-	}
-	if result == nil {
-		return "", fmt.Errorf("执行器未返回结果")
-	}
-	if result.Success {
-		return fmt.Sprintf("执行成功（计划ID: %s）: %s", plan.ID, result.Message), nil
-	}
-	return fmt.Sprintf("执行提议已提交但未执行（计划ID: %s）: %s。若提示需要审批，请在前端执行记录中人工审批。", plan.ID, result.Message), nil
+	// Tool/LLM-originated actions are proposals only. They are recorded as
+	// pending approval and are never executed from this path, regardless of
+	// the executor's auto mode or any confidence value supplied by the model.
+	return s.proposalAndRecord(ctx, action, risk, namespace, resourceName, fingerprint, reason, apply)
 }
+
+// execToolNames is the set of tools that can change cluster state. Callers
+// must treat these differently from read-only tools.
+var execToolNames = map[string]bool{
+	"restart_pod_safe":        true,
+	"rollout_restart":         true,
+	"scale_deployment":        true,
+	"update_deployment_image": true,
+	"adjust_resource_limits":  true,
+	"delete_pod":              true,
+	"rollout_undo":            true,
+}
+
+// IsExecTool reports whether name can modify cluster state.
+func IsExecTool(name string) bool { return execToolNames[name] }
 
 // proposalAndRecord 危险动作专用：构造计划后只记录为"待审批"审计，绝不执行（不走 autoMode 门禁）。
 // 与安全组相同的准入约束：必须有诊断结果支撑、同指纹同动作去重。
@@ -397,10 +360,11 @@ func (s *Server) handleScaleDeployment(ctx context.Context, args map[string]stri
 		return "", fmt.Errorf("invalid deployment name: %s", deployment)
 	}
 	replicas, err := strconv.Atoi(args["replicas"])
-	if err != nil || replicas < 0 {
-		return "", fmt.Errorf("replicas 必须为非负整数: %s", args["replicas"])
+	if err != nil || replicas < 0 || replicas > 1000 {
+		return "", fmt.Errorf("replicas 必须为 0-1000 的整数: %s", args["replicas"])
 	}
 	return s.planAndSubmit(ctx, ex.ActionScaleDeployment, ex.RiskLow, namespace, deployment, fingerprint, args["reason"], func(p *ex.ExecutionPlan) {
-		p.Replicas = int32(replicas)
+		// Range checked above (0-1000); the conversion cannot overflow.
+		p.Replicas = int32(replicas) //nolint:gosec
 	})
 }

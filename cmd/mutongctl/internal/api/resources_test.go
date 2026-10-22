@@ -48,7 +48,7 @@ func TestListPodsWithNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListPods error: %v", err)
 	}
-	expected := "/k8s/resources/graph/nodes?kind=Pod&namespace=kube-system"
+	expected := "/api/v1/k8s/resources/graph/nodes?kind=Pod&namespace=kube-system"
 	if reqURL != expected {
 		t.Errorf("expected URL %q, got %q", expected, reqURL)
 	}
@@ -279,7 +279,7 @@ func TestTopoGetURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TopoGet error: %v", err)
 	}
-	expected := "/k8s/resources/graph/search?resourceId=uid-abc&depth=5"
+	expected := "/api/v1/k8s/resources/graph/search?resourceId=uid-abc&depth=5"
 	if reqURL != expected {
 		t.Errorf("expected URL %q, got %q", expected, reqURL)
 	}

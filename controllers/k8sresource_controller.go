@@ -18,14 +18,14 @@ func NewK8sResourceController(K8sResourceSvc interfaces.K8sResourceInterface) *K
 
 func (ct *K8sResourceController) RegisterK8sResourceRoutes(app *gin.Engine) {
 	// 具体路径必须在通配符之前注册，否则会被覆盖
-	app.GET("/k8s/resources/graph/nodes", ct.GetAllResources)
-	app.GET("/k8s/resources/graph/edges", ct.GetAllRelationships)
-	app.GET("/k8s/resources/graph/metadata", ct.GetKindsAndNamespaces)
-	app.GET("/k8s/resources/graph/search", ct.SearchResourceRelationship)
-	app.GET("/k8s/resources/graph/suggest", ct.SuggestResources)
-	app.GET("/k8s/resources/graph/resource-define", ct.GetResourceDefine)
+	app.GET("/api/v1/k8s/resources/graph/nodes", ct.GetAllResources)
+	app.GET("/api/v1/k8s/resources/graph/edges", ct.GetAllRelationships)
+	app.GET("/api/v1/k8s/resources/graph/metadata", ct.GetKindsAndNamespaces)
+	app.GET("/api/v1/k8s/resources/graph/search", ct.SearchResourceRelationship)
+	app.GET("/api/v1/k8s/resources/graph/suggest", ct.SuggestResources)
+	app.GET("/api/v1/k8s/resources/graph/resource-define", ct.GetResourceDefine)
 	// 通配符路由放最后
-	app.GET("/k8s/resources/:name", ct.GetAll)
+	app.GET("/api/v1/k8s/resources/:name", ct.GetAll)
 }
 
 func (ct *K8sResourceController) reqCtx(c *gin.Context) interfaces.RequestContext {

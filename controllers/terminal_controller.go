@@ -3,6 +3,7 @@ package controllers
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,13 +22,30 @@ var wsUpgrader = websocket.Upgrader{
 	HandshakeTimeout: 10 * time.Second,
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
+		if origin == "" {
+			// Non-browser client (no Origin header).
+			return true
+		}
 		allowed := os.Getenv("MUTONG_ALLOWED_ORIGINS")
 		if allowed == "" {
-			return true
+			// Default to same-origin instead of allowing every site.
+			u, err := url.Parse(origin)
+			return err == nil && u.Host == r.Host
+		}
+		originHost := origin
+		if u, err := url.Parse(origin); err == nil {
+			originHost = u.Host
 		}
 		for _, a := range strings.Split(allowed, ",") {
 			a = strings.TrimSpace(a)
-			if a == "*" || origin == a {
+			if a == "" || a == "*" {
+				continue
+			}
+			allowedHost := a
+			if u, err := url.Parse(a); err == nil && u.Host != "" {
+				allowedHost = u.Host
+			}
+			if origin == a || originHost == allowedHost {
 				return true
 			}
 		}
@@ -158,7 +176,7 @@ func (c *TerminalController) ws(ctx *gin.Context) {
 		}
 		return
 	}
-	defer ws.Close()
+	defer func() { _ = ws.Close() }()
 
 	const (
 		writeWait      = 10 * time.Second
@@ -197,6 +215,11 @@ func (c *TerminalController) ws(ctx *gin.Context) {
 	pod := ctx.DefaultQuery("pod", "")
 	container := ctx.DefaultQuery("container", "")
 	shell := ctx.DefaultQuery("shell", "/bin/sh")
+	switch shell {
+	case "/bin/sh", "/bin/bash", "/bin/ash", "/bin/zsh", "/bin/dash":
+	default:
+		shell = "/bin/sh"
+	}
 
 	if pod == "" {
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: pod name required\x1b[0m\r\n"))
@@ -206,8 +229,13 @@ func (c *TerminalController) ws(ctx *gin.Context) {
 		container = pod
 	}
 
+	if c.Manager.SessionCount() >= 100 {
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: too many concurrent terminal sessions\x1b[0m\r\n"))
+		return
+	}
 	sess, _ := c.Manager.CreateSession(cluster, namespace, pod, container, ws)
 	if sess != nil {
+		defer func() { _ = c.Manager.CloseSession(sess.ID) }()
 		sess.SetK8sClient(c.k8sClient, c.restConfig)
 		go sess.StartK8sExec(cluster, namespace, pod, container, shell)
 	}

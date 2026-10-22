@@ -87,7 +87,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, h
 			c.baseURL, method, fullURL, c.baseURL,
 		)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	// Limit response body to 10MB to prevent OOM
 	const maxBodySize = 10 << 20
@@ -192,7 +192,7 @@ func refreshOAuthToken(server, refreshToken string) (string, int, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		AccessToken string `json:"access_token"`

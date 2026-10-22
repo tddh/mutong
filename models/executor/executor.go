@@ -45,29 +45,29 @@ const (
 
 // ExecutionPlan describes a planned remediation action
 type ExecutionPlan struct {
-	ID            string            `json:"id"`
-	Action        ActionType        `json:"action"`
-	Target        string            `json:"target"` // e.g., namespace/name or resource identifier
-	Namespace     string            `json:"namespace"`
-	ResourceName  string            `json:"resourceName"`
-	Reason        string            `json:"reason"` // AI diagnosis conclusion
-	Confidence    float64           `json:"confidence"`
-	Risk          RiskLevel         `json:"risk"`
-	ApprovedBy    string            `json:"approvedBy"`  // empty if auto, username if approved
-	Fingerprint   string            `json:"fingerprint"` // alert fingerprint this plan was derived from
-	Replicas      int32             `json:"replicas"`    // desired number of replicas for deployments
-	MinReplicas   int32             `json:"minReplicas"`
-	MaxReplicas   int32             `json:"maxReplicas"`
-	TargetCPU     int32             `json:"targetCpu"`
-	TargetMemory  int32             `json:"targetMemory,omitempty"`
-	CreatedAt     time.Time         `json:"createdAt"`
-	ConfigData    map[string]string `json:"configData,omitempty"`
-	Annotations   map[string]string `json:"annotations,omitempty"`
-	Labels        map[string]string `json:"labels,omitempty"`
-	Image         string            `json:"image,omitempty"`
-	ContainerName string            `json:"containerName,omitempty"`
-	Revision      int64             `json:"revision,omitempty"`      // target revision for rollout_undo, 0 = previous
-	OldTemplateJSON string          `json:"oldTemplateJson,omitempty"` // internal: pre-change pod template snapshot for auto-rollback
+	ID              string            `json:"id"`
+	Action          ActionType        `json:"action"`
+	Target          string            `json:"target"` // e.g., namespace/name or resource identifier
+	Namespace       string            `json:"namespace"`
+	ResourceName    string            `json:"resourceName"`
+	Reason          string            `json:"reason"` // AI diagnosis conclusion
+	Confidence      float64           `json:"confidence"`
+	Risk            RiskLevel         `json:"risk"`
+	ApprovedBy      string            `json:"approvedBy"`  // empty if auto, username if approved
+	Fingerprint     string            `json:"fingerprint"` // alert fingerprint this plan was derived from
+	Replicas        int32             `json:"replicas"`    // desired number of replicas for deployments
+	MinReplicas     int32             `json:"minReplicas"`
+	MaxReplicas     int32             `json:"maxReplicas"`
+	TargetCPU       int32             `json:"targetCpu"`
+	TargetMemory    int32             `json:"targetMemory,omitempty"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	ConfigData      map[string]string `json:"configData,omitempty"`
+	Annotations     map[string]string `json:"annotations,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	Image           string            `json:"image,omitempty"`
+	ContainerName   string            `json:"containerName,omitempty"`
+	Revision        int64             `json:"revision,omitempty"`        // target revision for rollout_undo, 0 = previous
+	OldTemplateJSON string            `json:"oldTemplateJson,omitempty"` // internal: pre-change pod template snapshot for auto-rollback
 }
 
 // ExecutionResult records the outcome of an execution

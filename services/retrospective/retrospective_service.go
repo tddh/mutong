@@ -354,13 +354,13 @@ func (s *Service) generateResolution(alert *alert_models.ProcessedAlert) string 
 func (s *Service) FormatReport(report *retrospective.PostmortemReport) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("# 故障复盘报告: %s\n\n", report.IncidentTitle))
+	fmt.Fprintf(&sb, "# 故障复盘报告: %s\n\n", report.IncidentTitle)
 
 	// === 基本信息 ===
 	sb.WriteString("## 📊 基本信息\n\n")
-	sb.WriteString(fmt.Sprintf("- **报告 ID**: %s\n", report.ID))
-	sb.WriteString(fmt.Sprintf("- **严重级别**: %s\n", report.Severity))
-	sb.WriteString(fmt.Sprintf("- **持续时间**: %s\n", report.Duration))
+	fmt.Fprintf(&sb, "- **报告 ID**: %s\n", report.ID)
+	fmt.Fprintf(&sb, "- **严重级别**: %s\n", report.Severity)
+	fmt.Fprintf(&sb, "- **持续时间**: %s\n", report.Duration)
 	sb.WriteString(fmt.Sprintf("- **开始时间**: %s\n", report.StartTime.Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("- **结束时间**: %s\n", report.EndTime.Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("- **生成时间**: %s\n", report.GeneratedAt.Format(time.RFC3339)))

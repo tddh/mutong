@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net/http"
 	"os"
@@ -52,10 +53,19 @@ func (c *ExecutorController) RegisterRoutes(app *gin.Engine) {
 func (c *ExecutorController) requireAdminKey(ctx *gin.Context) bool {
 	adminKey := os.Getenv("MUTONG_ADMIN_KEY")
 	if adminKey == "" {
-		return true
+		// No shared key configured: fall back to role-based authorization.
+		// Casbin grants execute to both operator and admin; this check is
+		// deliberately stricter and requires the admin role.
+		if GetUserRole(ctx) == "admin" {
+			return true
+		}
+		ctx.JSON(http.StatusForbidden, gin.H{
+			"error": "admin role required (MUTONG_ADMIN_KEY is not configured)",
+		})
+		return false
 	}
 	token := ctx.GetHeader("X-Admin-Key")
-	if token == adminKey {
+	if subtle.ConstantTimeCompare([]byte(token), []byte(adminKey)) == 1 {
 		return true
 	}
 	ctx.JSON(http.StatusForbidden, gin.H{"error": "admin key required for this operation"})

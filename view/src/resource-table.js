@@ -108,7 +108,7 @@ createApp({
 
     const fetchMetadata = async () => {
       try {
-        const resp = await fetch('/k8s/resources/graph/metadata')
+        const resp = await fetch('/api/v1/k8s/resources/graph/metadata')
         if (resp.ok) {
           const data = await resp.json()
           if (data && data.namespaces) {
@@ -136,7 +136,7 @@ createApp({
         if (kind && kind !== 'all') params.set('kind', kind)
         if (search) params.set('search', search)
 
-        const response = await fetch('/k8s/resources/graph/nodes?' + params.toString())
+        const response = await fetch('/api/v1/k8s/resources/graph/nodes?' + params.toString())
         if (!response.ok) throw new Error(`获取资源数据失败 (${response.status})`)
         const data = await response.json()
         const nodes = Array.isArray(data) ? data : data.nodes || []

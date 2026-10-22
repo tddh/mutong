@@ -48,7 +48,7 @@ func runLogout(opts *logoutOptions) error {
 
 	if _, err := os.Stat(tokensFile); err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintln(opts.IO.Out, "Not logged in. No tokens found.")
+			_, _ = fmt.Fprintln(opts.IO.Out, "Not logged in. No tokens found.")
 			return nil
 		}
 		return fmt.Errorf("checking token file: %w", err)
@@ -70,9 +70,9 @@ func runLogout(opts *logoutOptions) error {
 			}
 		}
 		if len(failed) > 0 {
-			fmt.Fprintf(opts.IO.ErrOut, "Warning: server-side revocation failed for:\n")
+			_, _ = fmt.Fprintf(opts.IO.ErrOut, "Warning: server-side revocation failed for:\n")
 			for _, f := range failed {
-				fmt.Fprintf(opts.IO.ErrOut, "  - %s\n", f)
+				_, _ = fmt.Fprintf(opts.IO.ErrOut, "  - %s\n", f)
 			}
 		}
 	}
@@ -81,12 +81,12 @@ func runLogout(opts *logoutOptions) error {
 		return fmt.Errorf("removing token file: %w", err)
 	}
 
-	fmt.Fprintln(opts.IO.Out, "✓ Logged out. Local tokens cleared.")
+	_, _ = fmt.Fprintln(opts.IO.Out, "✓ Logged out. Local tokens cleared.")
 	if opts.Revoke {
-		fmt.Fprintln(opts.IO.Out, "  Server-side revocation completed.")
+		_, _ = fmt.Fprintln(opts.IO.Out, "  Server-side revocation completed.")
 	}
-	fmt.Fprintln(opts.IO.Out)
-	fmt.Fprintln(opts.IO.Out, "Run 'mutongctl auth login' to sign in again.")
+	_, _ = fmt.Fprintln(opts.IO.Out)
+	_, _ = fmt.Fprintln(opts.IO.Out, "Run 'mutongctl auth login' to sign in again.")
 
 	return nil
 }
@@ -105,7 +105,7 @@ func revokeToken(server, refreshToken string) error {
 	if err != nil {
 		return fmt.Errorf("revoke request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("revoke returned HTTP %d", resp.StatusCode)

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -165,7 +166,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 					ApprovedBy:   "",
 					Timestamp:    time.Now(),
 				}
-				e.appendAuditLog(audit)
+				_ = e.appendAuditLog(audit)
 				return &audit.Result, nil
 			}
 		} else {
@@ -177,7 +178,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 				ApprovedBy:   plan.ApprovedBy,
 				Timestamp:    time.Now(),
 			}
-			e.appendAuditLog(audit)
+			_ = e.appendAuditLog(audit)
 			return &audit.Result, nil
 		}
 	}
@@ -334,7 +335,7 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 	}
 	// 模板快照只用于进程内验证回滚，不写入审计明细
 	audit.Plan.OldTemplateJSON = ""
-	e.appendAuditLog(audit)
+	_ = e.appendAuditLog(audit)
 
 	if success {
 		// 执行后验证：后台异步轮询目标就绪状态，结果回写审计（HTTP 请求上下文结束后仍需运行）
@@ -371,8 +372,11 @@ func (e *K8sExecutor) GetAuditLogByID(id string) (*ex.AuditLog, error) {
 	return e.auditStore.GetByID(id)
 }
 
-func (e *K8sExecutor) appendAuditLog(a ex.AuditLog) {
-	_ = e.auditStore.Save(a)
+func (e *K8sExecutor) appendAuditLog(a ex.AuditLog) error {
+	var errs []error
+	if err := e.auditStore.Save(a); err != nil {
+		errs = append(errs, err)
+	}
 	// Also persist an OperationAuditLog if the store is configured
 	if e.opAuditStore != nil {
 		operator := a.Plan.ApprovedBy
@@ -390,13 +394,18 @@ func (e *K8sExecutor) appendAuditLog(a ex.AuditLog) {
 			Timestamp:    a.Timestamp,
 			Details:      "",
 		}
-		_ = e.opAuditStore.Save(op)
+		if err := e.opAuditStore.Save(op); err != nil {
+			errs = append(errs, err)
+		}
 	}
+	if len(errs) > 0 && e.logger != nil {
+		e.logger.Error("failed to persist execution audit log", zap.Errors("errors", errs))
+	}
+	return errors.Join(errs...)
 }
 
 func (e *K8sExecutor) RecordAudit(_ context.Context, log ex.AuditLog) error {
-	e.appendAuditLog(log)
-	return nil
+	return e.appendAuditLog(log)
 }
 
 func (e *K8sExecutor) restartPod(ctx context.Context, namespace, name string) error {
@@ -410,7 +419,7 @@ func (e *K8sExecutor) restartPod(ctx context.Context, namespace, name string) er
 	}
 
 	if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded {
-		return fmt.Errorf("Pod 状态为 %s，拒绝重启", pod.Status.Phase)
+		return fmt.Errorf("pod 状态为 %s，拒绝重启", pod.Status.Phase)
 	}
 
 	for _, cs := range pod.Status.ContainerStatuses {
@@ -617,7 +626,7 @@ type podSnapshot struct {
 	uid        types.UID
 	selector   string // 控制器的标签选择器（Pod 删除后仍可据此找替代 Pod）
 	ownerName  string // 控制器描述，如 "Deployment nginx"
-	controller bool    // 是否有控制器管理（裸 Pod 删除后不会重建）
+	controller bool   // 是否有控制器管理（裸 Pod 删除后不会重建）
 }
 
 // snapshotPod 抓取 Pod 及其控制器信息（执行前调用；失败返回零值，验证退化为按名字判断）

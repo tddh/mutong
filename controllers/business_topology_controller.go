@@ -41,8 +41,7 @@ func (c *BusinessTopologyController) GetApps(ctx *gin.Context) {
 
 	apps, err := c.svc.GetApps(businessUnit, team, namespace)
 	if err != nil {
-		ctx.JSON(http.StatusOK, map[string]string{"error": err.Error()})
-		ctx.Status(http.StatusInternalServerError)
+		ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -53,8 +52,7 @@ func (c *BusinessTopologyController) GetApps(ctx *gin.Context) {
 func (c *BusinessTopologyController) GetCalls(ctx *gin.Context) {
 	edges, err := c.svc.GetCalls()
 	if err != nil {
-		ctx.JSON(http.StatusOK, map[string]string{"error": err.Error()})
-		ctx.Status(http.StatusInternalServerError)
+		ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -68,8 +66,7 @@ func (c *BusinessTopologyController) GetGraph(ctx *gin.Context) {
 
 	graph, err := c.svc.GetGraph(businessUnit, team)
 	if err != nil {
-		ctx.JSON(http.StatusOK, map[string]string{"error": err.Error()})
-		ctx.Status(http.StatusInternalServerError)
+		ctx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 

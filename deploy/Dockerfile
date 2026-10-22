@@ -1,5 +1,5 @@
 # ─── 阶段 1：Go 编译 ───
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -39,10 +39,13 @@ COPY --from=ui-builder /dist /app/view
 
 # 初始化脚本：首次启动时从 .example 复制配置
 COPY deploy/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh && chown -R mutong:mutong /app
 
 USER mutong
 EXPOSE 8888
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8888/healthz || exit 1
+
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["/app/mutong", "-c", "configs/"]
+CMD ["/app/mutong"]

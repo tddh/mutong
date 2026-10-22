@@ -11,11 +11,11 @@ services:
       MUTONG_ADDR: "0.0.0.0"
       MUTONG_PORT: "8888"
       MUTONG_DB_USER: ${POSTGRES_USER:-mutong}
-      MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}
+      MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       MUTONG_NEBULA_USER: ${NEBULA_USER:-root}
-      MUTONG_NEBULA_PASS: ${NEBULA_PASSWORD:-nebula}
+      MUTONG_NEBULA_PASS: ${NEBULA_PASSWORD:?set NEBULA_PASSWORD}
       MUTONG_REDIS_ADDR: redis:6379
-      MUTONG_REDIS_PASSWORD: ${REDIS_PASSWORD:-change_me}
+      MUTONG_REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:
       - mutong_config:/app/configs
     depends_on:
@@ -33,10 +33,8 @@ services:
     container_name: mutong-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-mutong}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mutong123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-mutong}
-    ports:
-      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -87,8 +85,6 @@ services:
         condition: service_healthy
       nebula-storaged:
         condition: service_healthy
-    ports:
-      - "9669:9669"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://nebula-graphd:19669/status"]
       interval: 10s
@@ -109,9 +105,6 @@ services:
       - --overprovisioned
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
       - --advertise-kafka-addr internal://kafka:9092,external://localhost:19092
-    ports:
-      - "9092:9092"
-      - "19092:19092"
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
       interval: 10s
@@ -125,13 +118,11 @@ services:
   redis:
     image: redis:7-alpine
     container_name: mutong-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --requirepass ${REDIS_PASSWORD:-change_me}
+    command: redis-server --requirepass ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:-change_me}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${REDIS_PASSWORD:?set REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -148,7 +139,7 @@ services:
       - |
         echo "等待 Nebula Graph 就绪..."
         sleep 15
-        nebula-console -addr nebula-graphd -port 9669 -u ${NEBULA_USER:-root} -p ${NEBULA_PASSWORD:-nebula} -e "CREATE SPACE IF NOT EXISTS mutong(partition_num=3, replica_factor=2, vid_type=FIXED_STRING(128));" || true
+        nebula-console -addr nebula-graphd -port 9669 -u ${NEBULA_USER:-root} -p ${NEBULA_PASSWORD:?set NEBULA_PASSWORD} -e "CREATE SPACE IF NOT EXISTS mutong(partition_num=3, replica_factor=2, vid_type=FIXED_STRING(128));" || true
         echo "Nebula 初始化完成"
     depends_on:
       nebula-graphd:

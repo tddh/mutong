@@ -204,6 +204,7 @@ func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 		DB:          db,
 		PasswordSvc: hashSvc,
 		TokenSvc:    auth.NewTokenService(),
+		Sessions:    auth.NewSessionManager([]byte("0123456789abcdef0123456789abcdef"), 24*time.Hour),
 	}
 
 	gin.SetMode(gin.TestMode)

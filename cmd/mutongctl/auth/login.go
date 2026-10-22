@@ -95,20 +95,20 @@ func runLogin(opt *loginOptions) error {
 	authURL := fmt.Sprintf("%s/oauth2/authorize?client_id=%s&redirect_uri=%s&response_type=code&state=%s&code_challenge=%s&code_challenge_method=S256",
 		opt.ServerURL, defaultClientID, url.QueryEscape(redirectURI), state, codeChallenge)
 
-	fmt.Fprintf(opt.IO.Out, "Authenticate with Mutong server\n\n")
+	_, _ = fmt.Fprintf(opt.IO.Out, "Authenticate with Mutong server\n\n")
 
 	// Step 4: Open browser or print URL
 	if opt.NoBrowserFlag {
-		fmt.Fprintf(opt.IO.Out, "➡ Visit this URL to login:\n   %s\n\n", authURL)
+		_, _ = fmt.Fprintf(opt.IO.Out, "➡ Visit this URL to login:\n   %s\n\n", authURL)
 	} else if err := openBrowser(authURL); err != nil {
-		fmt.Fprintf(opt.IO.ErrOut, "Could not open browser: %v\n", err)
-		fmt.Fprintf(opt.IO.Out, "➡ Visit this URL to login:\n   %s\n\n", authURL)
+		_, _ = fmt.Fprintf(opt.IO.ErrOut, "Could not open browser: %v\n", err)
+		_, _ = fmt.Fprintf(opt.IO.Out, "➡ Visit this URL to login:\n   %s\n\n", authURL)
 	} else {
-		fmt.Fprintf(opt.IO.Out, "➡ A browser window should open. If not, visit:\n   %s\n\n", authURL)
+		_, _ = fmt.Fprintf(opt.IO.Out, "➡ A browser window should open. If not, visit:\n   %s\n\n", authURL)
 	}
 
 	// Step 5: Wait for callback
-	fmt.Fprintf(opt.IO.Out, "Waiting for authorization... (press Ctrl+C to cancel)\n")
+	_, _ = fmt.Fprintf(opt.IO.Out, "Waiting for authorization... (press Ctrl+C to cancel)\n")
 
 	var authCode string
 	var returnedState string
@@ -132,7 +132,7 @@ func runLogin(opt *loginOptions) error {
 			}
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprint(w, "<html><body style=\"display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#f0f5ff;color:#1890ff\"><h1>✅ Login successful! You can close this page.</h1></body></html>")
+			_, _ = fmt.Fprint(w, "<html><body style=\"display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#f0f5ff;color:#1890ff\"><h1>✅ Login successful! You can close this page.</h1></body></html>")
 		})
 	})
 
@@ -163,12 +163,12 @@ func runLogin(opt *loginOptions) error {
 		return fmt.Errorf("[ERROR] 保存 token 失败 (exit_code=2)\n[CONTEXT] %v", err)
 	}
 
-	fmt.Fprintln(opt.IO.Out)
-	fmt.Fprintf(opt.IO.Out, "✓ Logged in successfully!\n\n")
-	fmt.Fprintf(opt.IO.Out, "  Server:    %s\n", opt.ServerURL)
-	fmt.Fprintf(opt.IO.Out, "  Token:     %s\n", maskSecret(token.AccessToken))
-	fmt.Fprintf(opt.IO.Out, "  Expires:   %s\n", token.Expiry.Format("2006-01-02 15:04:05"))
-	fmt.Fprintf(opt.IO.Out, "  Token file: %s\n", tokensFilePath())
+	_, _ = fmt.Fprintln(opt.IO.Out)
+	_, _ = fmt.Fprintf(opt.IO.Out, "✓ Logged in successfully!\n\n")
+	_, _ = fmt.Fprintf(opt.IO.Out, "  Server:    %s\n", opt.ServerURL)
+	_, _ = fmt.Fprintf(opt.IO.Out, "  Token:     %s\n", maskSecret(token.AccessToken))
+	_, _ = fmt.Fprintf(opt.IO.Out, "  Expires:   %s\n", token.Expiry.Format("2006-01-02 15:04:05"))
+	_, _ = fmt.Fprintf(opt.IO.Out, "  Token file: %s\n", tokensFilePath())
 	return nil
 }
 
@@ -204,7 +204,7 @@ func exchangeCodeForToken(opts *loginOptions, code, redirectURI, codeVerifier st
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp struct {

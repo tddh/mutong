@@ -296,7 +296,7 @@ func (e *K8sExecutor) podOwnerSelector(ctx context.Context, ns string, pod *core
 			return metav1.FormatLabelSelector(ds.Spec.Selector), "DaemonSet " + ref.Name, nil
 		}
 	}
-	return "", "", fmt.Errorf("Pod %s 没有控制器（裸 Pod 删除后不会重建）", pod.Name)
+	return "", "", fmt.Errorf("pod %s 没有控制器（裸 pod 删除后不会重建）", pod.Name)
 }
 
 func isPodReady(pod *corev1.Pod) bool {

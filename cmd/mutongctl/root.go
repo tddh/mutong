@@ -107,7 +107,7 @@ var rootCmd = &cobra.Command{
 		}
 		// Verbose output to stderr
 		if verboseFlag > 0 {
-			fmt.Fprintf(factory.IO.ErrOut, "[VERBOSE] server=%s auth=%s\n", factory.Client.BaseURL(), authSource)
+			_, _ = fmt.Fprintf(factory.IO.ErrOut, "[VERBOSE] server=%s auth=%s\n", factory.Client.BaseURL(), authSource)
 		}
 		if verboseFlag > 1 {
 			factory.Client.SetVerbose(true)

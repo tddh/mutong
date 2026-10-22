@@ -1,32 +1,45 @@
+version: "2"
+
 run:
   timeout: 5m
 
 linters:
+  default: none
   enable:
     - gosec
     - govet
     - staticcheck
     - errcheck
-    - gosimple
     - ineffassign
     - unused
     - misspell
+  settings:
+    staticcheck:
+      checks:
+        # QF1012/QF1008 are pure style suggestions with an equivalent
+        # formulation; excluding them avoids churn without losing correctness
+        # findings (default SA/S/ST checks remain enabled).
+        - -QF1012
+        - -QF1008
+    gosec:
+      excludes:
+        - G104  # 未处理 error（errcheck 已覆盖）
+        - G402  # TLS InsecureSkipVerify（内网服务连接需要）
+        - G101  # 常量名包含 Signature/Token，非硬编码凭据
+        - G117  # 序列化 OAuth/API token 字段是协议要求
+        - G204  # CLI 打开浏览器的固定命令
+        - G304  # CLI 读取用户显式指定的配置文件
+        - G118  # 异步持久化使用 request-scoped context 的不可取消派生
+  exclusions:
+    paths:
+      - view/node_modules
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
     - gofmt
     - goimports
-  disable-all: true
-
-linters-settings:
-  gosec:
-    excludes:
-      - G104  # 未处理 error（errcheck 已覆盖）
-      - G402  # TLS InsecureSkipVerify（内网服务连接需要）
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-    - path: _test\.go
-      linters:
-        - gosec
-      text: "G101|G103|G106|G107|G110|G111"

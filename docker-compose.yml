@@ -3,11 +3,9 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: mutong-postgres
-    ports:
-      - "5432:5432"
     environment:
       POSTGRES_USER: mutong
-      POSTGRES_PASSWORD: change_me
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: mutong
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -23,10 +21,6 @@ services:
   nebula:
     image: vesoft/nebula-graphd:v3.8.0
     container_name: mutong-nebula
-    ports:
-      - "9669:9669"
-      - "19669:19669"
-      - "19670:19670"
     environment:
       USER: root
     healthcheck:
@@ -41,9 +35,6 @@ services:
   kafka:
     image: vectorized/redpanda:v24.2.5
     container_name: mutong-kafka
-    ports:
-      - "9092:9092"
-      - "9644:9644"
     command:
       - redpanda
       - start
@@ -72,11 +63,9 @@ services:
   redis:
     image: redis:7-alpine
     container_name: mutong-redis
-    ports:
-      - "6379:6379"
-    command: redis-server --requirepass ${MUTONG_REDIS_PASSWORD:-change_me}
+    command: redis-server --requirepass ${MUTONG_REDIS_PASSWORD:?set MUTONG_REDIS_PASSWORD}
     healthcheck:
-      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${MUTONG_REDIS_PASSWORD:-change_me}", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${MUTONG_REDIS_PASSWORD:?set MUTONG_REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -92,11 +81,11 @@ services:
       - "8888:8888"
     environment:
       MUTONG_DB_USER: mutong
-      MUTONG_DB_PASSWORD: change_me
+      MUTONG_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       MUTONG_NEBULA_USER: root
-      MUTONG_NEBULA_PASS: change_me
+      MUTONG_NEBULA_PASS: ${NEBULA_PASSWORD:?set NEBULA_PASSWORD}
       MUTONG_REDIS_ADDR: redis:6379
-      MUTONG_REDIS_PASSWORD: ${MUTONG_REDIS_PASSWORD:-change_me}
+      MUTONG_REDIS_PASSWORD: ${MUTONG_REDIS_PASSWORD:?set MUTONG_REDIS_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy

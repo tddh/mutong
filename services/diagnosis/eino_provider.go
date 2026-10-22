@@ -182,7 +182,7 @@ func buildDiagnosisSystemPromptFromPrompt(prompt interfaces.DiagnosisPrompt) str
 
 func buildPostmortemSystemPrompt(prompt interfaces.PostmortemInsightsPrompt) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf(`你是一个 Kubernetes 故障复盘分析专家。请根据提供的故障上下文，生成复盘报告的核心内容。返回严格的 JSON 格式。
+	fmt.Fprintf(&sb, `你是一个 Kubernetes 故障复盘分析专家。请根据提供的故障上下文，生成复盘报告的核心内容。返回严格的 JSON 格式。
 
 JSON 格式：
 {
@@ -204,25 +204,25 @@ JSON 格式：
 资源: %s/%s
 命名空间: %s
 `, prompt.IncidentTitle, prompt.Severity, prompt.Duration, prompt.RootCause,
-		prompt.Timeline, prompt.AlertName, prompt.ResourceKind, prompt.ResourceName, prompt.Namespace))
+		prompt.Timeline, prompt.AlertName, prompt.ResourceKind, prompt.ResourceName, prompt.Namespace)
 
 	if prompt.CausalChain != "" {
-		sb.WriteString(fmt.Sprintf("因果链: %s\n", prompt.CausalChain))
+		fmt.Fprintf(&sb, "因果链: %s\n", prompt.CausalChain)
 	}
 	if prompt.ImpactSummary != "" {
-		sb.WriteString(fmt.Sprintf("影响摘要: %s\n", prompt.ImpactSummary))
+		fmt.Fprintf(&sb, "影响摘要: %s\n", prompt.ImpactSummary)
 	}
 	if prompt.DiagnosisSummary != "" {
-		sb.WriteString(fmt.Sprintf("AI诊断摘要: %s\n", prompt.DiagnosisSummary))
+		fmt.Fprintf(&sb, "AI诊断摘要: %s\n", prompt.DiagnosisSummary)
 	}
 	if len(prompt.AffectedServices) > 0 {
-		sb.WriteString(fmt.Sprintf("受影响服务: %s\n", strings.Join(prompt.AffectedServices, ", ")))
+		fmt.Fprintf(&sb, "受影响服务: %s\n", strings.Join(prompt.AffectedServices, ", "))
 	}
 	if prompt.MetricsSummary != "" {
-		sb.WriteString(fmt.Sprintf("关键指标: %s\n", prompt.MetricsSummary))
+		fmt.Fprintf(&sb, "关键指标: %s\n", prompt.MetricsSummary)
 	}
 	if prompt.LogsHighlights != "" {
-		sb.WriteString(fmt.Sprintf("关键日志: %s\n", prompt.LogsHighlights))
+		fmt.Fprintf(&sb, "关键日志: %s\n", prompt.LogsHighlights)
 	}
 
 	sb.WriteString(`

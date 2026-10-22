@@ -651,13 +651,13 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | `/k8s/resources/{name}` | 获取指定资源详情 |
-| GET | `/k8s/resources/graph/nodes` | 获取所有资源节点 |
-| GET | `/k8s/resources/graph/edges` | 获取所有资源关系 |
-| GET | `/k8s/resources/graph/metadata` | 获取资源类型与命名空间元数据 |
-| GET | `/k8s/resources/graph/search` | 搜索资源关系 |
-| GET | `/k8s/resources/graph/resource-define` | 获取资源类型定义 |
-| GET | `/k8s/resources/graph/suggest` | 资源搜索自动补全建议 |
+| GET | `/api/v1/k8s/resources/{name}` | 获取指定资源详情 |
+| GET | `/api/v1/k8s/resources/graph/nodes` | 获取所有资源节点 |
+| GET | `/api/v1/k8s/resources/graph/edges` | 获取所有资源关系 |
+| GET | `/api/v1/k8s/resources/graph/metadata` | 获取资源类型与命名空间元数据 |
+| GET | `/api/v1/k8s/resources/graph/search` | 搜索资源关系 |
+| GET | `/api/v1/k8s/resources/graph/resource-define` | 获取资源类型定义 |
+| GET | `/api/v1/k8s/resources/graph/suggest` | 资源搜索自动补全建议 |
 
 ### 告警管理 API
 
@@ -758,8 +758,8 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 | 方法 | 路径 | 功能 |
 |------|------|------|
-| GET | `/users` | 获取用户信息 |
-| GET | `/roles` | 获取角色信息 |
+| GET | `/api/v1/users` | 获取用户信息 |
+| GET | `/api/v1/roles` | 获取角色信息 |
 
 ### 认证授权 API
 

@@ -17,19 +17,20 @@ import (
 	"gorm.io/gorm"
 )
 
+// AuthMiddleware enforces the trusted-IP allowlist for alert intake.
+// It is intentionally narrow: signature verification lives in WebhookVerifier.
 func AuthMiddleware(logger *zap.Logger) gin.HandlerFunc {
 	webhookIPs := parseTrustedIPs(os.Getenv("MUTONG_WEBHOOK_TRUSTED_IPS"))
 
 	return func(ctx *gin.Context) {
 		path := ctx.Request.URL.Path
-
-		if strings.HasPrefix(path, "/api/alert/webhook") {
+		if strings.HasPrefix(path, "/api/v1/alerts/webhook") || strings.HasPrefix(path, "/api/v1/alerts/external/") {
 			if len(webhookIPs) > 0 {
 				remoteIP := ctx.ClientIP()
 				if !isTrustedIP(remoteIP, webhookIPs) {
 					logger.Warn("Webhook from untrusted IP",
 						zap.String("remote_addr", remoteIP))
-					ctx.AbortWithStatusJSON(403, gin.H{"error": "forbidden: untrusted source"})
+					ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden: untrusted source"})
 					return
 				}
 			}
@@ -84,6 +85,9 @@ func isTrustedIP(ip string, networks []*net.IPNet) bool {
 //     is resolved by zitadel_user_id (subject).
 //  3. Local OAuth2 access token — validated via fosite.OAuth2Provider introspection.
 //  4. Session cookie (mutong_session) — verified via SessionManager.
+//
+// A cookie value is never trusted as a user identifier: only HMAC-verified
+// session tokens are accepted.
 func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator auth.AccessTokenValidator, oauth2Provider fosite.OAuth2Provider) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		authHeader := ctx.GetHeader("Authorization")
@@ -103,11 +107,12 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 				}
 				db.Model(&t).Update("last_used_at", time.Now())
 
-				// Load user to get UUID
 				if t.UserID != nil {
 					var user models.User
 					if err := db.First(&user, *t.UserID).Error; err == nil {
 						ctx.Set("user_uuid", user.UUID)
+						ctx.Set("role", user.Role)
+						ctx.Set("username", user.Username)
 					}
 				}
 
@@ -126,6 +131,8 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 					if err := db.Where("zitadel_user_id = ?", claims.Subject).First(&user).Error; err == nil {
 						ctx.Set("user_id", user.ID)
 						ctx.Set("user_uuid", user.UUID)
+						ctx.Set("role", user.Role)
+						ctx.Set("username", user.Username)
 						ctx.Set("token_type", "oidc")
 						ctx.Next()
 						return
@@ -147,6 +154,8 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 					if err := db.Where("uuid = ? OR zitadel_user_id = ?", subject, subject).First(&user).Error; err == nil {
 						ctx.Set("user_id", user.ID)
 						ctx.Set("user_uuid", user.UUID)
+						ctx.Set("role", user.Role)
+						ctx.Set("username", user.Username)
 						ctx.Set("token_type", "oauth2")
 						ctx.Next()
 						return
@@ -154,27 +163,21 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 				}
 			}
 
-			// No valid path matched for Bearer token
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
 		}
 
-		// Path 4: Session cookie (mutong_session)
+		// Path 4: Session cookie (mutong_session). Signature verification is
+		// mandatory; the legacy "cookie is a UUID" fallback was removed because
+		// it allowed session forgery with a publicly readable UUID.
 		if sessions != nil {
 			if cookie, err := ctx.Cookie("mutong_session"); err == nil && cookie != "" {
 				claims, err := sessions.Verify(cookie)
 				if err == nil {
 					ctx.Set("user_id", claims.UserID)
 					ctx.Set("user_uuid", claims.UUID)
+					ctx.Set("role", claims.Role)
 					ctx.Set("token_type", "session")
-				} else {
-					// Legacy backward compatibility: plain UUID from local login
-					var user models.User
-					if err := db.Where("uuid = ?", cookie).First(&user).Error; err == nil {
-						ctx.Set("user_id", user.ID)
-						ctx.Set("user_uuid", user.UUID)
-						ctx.Set("token_type", "session")
-					}
 				}
 			}
 		}
@@ -182,33 +185,16 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 	}
 }
 
-// RequireAuthMiddleware aborts with 401 if no user_id is set in context.
-// Only applies to /api/ paths; non-API paths (/oauth2, /view, /metrics) pass through.
-// Public API endpoints (login, captcha, webhook, external alerts) are whitelisted.
+// RequireAuthMiddleware applies deny-by-default authentication to every route
+// except explicitly public endpoints. It does not rely on a path prefix: a new
+// route is protected unless it is listed here.
 func RequireAuthMiddleware() gin.HandlerFunc {
-	publicPaths := []string{
-		"/api/auth/login",
-		"/api/auth/captcha",
-		"/api/auth/captcha/verify",
-		"/api/auth/login-status",
-		"/api/auth/oidc/login",
-		"/api/auth/oidc/callback",
-		"/api/v1/alerts/webhook",
-		"/api/v1/alerts/external/",
-	}
 	return func(ctx *gin.Context) {
 		path := ctx.Request.URL.Path
 
-		if !strings.HasPrefix(path, "/api/") {
+		if isPublicPath(path) {
 			ctx.Next()
 			return
-		}
-
-		for _, p := range publicPaths {
-			if strings.HasPrefix(path, p) {
-				ctx.Next()
-				return
-			}
 		}
 
 		if _, exists := ctx.Get("user_id"); !exists {
@@ -217,6 +203,39 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 		}
 		ctx.Next()
 	}
+}
+
+// isPublicPath lists the only endpoints that may be reached without a verified
+// identity. Keep this list minimal and exact where possible.
+func isPublicPath(path string) bool {
+	// Exact public paths.
+	switch path {
+	case "/", "/login", "/oidc/login", "/device", "/api/auth/login", "/api/auth/login-status":
+		return true
+	}
+
+	// Prefixes for protocol endpoints that authenticate their own requests or
+	// serve assets required before login.
+	for _, prefix := range []string{
+		"/api/auth/captcha",
+		"/api/auth/oidc/",
+		"/api/v1/alerts/webhook",
+		"/api/v1/alerts/external/",
+		"/oauth2/",
+		"/view/",
+	} {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+
+	// Metrics are public only when explicitly requested for a Prometheus
+	// scraper; otherwise they require authentication.
+	if path == "/metrics" && os.Getenv("MUTONG_METRICS_PUBLIC") == "true" {
+		return true
+	}
+
+	return false
 }
 
 // ViewAuthGuard redirects unauthenticated users to the login page.
@@ -264,7 +283,6 @@ func GetUserID(c *gin.Context) (uint, bool) {
 		return id, true
 	case string:
 		// OAuth2 JWT: user_id is a UUID string — need to look up numeric ID
-		// Fall through to "not found" if no DB lookup available
 		return 0, false
 	default:
 		return 0, false
@@ -286,6 +304,16 @@ func GetUserUUID(c *gin.Context) string {
 	}
 	if s, ok := v.(string); ok {
 		return s
+	}
+	return ""
+}
+
+// GetUserRole returns the authenticated user's role, if known.
+func GetUserRole(c *gin.Context) string {
+	if v, exists := c.Get("role"); exists {
+		if s, ok := v.(string); ok {
+			return s
+		}
 	}
 	return ""
 }

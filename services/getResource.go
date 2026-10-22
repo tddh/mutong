@@ -73,22 +73,29 @@ func (d *K8sResoureService) Get(reqCtx interfaces.RequestContext) (interface{}, 
 	// 构建 JSON 输出
 	var result []models.K8sResource
 	for _, row := range rows {
+		// 查询只 yield 7 列；防御性检查，避免索引越界导致整个接口 panic。
+		if len(row.Values) < 7 {
+			continue
+		}
 
 		//labels, _ := strconv.Unquote(string(row.Values[5].GetSVal()))
-		//resourceDefine, _ := strconv.Unquote(string(row.Values[7].GetSVal()))
 
 		// 使用 parseJSONString 方法解析字符串
 		labels, _ := parseJSONString(string(row.Values[5].GetSVal()))
-		resourceDefine, _ := parseJSONString(string(row.Values[7].GetSVal()))
+		kind := string(row.Values[1].GetSVal())
+		var resourceDefine string
+		if len(row.Values) > 7 {
+			resourceDefine, _ = parseJSONString(string(row.Values[7].GetSVal()))
+		}
 		resource := models.K8sResource{
 			Name:           string(row.Values[0].GetSVal()),
-			Kind:           string(row.Values[1].GetSVal()),
+			Kind:           kind,
 			APIVersion:     string(row.Values[2].GetSVal()),
 			Group:          string(row.Values[3].GetSVal()),
 			Uid:            string(row.Values[4].GetSVal()),
 			Labels:         labels,
 			NameSpace:      string(row.Values[6].GetSVal()),
-			ResourceDefine: resourceDefine,
+			ResourceDefine: redactResourceDefineString(kind, resourceDefine),
 		}
 		result = append(result, resource)
 	}
@@ -107,58 +114,6 @@ func parseJSONString(s string) (string, error) {
 		return "", err
 	}
 	return v.String(), nil
-}
-
-// GetAllResources 获取K8s资源节点列表（分页）
-// 用 GO FROM namespace REVERSELY 替代 LOOKUP，避免 storaged OOM
-func (d *K8sResoureService) countResourcesByKind(kind string) int {
-	sanitizer := NewNGQLSanitizer()
-	if kind == "" || kind == "all" {
-		return d.countAllResources()
-	}
-	query := fmt.Sprintf(
-		`LOOKUP ON K8sResource WHERE K8sResource.kind == %s AND K8sResource.is_deleted == false
-		 YIELD K8sResource.name AS name | YIELD count(*) AS cnt`,
-		sanitizer.QuoteString(kind),
-	)
-	rs, err := d.graphDB.ExecuteAndCheck(query)
-	if err != nil || rs == nil || rs.GetRowSize() == 0 {
-		return 0
-	}
-	row, err := rs.GetRowValuesByIndex(0)
-	if err != nil {
-		return 0
-	}
-	val, err := row.GetValueByColName("cnt")
-	if err != nil {
-		return 0
-	}
-	cnt, err := val.AsInt()
-	if err != nil {
-		return 0
-	}
-	return int(cnt)
-}
-
-func (d *K8sResoureService) countAllResources() int {
-	query := `LOOKUP ON K8sResource WHERE K8sResource.is_deleted == false YIELD K8sResource.name AS name | YIELD count(*) AS cnt`
-	rs, err := d.graphDB.ExecuteAndCheck(query)
-	if err != nil || rs == nil || rs.GetRowSize() == 0 {
-		return 0
-	}
-	row, err := rs.GetRowValuesByIndex(0)
-	if err != nil {
-		return 0
-	}
-	val, err := row.GetValueByColName("cnt")
-	if err != nil {
-		return 0
-	}
-	cnt, err := val.AsInt()
-	if err != nil {
-		return 0
-	}
-	return int(cnt)
 }
 
 // clusterScopedNamespace 是前端"🌐 集群级"下拉项与后端约定的哨兵值。
@@ -837,7 +792,7 @@ func (d *K8sResoureService) GetResourceDefine(reqCtx interfaces.RequestContext) 
 	if resourceID == "" {
 		return nil, errors.New("resourceId is required")
 	}
-	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.resource_define AS resource_define`, sanitizer.QuoteString(resourceID))
+	query := fmt.Sprintf(`FETCH PROP ON K8sResource %s YIELD K8sResource.kind AS kind, K8sResource.resource_define AS resource_define`, sanitizer.QuoteString(resourceID))
 	d.logger.Debug("GetResourceDefine query", zap.String("X-Trace-ID", traceID), zap.String("query", query))
 	resultSet, err := d.graphDB.ExecuteAndCheck(query)
 	if err != nil {
@@ -845,11 +800,31 @@ func (d *K8sResoureService) GetResourceDefine(reqCtx interfaces.RequestContext) 
 		return nil, err
 	}
 	rows := resultSet.GetRows()
-	if len(rows) == 0 {
+	if len(rows) == 0 || len(rows[0].Values) < 2 {
 		return nil, errors.New("resource not found")
 	}
-	resourceDefine := string(rows[0].Values[0].GetSVal())
+	kind := string(rows[0].Values[0].GetSVal())
+	resourceDefine := redactResourceDefineString(kind, string(rows[0].Values[1].GetSVal()))
 	return map[string]interface{}{"resource_define": resourceDefine}, nil
+}
+
+// redactResourceDefineString removes Secret payloads from a raw JSON resource
+// definition. Unparseable input is returned unchanged.
+func redactResourceDefineString(kind, raw string) string {
+	if !strings.EqualFold(kind, "Secret") || raw == "" {
+		return raw
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return raw
+	}
+	delete(obj, "data")
+	delete(obj, "stringData")
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return string(out)
 }
 
 // 根据资源类型返回不同的颜色

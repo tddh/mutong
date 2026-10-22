@@ -12,11 +12,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -84,7 +86,11 @@ func runApp(cmd *cobra.Command, args []string) {
 	}
 	runtime.GOMAXPROCS(maxProcs)
 
-	cfg := initializeConfig(configPath)
+	cfg, cfgErr := initializeConfig(configPath)
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize configuration: %v\n", cfgErr)
+		os.Exit(1)
+	}
 	logger := cfg.Logger
 	authsvc.SetSessionLogger(cfg.GetLogger())
 	pyroscopeServer(logger)
@@ -115,13 +121,13 @@ func runApp(cmd *cobra.Command, args []string) {
 
 	oauth2Provider, rdb := initOAuth2(cfg)
 
-	// Create session manager for middleware and OIDC flows
-	var sessions *authsvc.SessionManager
-	if sessionSecret := os.Getenv("MUTONG_SESSION_SECRET"); sessionSecret != "" {
-		sessions = authsvc.NewSessionManager([]byte(sessionSecret), 24*time.Hour)
-	} else if cfg.Auth.GlobalSecret != "" {
-		sessions = authsvc.NewSessionManager([]byte(cfg.Auth.GlobalSecret), 24*time.Hour)
+	// Create session manager for middleware and OIDC flows.
+	sessionKey, sessionErr := resolveSessionSecret(cfg, logger)
+	if sessionErr != nil {
+		logger.Error("Failed to initialize session secret", zap.Error(sessionErr))
+		os.Exit(1)
 	}
+	sessions := authsvc.NewSessionManager(sessionKey, 24*time.Hour)
 
 	// Create OIDC client for access token validation and route registration
 	var oidcClient *authsvc.ZitadelOIDCClient
@@ -283,7 +289,7 @@ func pyroscopeServer(logger *zap.Logger) {
 	}
 }
 
-func initializeConfig(path string) *config.Config {
+func initializeConfig(path string) (*config.Config, error) {
 	return config.NewConfig(path)
 }
 
@@ -445,33 +451,99 @@ func initOAuth2(cfg *config.Config) (fosite.OAuth2Provider, *redis.Client) {
 }
 
 func allowedOrigins() []string {
-	origins := os.Getenv("MUTONG_ALLOWED_ORIGINS")
-	if origins == "" {
-		return []string{"*"}
+	raw := os.Getenv("MUTONG_ALLOWED_ORIGINS")
+	if raw == "" {
+		// Deny cross-origin requests by default. Deployments that need CORS
+		// must list explicit origins.
+		return []string{}
 	}
-	return strings.Split(origins, ",")
+	var origins []string
+	for _, o := range strings.Split(raw, ",") {
+		o = strings.TrimSpace(o)
+		if o == "" || o == "*" {
+			// A wildcard is incompatible with credentialed requests and is
+			// therefore refused rather than silently weakened.
+			continue
+		}
+		origins = append(origins, o)
+	}
+	return origins
 }
 
-func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager) {
-	var execCtrl *controllers.ExecutorController
-	var k8sExec *execService.K8sExecutor
-	var diagEngine *diagnosis_svc.Engine
-	var chatManager *diagnosis_svc.ChatSessionManager
+// resolveSessionSecret returns the key used to sign session cookies.
+//
+// Priority:
+//  1. MUTONG_SESSION_SECRET
+//  2. auth.global_secret from configuration
+//  3. an existing key at MUTONG_SESSION_SECRET_FILE (default data/session_secret)
+//  4. a newly generated 32-byte key persisted with 0600 permissions
+//
+// Multi-replica deployments must provide the same secret via environment
+// variable or a shared volume; otherwise sessions are only valid on the
+// replica that issued them.
+func resolveSessionSecret(cfg *config.Config, logger *zap.Logger) ([]byte, error) {
+	if s := os.Getenv("MUTONG_SESSION_SECRET"); s != "" {
+		return []byte(s), nil
+	}
+	if cfg.Auth.GlobalSecret != "" {
+		return []byte(cfg.Auth.GlobalSecret), nil
+	}
 
-	engine := gin.New()
+	path := os.Getenv("MUTONG_SESSION_SECRET_FILE")
+	if path == "" {
+		path = filepath.Join("data", "session_secret")
+	}
 
-	// Request logging
+	if b, err := os.ReadFile(path); err == nil && len(b) >= 32 { //nolint:gosec // path is operator-controlled
+		return b, nil
+	}
+
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, fmt.Errorf("generate session secret: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil { //nolint:gosec // path is operator-controlled
+		logger.Warn("Could not create session secret directory; sessions will not survive restart",
+			zap.String("path", path), zap.Error(err))
+		return buf, nil
+	}
+	if err := os.WriteFile(path, buf, 0o600); err != nil { //nolint:gosec // path is operator-controlled
+		logger.Warn("Could not persist session secret; sessions will not survive restart",
+			zap.String("path", path), zap.Error(err))
+		return buf, nil
+	}
+
+	logger.Warn("MUTONG_SESSION_SECRET not set; generated a new session secret",
+		zap.String("path", path),
+		zap.String("note", "multi-replica deployments must share the secret via environment variable"))
+	return buf, nil
+}
+
+// setupMiddleware installs the cross-cutting middleware chain. Order matters:
+// alert intake verification runs before authentication, and authorization
+// runs after identity is established.
+func setupMiddleware(engine *gin.Engine, cfg *config.Config, sessions *authsvc.SessionManager, oauth2Provider fosite.OAuth2Provider, oidcClient *authsvc.ZitadelOIDCClient, logger *zap.Logger) {
 	engine.Use(gin.Logger())
 	engine.Use(gin.Recovery())
-
-	// Global middleware
 	engine.Use(TraceIDMiddleware())
+
+	// Trust X-Forwarded-* only from local loopback by default (the common
+	// nginx/sidecar layout). Deployments behind a non-local proxy must list its
+	// CIDRs in MUTONG_TRUSTED_PROXIES.
+	proxies := os.Getenv("MUTONG_TRUSTED_PROXIES")
+	if proxies == "" {
+		proxies = "127.0.0.1/32,::1/128"
+	}
+	_ = engine.SetTrustedProxies(strings.Split(proxies, ","))
+
 	engine.Use(cors.New(cors.Config{
 		AllowOrigins:     allowedOrigins(),
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "Accept", "Authorization", "X-Trace-ID", "X-Role", "X-Admin-Key"},
+		AllowHeaders:     []string{"Content-Type", "Accept", "Authorization", "X-Trace-ID", "X-Role", "X-Admin-Key", "X-Alert-Token", "X-Alertmanager-Signature", "X-Alertmanager-Timestamp"},
 		AllowCredentials: true,
 	}))
+	engine.Use(controllers.AuthMiddleware(logger))
+	engine.Use(controllers.WebhookSignatureMiddleware(logger))
 	engine.Use(controllers.RateLimitMiddleware(cfg.Server.RateLimitPerSec, time.Second))
 	engine.Use(controllers.BearerTokenMiddleware(cfg.DB, sessions, func() authsvc.AccessTokenValidator {
 		if oidcClient == nil {
@@ -479,20 +551,37 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		}
 		return oidcClient
 	}(), oauth2Provider))
-	engine.Use(controllers.RequireAuthMiddleware())
 
-	// Redirect legacy topology URL before static files take over
+	// Redirect legacy unauthenticated paths to their protected /api/v1
+	// equivalents. The redirect itself exposes no data.
 	engine.Use(func(ctx *gin.Context) {
-		if ctx.Request.URL.Path == "/view/topology/resource_graph.html" {
-			ctx.Redirect(http.StatusMovedPermanently, "/view/topology")
+		p := ctx.Request.URL.Path
+		switch {
+		case strings.HasPrefix(p, "/k8s/"):
+			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1"+p)
+			ctx.Abort()
+			return
+		case p == "/users":
+			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1/users")
+			ctx.Abort()
+			return
+		case p == "/roles":
+			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1/roles")
 			ctx.Abort()
 			return
 		}
 		ctx.Next()
 	})
 
-	// Serve frontend static files with auth guard for browser access
-	viewDirs := []string{"./artifacts/view", "./view/dist", "./view"}
+	engine.Use(controllers.RequireAuthMiddleware())
+	engine.Use(controllers.CasbinMiddleware(logger))
+}
+
+// registerStaticRoutes serves the built frontend and the pre-login pages.
+func registerStaticRoutes(engine *gin.Engine, logger *zap.Logger) {
+	// Only serve build output. Serving the ./view source tree would expose
+	// frontend source files to unauthenticated static-asset requests.
+	viewDirs := []string{"./artifacts/view", "./view/dist"}
 	viewServed := false
 	for _, dir := range viewDirs {
 		if _, err := os.Stat(dir); err == nil {
@@ -500,7 +589,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			handler := http.StripPrefix("/view", fs)
 			engine.GET("/view/*filepath", func(c *gin.Context) {
 				path := c.Request.URL.Path
-				// Allow public pages and static assets through without auth
+				// Public pages and static assets bypass the redirect.
 				if path == "/view/login.html" || path == "/view/consent.html" ||
 					strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") ||
 					strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".svg") ||
@@ -509,10 +598,8 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					handler.ServeHTTP(c.Writer, c.Request)
 					return
 				}
-				hasAuth := c.GetHeader("Authorization") != ""
-				_, hasCookieErr := c.Cookie("mutong_session")
 				_, hasUser := c.Get("user_id")
-				if !hasAuth && hasCookieErr != nil && !hasUser {
+				if !hasUser {
 					c.Redirect(http.StatusFound, "/view/login.html")
 					c.Abort()
 					return
@@ -527,6 +614,30 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 	if !viewServed {
 		logger.Warn("No frontend build found, serving will fail")
 	}
+}
+
+func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager) {
+	var execCtrl *controllers.ExecutorController
+	var k8sExec *execService.K8sExecutor
+	var diagEngine *diagnosis_svc.Engine
+	var chatManager *diagnosis_svc.ChatSessionManager
+
+	engine := gin.New()
+
+	setupMiddleware(engine, cfg, sessions, oauth2Provider, oidcClient, logger)
+
+	// Redirect legacy topology URL before static files take over
+	engine.Use(func(ctx *gin.Context) {
+		if ctx.Request.URL.Path == "/view/topology/resource_graph.html" {
+			ctx.Redirect(http.StatusMovedPermanently, "/view/topology")
+			ctx.Abort()
+			return
+		}
+		ctx.Next()
+	})
+
+	// Serve frontend static files with auth guard for browser access.
+	registerStaticRoutes(engine, logger)
 
 	engine.GET("/", func(ctx *gin.Context) {
 		ctx.Redirect(http.StatusMovedPermanently, "/view/index.html")
@@ -543,8 +654,10 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		ctx.Redirect(http.StatusMovedPermanently, "/api/auth/oidc/login")
 	})
 
-	// Swagger UI
-	engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	// Swagger UI is disabled by default; it exposes the full API surface.
+	if cfg.Server.EnableSwagger {
+		engine.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	}
 
 	// Register OAuth 2.0 endpoints (public)
 	deviceH := &oauth2ctrl.DeviceHandler{DB: cfg.DB}
@@ -582,11 +695,20 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 	}
 
 	// Initialize Casbin RBAC
+	mode := cfg.Auth.RBACMode
+	if mode == "" {
+		mode = os.Getenv("MUTONG_RBAC_MODE")
+	}
+	if mode == "" {
+		mode = authsvc.RBACEnforce
+	}
+	authsvc.SetRBACMode(mode)
 	if cfg.DB != nil {
 		if err := authsvc.InitCasbin(cfg.DB); err != nil {
-			logger.Warn("Failed to initialize Casbin RBAC", zap.Error(err))
+			logger.Error("Failed to initialize Casbin RBAC; requests will be denied until it is fixed", zap.Error(err))
 		}
 	}
+	logger.Info("RBAC mode configured", zap.String("mode", authsvc.GetRBACMode()))
 
 	ctrls.RegisterRoutes(engine)
 

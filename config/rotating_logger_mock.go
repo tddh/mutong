@@ -14,7 +14,7 @@ func newRotatingLogger(filename string, maxSize int, maxAge int) (zapcore.WriteS
 	if filename == "" {
 		return nil, nil
 	}
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}

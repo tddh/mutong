@@ -18,19 +18,19 @@ import (
 
 // AutoDiagnosisPipeline watches for processed alerts and triggers diagnosis -> remediation
 type AutoDiagnosisPipeline struct {
-	logger       interfaces.Logger
-	engine       *diagEngine.Engine
-	bridge       *RemediationBridge
-	executor     interfaces.Executor
-	executorMu   sync.RWMutex
-	alertQueue   chan *alert_models.ProcessedAlert
-	enabled      bool
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	stopped      atomic.Bool
-	redisStorage *diagEngine.RedisStorage
-	pgStorage    *diagEngine.PostgresStorage
-	cacheTTL     time.Duration
+	logger        interfaces.Logger
+	engine        *diagEngine.Engine
+	bridge        *RemediationBridge
+	executor      interfaces.Executor
+	executorMu    sync.RWMutex
+	alertQueue    chan *alert_models.ProcessedAlert
+	enabled       bool
+	cancel        context.CancelFunc
+	wg            sync.WaitGroup
+	stopped       atomic.Bool
+	redisStorage  *diagEngine.RedisStorage
+	pgStorage     *diagEngine.PostgresStorage
+	cacheTTL      time.Duration
 	deepDiagnoser DeepDiagnoseFunc
 }
 

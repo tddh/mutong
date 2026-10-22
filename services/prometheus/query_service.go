@@ -471,7 +471,7 @@ func (s *QueryService) QueryInstant(ctx context.Context, expr string) (float64, 
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var apiResp struct {
 		Status string `json:"status"`
@@ -534,7 +534,7 @@ func (s *QueryService) QueryRange(ctx context.Context, expr string, start, end t
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute range query: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("prometheus range query returned status: %d", resp.StatusCode)
@@ -662,7 +662,7 @@ func (s *QueryService) executeQuery(ctx context.Context, query, metricName strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute query: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("prometheus returned status: %d", resp.StatusCode)
@@ -769,7 +769,7 @@ func (s *QueryService) GetHPAStatus(ctx context.Context, namespace, hpaName stri
 		if err != nil {
 			return 0, err
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			return 0, fmt.Errorf("prometheus returned status: %d", resp.StatusCode)
 		}
@@ -944,7 +944,7 @@ func (a *metricsQuerierAdapter) CheckHealth(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("prometheus unhealthy: status %d", resp.StatusCode)

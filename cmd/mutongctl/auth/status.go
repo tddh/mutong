@@ -34,9 +34,9 @@ func runStatus(opts *statusOptions) error {
 	data, err := os.ReadFile(tokensFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			fmt.Fprintln(opts.IO.Out, "Not logged in.")
-			fmt.Fprintln(opts.IO.Out)
-			fmt.Fprintln(opts.IO.Out, "Run 'mutongctl auth login' to authenticate.")
+			_, _ = fmt.Fprintln(opts.IO.Out, "Not logged in.")
+			_, _ = fmt.Fprintln(opts.IO.Out)
+			_, _ = fmt.Fprintln(opts.IO.Out, "Run 'mutongctl auth login' to authenticate.")
 			return nil
 		}
 		return fmt.Errorf("reading token file: %w", err)
@@ -48,12 +48,12 @@ func runStatus(opts *statusOptions) error {
 	}
 
 	if len(tokens) == 0 {
-		fmt.Fprintln(opts.IO.Out, "Not logged in. Token file is empty.")
+		_, _ = fmt.Fprintln(opts.IO.Out, "Not logged in. Token file is empty.")
 		return nil
 	}
 
-	fmt.Fprintln(opts.IO.Out, "Authenticated sessions:")
-	fmt.Fprintln(opts.IO.Out)
+	_, _ = fmt.Fprintln(opts.IO.Out, "Authenticated sessions:")
+	_, _ = fmt.Fprintln(opts.IO.Out)
 
 	now := time.Now()
 	for server, token := range tokens {
@@ -65,18 +65,18 @@ func runStatus(opts *statusOptions) error {
 			status = "✗ expired"
 		}
 
-		fmt.Fprintf(opts.IO.Out, "  Server:    %s\n", server)
-		fmt.Fprintf(opts.IO.Out, "  Type:      %s\n", token.TokenType)
-		fmt.Fprintf(opts.IO.Out, "  Token:     %s\n", maskSecret(token.AccessToken))
-		fmt.Fprintf(opts.IO.Out, "  Expires:   %s\n", expiryStr)
+		_, _ = fmt.Fprintf(opts.IO.Out, "  Server:    %s\n", server)
+		_, _ = fmt.Fprintf(opts.IO.Out, "  Type:      %s\n", token.TokenType)
+		_, _ = fmt.Fprintf(opts.IO.Out, "  Token:     %s\n", maskSecret(token.AccessToken))
+		_, _ = fmt.Fprintf(opts.IO.Out, "  Expires:   %s\n", expiryStr)
 		if token.RefreshToken != "" {
-			fmt.Fprintf(opts.IO.Out, "  Refresh:   ✓ available (auto-refresh enabled)\n")
+			_, _ = fmt.Fprintf(opts.IO.Out, "  Refresh:   ✓ available (auto-refresh enabled)\n")
 		} else {
-			fmt.Fprintf(opts.IO.Out, "  Refresh:   ✗ not available\n")
+			_, _ = fmt.Fprintf(opts.IO.Out, "  Refresh:   ✗ not available\n")
 		}
-		fmt.Fprintf(opts.IO.Out, "  Status:    %s\n", status)
-		fmt.Fprintf(opts.IO.Out, "  File:      %s\n", tokensFile)
-		fmt.Fprintln(opts.IO.Out)
+		_, _ = fmt.Fprintf(opts.IO.Out, "  Status:    %s\n", status)
+		_, _ = fmt.Fprintf(opts.IO.Out, "  File:      %s\n", tokensFile)
+		_, _ = fmt.Fprintln(opts.IO.Out)
 	}
 
 	return nil

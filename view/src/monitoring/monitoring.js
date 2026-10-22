@@ -40,7 +40,7 @@ createApp({
 
     const loadResources = async () => {
       try {
-        const res = await fetch('/k8s/resources/graph/nodes?page=1&pageSize=5000')
+        const res = await fetch('/api/v1/k8s/resources/graph/nodes?page=1&pageSize=5000')
         if (!res.ok) throw new Error(`获取资源列表失败 (${res.status})`)
         const data = await res.json()
         allResources.value = (data.nodes || []).map((n) => ({

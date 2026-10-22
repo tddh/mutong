@@ -44,7 +44,7 @@ func (s *OTelQueryService) QueryTraces(serviceName, operationName, traceId strin
 	if err != nil {
 		return nil, fmt.Errorf("failed to query traces: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("query returned status: %d", resp.StatusCode)
@@ -103,7 +103,7 @@ func (s *OTelQueryService) GetSpans(traceId string) ([]interfaces.Span, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query spans: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("query returned status: %d", resp.StatusCode)
@@ -186,7 +186,7 @@ func (s *OTelQueryService) GetServices() ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to query services: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("query returned status: %d", resp.StatusCode)

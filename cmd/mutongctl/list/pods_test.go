@@ -50,7 +50,7 @@ func TestListPodsRunNoNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listPodsRun error: %v", err)
 	}
-	expected := "/k8s/resources/graph/nodes?kind=Pod"
+	expected := "/api/v1/k8s/resources/graph/nodes?kind=Pod"
 	if reqURL != expected {
 		t.Errorf("expected URL %q, got %q", expected, reqURL)
 	}

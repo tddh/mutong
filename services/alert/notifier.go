@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/smtp"
@@ -128,9 +129,10 @@ func (n *AlertNotifier) notifySlack(ctx context.Context, a *alert_models.Process
 	}
 
 	color := "warning"
-	if a.Routing.Severity == "critical" {
+	switch a.Routing.Severity {
+	case "critical":
 		color = "danger"
-	} else if a.Routing.Severity == "info" {
+	case "info":
 		color = "good"
 	}
 
@@ -228,30 +230,30 @@ func (n *AlertNotifier) notifyDingTalk(ctx context.Context, a *alert_models.Proc
 	header := fmt.Sprintf("%s **[%s] %s**", emoji, a.Status, a.Labels["alertname"])
 
 	var textBuilder strings.Builder
-	textBuilder.WriteString(fmt.Sprintf("%s\n\n", header))
+	fmt.Fprintf(&textBuilder, "%s\n\n", header)
 
 	// Topology path 以箭头分隔（Node → Pod → Deployment）
 	if len(a.TopologyPath) > 0 {
 		topology := strings.Join(a.TopologyPath, " → ")
-		textBuilder.WriteString(fmt.Sprintf("**Topology:** %s\n", topology))
+		fmt.Fprintf(&textBuilder, "**Topology:** %s\n", topology)
 	}
 	// Namespace / Resource / Node
 	if a.Namespace != "" {
-		textBuilder.WriteString(fmt.Sprintf("**Namespace:** %s\n", a.Namespace))
+		fmt.Fprintf(&textBuilder, "**Namespace:** %s\n", a.Namespace)
 	}
 	if a.ResourceName != "" {
-		textBuilder.WriteString(fmt.Sprintf("**Resource:** %s/%s\n", a.ResourceType, a.ResourceName))
+		fmt.Fprintf(&textBuilder, "**Resource:** %s/%s\n", a.ResourceType, a.ResourceName)
 	}
 	if a.NodeName != "" {
-		textBuilder.WriteString(fmt.Sprintf("**Node:** %s\n", a.NodeName))
+		fmt.Fprintf(&textBuilder, "**Node:** %s\n", a.NodeName)
 	}
 	// Owner 信息
 	if a.OwnerKind != "" || a.OwnerName != "" {
-		textBuilder.WriteString(fmt.Sprintf("**Owner:** %s/%s\n", a.OwnerKind, a.OwnerName))
+		fmt.Fprintf(&textBuilder, "**Owner:** %s/%s\n", a.OwnerKind, a.OwnerName)
 	}
 	// Related alerts count
 	if len(a.RelatedAlerts) > 0 {
-		textBuilder.WriteString(fmt.Sprintf("**Related Alerts:** %d\n", len(a.RelatedAlerts)))
+		fmt.Fprintf(&textBuilder, "**Related Alerts:** %d\n", len(a.RelatedAlerts))
 	} else {
 		textBuilder.WriteString("**Related Alerts:** 0\n")
 	}
@@ -266,25 +268,25 @@ func (n *AlertNotifier) notifyDingTalk(ctx context.Context, a *alert_models.Proc
 		sort.Strings(keys)
 		for _, k := range keys {
 			v := a.EnrichTags[k]
-			textBuilder.WriteString(fmt.Sprintf("%s: %s\n", k, v))
+			fmt.Fprintf(&textBuilder, "%s: %s\n", k, v)
 		}
 	}
 	// Routing 信息
 	if a.Routing.Severity != "" {
-		textBuilder.WriteString(fmt.Sprintf("\n**Severity:** %s\n", a.Routing.Severity))
+		fmt.Fprintf(&textBuilder, "\n**Severity:** %s\n", a.Routing.Severity)
 	}
 	if a.Routing.NotifyChannel != "" || a.Routing.Receiver != "" {
-		textBuilder.WriteString(fmt.Sprintf("**Routing:** Channel=%s, Receiver=%s\n", a.Routing.NotifyChannel, a.Routing.Receiver))
+		fmt.Fprintf(&textBuilder, "**Routing:** Channel=%s, Receiver=%s\n", a.Routing.NotifyChannel, a.Routing.Receiver)
 	}
 	// ProcessedAt 时区信息
 	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
-		textBuilder.WriteString(fmt.Sprintf("**Processed At (Asia/Shanghai):** %s\n", a.ProcessedAt.In(loc).Format("2006-01-02 15:04:05 MST")))
+		fmt.Fprintf(&textBuilder, "**Processed At (Asia/Shanghai):** %s\n", a.ProcessedAt.In(loc).Format("2006-01-02 15:04:05 MST"))
 	} else {
-		textBuilder.WriteString(fmt.Sprintf("**Processed At:** %s\n", a.ProcessedAt.Format(time.RFC3339)))
+		fmt.Fprintf(&textBuilder, "**Processed At:** %s\n", a.ProcessedAt.Format(time.RFC3339))
 	}
 	// Fingerprint
 	if a.Fingerprint != "" {
-		textBuilder.WriteString(fmt.Sprintf("\nFingerprint: %s\n", a.Fingerprint))
+		fmt.Fprintf(&textBuilder, "\nFingerprint: %s\n", a.Fingerprint)
 	}
 
 	payload := map[string]interface{}{
@@ -412,7 +414,7 @@ func (n *AlertNotifier) sendWebhook(url string, payload interface{}) error {
 	if err != nil {
 		return fmt.Errorf("failed to send webhook: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("webhook returned status %d", resp.StatusCode)
@@ -442,9 +444,13 @@ func (n *AlertNotifier) sendAggregatedAlerts(groups []*AlertGroup) error {
 		"text": sb.String(),
 	}
 
+	var errs []error
 	// Slack (if configured)
 	if n.notifier.SlackWebhookURL != "" {
-		_ = n.sendWebhook(n.notifier.SlackWebhookURL, payload)
+		if err := n.sendWebhook(n.notifier.SlackWebhookURL, payload); err != nil {
+			n.logger.Error("failed to deliver Slack notification", zap.Error(err))
+			errs = append(errs, err)
+		}
 	}
 
 	// DingTalk (if configured) - reuse same text payload
@@ -456,7 +462,10 @@ func (n *AlertNotifier) sendAggregatedAlerts(groups []*AlertGroup) error {
 				"text":  sb.String(),
 			},
 		}
-		_ = n.sendWebhook(n.notifier.DingTalkWebhook, payloadDT)
+		if err := n.sendWebhook(n.notifier.DingTalkWebhook, payloadDT); err != nil {
+			n.logger.Error("failed to deliver DingTalk notification", zap.Error(err))
+			errs = append(errs, err)
+		}
 	}
 
 	// PagerDuty (if configured)
@@ -470,8 +479,11 @@ func (n *AlertNotifier) sendAggregatedAlerts(groups []*AlertGroup) error {
 				"details": sb.String(),
 			},
 		}
-		_ = n.sendWebhook("https://events.pagerduty.com/v2/enqueue", payloadPD)
+		if err := n.sendWebhook("https://events.pagerduty.com/v2/enqueue", payloadPD); err != nil {
+			n.logger.Error("failed to deliver PagerDuty notification", zap.Error(err))
+			errs = append(errs, err)
+		}
 	}
 
-	return nil
+	return errors.Join(errs...)
 }

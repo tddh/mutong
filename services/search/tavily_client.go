@@ -123,7 +123,7 @@ func (c *TavilyClient) Search(ctx context.Context, query string, topic string) (
 		)
 		return nil, "", fmt.Errorf("tavily request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {

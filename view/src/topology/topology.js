@@ -797,7 +797,7 @@ createApp({
               }
               detailLoading.value = true
               fetch(
-                `/k8s/resources/graph/resource-define?resourceId=${encodeURIComponent(node.id)}`,
+                `/api/v1/k8s/resources/graph/resource-define?resourceId=${encodeURIComponent(node.id)}`,
               )
                 .then((res) => (res.ok ? res.json() : null))
                 .then((data) => {
@@ -1020,7 +1020,7 @@ createApp({
       loading.value = true
       try {
         const res = await fetch(
-          `/k8s/resources/graph/search?resourceId=${encodeURIComponent(uid)}&depth=${layers}`,
+          `/api/v1/k8s/resources/graph/search?resourceId=${encodeURIComponent(uid)}&depth=${layers}`,
         )
         if (!res.ok) throw new Error(`获取拓扑数据失败 (${res.status})`)
         const data = await res.json()
@@ -1068,7 +1068,7 @@ createApp({
       try {
         const params = new URLSearchParams({ page: currentPage.value, pageSize: RESOURCE_PAGE_SIZE })
         if (selectedNs.value !== 'all') params.set('namespace', selectedNs.value)
-        const res = await fetch('/k8s/resources/graph/nodes?' + params.toString())
+        const res = await fetch('/api/v1/k8s/resources/graph/nodes?' + params.toString())
         if (!res.ok) throw new Error(`获取资源列表失败 (${res.status})`)
         const data = await res.json()
         allNodes.value = (data.nodes || []).map((n) => ({
@@ -1109,7 +1109,7 @@ createApp({
       try {
         const params = new URLSearchParams({ q: q.trim() })
         if (selectedNs.value !== 'all') params.set('namespace', selectedNs.value)
-        const res = await fetch('/k8s/resources/graph/suggest?' + params.toString())
+        const res = await fetch('/api/v1/k8s/resources/graph/suggest?' + params.toString())
         if (!res.ok) return
         const data = await res.json()
         suggestions.value = Array.isArray(data) ? data : data.suggestions || []

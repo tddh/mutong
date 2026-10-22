@@ -69,7 +69,7 @@ func (c *DiagnosisController) SetSelfHealing(exec interfaces.Executor, reader mc
 
 func (c *DiagnosisController) sseWriteLine(w http.ResponseWriter, flusher http.Flusher) func(string) {
 	return func(line string) {
-		fmt.Fprint(w, line+"\n")
+		_, _ = fmt.Fprint(w, line+"\n")
 		flusher.Flush()
 		if c.sseWriteTimeout > 0 {
 			rc := http.NewResponseController(w)
@@ -219,6 +219,13 @@ func (c *DiagnosisController) listMCPTools(ctx *gin.Context) {
 func (c *DiagnosisController) executeMCPTool(ctx *gin.Context) {
 	name := ctx.Param("name")
 
+	// State-changing tools are only callable by administrators through this
+	// debug endpoint. Model-originated calls still produce proposals only.
+	if mcp.IsExecTool(name) && GetUserRole(ctx) != "admin" {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "admin role required for execution tools"})
+		return
+	}
+
 	var args map[string]string
 	if err := ctx.ShouldBindJSON(&args); err != nil {
 		args = make(map[string]string)
@@ -308,7 +315,7 @@ func (c *DiagnosisController) streamChat(ctx *gin.Context) {
 
 	for event := range session.SSEChan {
 		data, _ := json.Marshal(event)
-		fmt.Fprintf(ctx.Writer, "event: %s\ndata: %s\n\n", event.Type, string(data))
+		_, _ = fmt.Fprintf(ctx.Writer, "event: %s\ndata: %s\n\n", event.Type, string(data))
 		flusher.Flush()
 	}
 }
@@ -1077,7 +1084,7 @@ func (c *DiagnosisController) askChatWithEino(ginCtx *gin.Context, req askChatRe
 	}
 
 	// trigger initial flush
-	fmt.Fprint(ginCtx.Writer, ":\n\n")
+	_, _ = fmt.Fprint(ginCtx.Writer, ":\n\n")
 	flusher.Flush()
 
 	writeLineRaw := c.sseWriteLine(ginCtx.Writer, flusher)

@@ -58,6 +58,15 @@ func (c *DiagnosisController) NewDeepDiagnoseFunc() executor.DeepDiagnoseFunc {
 			return nil, err
 		}
 
+		// Model output is untrusted. Risk is normalised and auto-fixability is
+		// never granted from the model: every AI proposal requires approval.
+		risk := strings.ToLower(strings.TrimSpace(parsed.Remediation.RiskLevel))
+		switch risk {
+		case "low", "medium", "high":
+		default:
+			risk = "high"
+		}
+
 		res := &diagModel.DiagnosisResult{
 			ID:        base.ID,
 			Timestamp: time.Now(),
@@ -73,8 +82,8 @@ func (c *DiagnosisController) NewDeepDiagnoseFunc() executor.DeepDiagnoseFunc {
 			Remediations: []diagModel.RemediationSuggestion{{
 				Action:      parsed.Remediation.Action,
 				Description: parsed.Remediation.Description,
-				RiskLevel:   parsed.Remediation.RiskLevel,
-				AutoFixable: parsed.Remediation.AutoFixable,
+				RiskLevel:   risk,
+				AutoFixable: false,
 			}},
 		}
 		return res, nil

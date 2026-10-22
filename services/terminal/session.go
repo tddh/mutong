@@ -28,6 +28,8 @@ type TerminalSession struct {
 	k8sClient  *kubernetes.Clientset
 	restConfig *rest.Config
 	stdinChan  chan []byte
+	writeCh    chan []byte
+	writerOnce sync.Once
 	closeCh    chan struct{}
 	createdAt  time.Time
 }
@@ -78,6 +80,7 @@ func (m *TerminalSessionManager) CreateSession(cluster, namespace, pod, containe
 		Conn:      conn,
 		sizeQueue: &terminalSizeQueue{ch: make(chan remoteTerminalSize, 10)},
 		stdinChan: make(chan []byte, 100),
+		writeCh:   make(chan []byte, 64),
 		closeCh:   make(chan struct{}),
 		createdAt: time.Now(),
 	}
@@ -117,7 +120,7 @@ func (m *TerminalSessionManager) CloseSession(id string) error {
 			close(sess.closeCh)
 		}
 		if sess.Conn != nil {
-			sess.Conn.Close()
+			_ = sess.Conn.Close()
 		}
 		delete(m.sessions, id)
 	}
@@ -135,7 +138,7 @@ func (m *TerminalSessionManager) CleanupExpired(maxAge time.Duration) {
 				close(sess.closeCh)
 			}
 			if sess.Conn != nil {
-				sess.Conn.Close()
+				_ = sess.Conn.Close()
 			}
 			delete(m.sessions, id)
 		}
@@ -183,20 +186,72 @@ func (q *terminalSizeQueue) Push(width uint16, height uint16) {
 	}
 }
 
+// startWriter serialises all WebSocket writes through a single goroutine.
+// gorilla/websocket forbids concurrent writers.
+func (sess *TerminalSession) startWriter() {
+	sess.writerOnce.Do(func() {
+		go func() {
+			for {
+				select {
+				case msg := <-sess.writeCh:
+					if sess.Conn == nil {
+						continue
+					}
+					_ = sess.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+					if err := sess.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+						return
+					}
+				case <-sess.closeCh:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// writeText enqueues a status/error message for the writer goroutine.
+func (sess *TerminalSession) writeText(msg string) {
+	sess.writeBytes([]byte(msg))
+}
+
+// writeBytes enqueues a copy of msg. The copy is required because callers
+// reuse their read buffers.
+func (sess *TerminalSession) writeBytes(msg []byte) {
+	if sess == nil || len(msg) == 0 {
+		return
+	}
+	buf := append([]byte(nil), msg...)
+	select {
+	case sess.writeCh <- buf:
+	default:
+		// Never block the reader on a slow client.
+	}
+}
+
 func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, shell string) {
+	sess.startWriter()
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	defer streamCancel()
+	go func() {
+		select {
+		case <-sess.closeCh:
+			streamCancel()
+		case <-streamCtx.Done():
+		}
+	}()
 	if sess.Conn != nil {
-		_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[36mStarting exec session...\x1b[0m\r\n"))
+		sess.writeText(string([]byte("\r\n\x1b[36mStarting exec session...\x1b[0m\r\n")))
 	}
 
 	if sess.k8sClient == nil {
 		if sess.Conn != nil {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: K8s client is nil\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[31mError: K8s client is nil\x1b[0m\r\n")))
 		}
 		return
 	}
 	if sess.restConfig == nil {
 		if sess.Conn != nil {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: K8s restConfig is nil\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[31mError: K8s restConfig is nil\x1b[0m\r\n")))
 		}
 		return
 	}
@@ -207,9 +262,9 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 
 	if sess.Conn != nil {
 		if os.Getenv("MUTONG_DEBUG") == "true" {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[36mK8s API Host: "+sess.restConfig.Host+"\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[36mK8s API Host: " + sess.restConfig.Host + "\x1b[0m\r\n")))
 		}
-		_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[36mShell: "+shell+"\x1b[0m\r\n"))
+		sess.writeText(string([]byte("\r\n\x1b[36mShell: " + shell + "\x1b[0m\r\n")))
 	}
 
 	req := sess.k8sClient.CoreV1().RESTClient().Post().
@@ -224,19 +279,19 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 		}, scheme.ParameterCodec)
 
 	if sess.Conn != nil {
-		_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[36mExec URL: "+req.URL().String()+"\x1b[0m\r\n"))
+		sess.writeText(string([]byte("\r\n\x1b[36mExec URL: " + req.URL().String() + "\x1b[0m\r\n")))
 	}
 
 	executor, err := remotecommand.NewSPDYExecutor(sess.restConfig, "POST", req.URL())
 	if err != nil {
 		if sess.Conn != nil {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mSPDY Executor Error: "+err.Error()+"\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[31mSPDY Executor Error: " + err.Error() + "\x1b[0m\r\n")))
 		}
 		return
 	}
 
 	if sess.Conn != nil {
-		_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[36mSPDY Executor created, starting stream...\x1b[0m\r\n"))
+		sess.writeText(string([]byte("\r\n\x1b[36mSPDY Executor created, starting stream...\x1b[0m\r\n")))
 	}
 
 	stdinReader, stdinWriter := io.Pipe()
@@ -249,9 +304,8 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 			if err != nil {
 				break
 			}
-			if n > 0 && sess.Conn != nil {
-				_ = sess.Conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				_ = sess.Conn.WriteMessage(websocket.TextMessage, buf[:n])
+			if n > 0 {
+				sess.writeBytes(buf[:n])
 			}
 		}
 	}()
@@ -270,7 +324,7 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 		}
 	}()
 
-	err = executor.StreamWithContext(context.Background(), remotecommand.StreamOptions{
+	err = executor.StreamWithContext(streamCtx, remotecommand.StreamOptions{
 		Stdin:             stdinReader,
 		Stdout:            stdoutWriter,
 		Stderr:            stdoutWriter,
@@ -278,11 +332,23 @@ func (sess *TerminalSession) StartK8sExec(cluster, namespace, pod, container, sh
 		TerminalSizeQueue: sess.sizeQueue,
 	})
 
+	// Close the pipe ends so the stdout pump and stdin pump can exit even if
+	// the transport stream has already terminated.
+	_ = stdoutWriter.Close()
+	_ = stdinWriter.Close()
+
 	if sess.Conn != nil {
 		if err != nil {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mStream Error: "+err.Error()+"\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[31mStream Error: " + err.Error() + "\x1b[0m\r\n")))
 		} else {
-			_ = sess.Conn.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[33mSession ended normally\x1b[0m\r\n"))
+			sess.writeText(string([]byte("\r\n\x1b[33mSession ended normally\x1b[0m\r\n")))
 		}
 	}
+}
+
+// SessionCount returns the number of live terminal sessions.
+func (m *TerminalSessionManager) SessionCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
 }

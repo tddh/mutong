@@ -9,7 +9,6 @@
 node_modules/
 view/node_modules/
 view/dist/
-view/bun.lock
 # Test binary, built with `go test -c`
 *.test
 *.test.sh
@@ -74,3 +73,14 @@ docs/swagger.json
 docs/swagger.yaml
 {{output_dir}}/
 *.bak
+.omo/
+.qoder/
+.workbuddy/
+.zvec-grep/
+WATCHDOG.yml
+docs/superpowers/
+
+# Local build/runtime output
+/dist/
+coverage.html
+/data/

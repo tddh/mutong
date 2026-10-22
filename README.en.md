@@ -256,7 +256,7 @@ The platform exposes REST APIs for all modules. Key endpoint groups:
 
 | Module | Base Path |
 |--------|-----------|
-| K8s Resources | `/k8s/resources/*` |
+| K8s Resources | `/api/v1/k8s/resources/*` |
 | Alerts | `/api/v1/alerts/*` |
 | AI Diagnosis | `/api/v1/diagnosis/*` |
 | Inspection | `/api/v1/inspection/*` |
@@ -267,7 +267,7 @@ The platform exposes REST APIs for all modules. Key endpoint groups:
 | Business Topology | `/api/v1/business-topology/*` |
 | Trace | `/api/v1/trace/*` |
 | Terminal | `/api/v1/terminal/*` |
-| RBAC | `/users`, `/roles` |
+| RBAC | `/api/v1/users`, `/api/v1/roles` |
 | System | `/api/v1/system/*`, `/api/v1/clusters/*`, `/api/v1/stats/*` |
 
 See the [Chinese README](README.md) for the complete API reference with all endpoints.

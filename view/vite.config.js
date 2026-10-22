@@ -34,6 +34,14 @@ export default defineConfig(({ command, mode }) => {
       outDir: outDir,
       emptyOutDir: true,
       rollupOptions: {
+        output: {
+          manualChunks(id) {
+            // G6 is only used by the retrospective pages; keep it out of the
+            // shared entry chunk so other pages do not pay 1.4 MB.
+            if (id.includes('@antv/g6') || id.includes('node_modules/@antv')) return 'g6'
+            return undefined
+          },
+        },
         input: {
           index: resolve(__dirname, 'src/index.html'),
           topology: resolve(__dirname, 'src/topology/index.html'),

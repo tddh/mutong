@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"gitee.com/tddh/mutong/models"
 	"gitee.com/tddh/mutong/services/auth"
@@ -20,6 +21,26 @@ type AuthController struct {
 	LoginLimit    *auth.LoginLimiter
 	OIDCAvailable bool
 	AuthMode      string
+}
+
+// cookieSecure reports whether session cookies should carry the Secure flag.
+// TLS may terminate at a reverse proxy, so X-Forwarded-Proto is honoured when
+// MUTONG_COOKIE_SECURE is not set explicitly.
+func cookieSecure(c *gin.Context) bool {
+	if v := os.Getenv("MUTONG_COOKIE_SECURE"); v != "" {
+		return v == "true"
+	}
+	if c.Request.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
+}
+
+// setSessionCookie writes the session cookie with an explicit SameSite policy
+// and HttpOnly. maxAge < 0 deletes the cookie.
+func setSessionCookie(c *gin.Context, value string, maxAge int) {
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("mutong_session", value, maxAge, "/", "", cookieSecure(c), true)
 }
 
 func NewAuthController(db *gorm.DB, sessions *auth.SessionManager, loginLimit *auth.LoginLimiter) *AuthController {
@@ -92,20 +113,25 @@ func (ac *AuthController) Login(c *gin.Context) {
 		ac.LoginLimit.ClearFailures(c.Request.Context(), req.Username)
 	}
 
-	secure := c.Request.TLS != nil
-	sessionToken := user.UUID
-	if ac.Sessions != nil {
-		token, err := ac.Sessions.Issue(auth.SessionClaims{
-			UserID:       user.ID,
-			UUID:         user.UUID,
-			Role:         user.Role,
-			AuthProvider: "local",
+	if ac.Sessions == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "session manager not configured; set MUTONG_SESSION_SECRET or auth.global_secret",
 		})
-		if err == nil {
-			sessionToken = token
-		}
+		return
 	}
-	c.SetCookie("mutong_session", sessionToken, 86400, "/", "", secure, true)
+	sessionToken, err := ac.Sessions.Issue(auth.SessionClaims{
+		UserID:       user.ID,
+		UUID:         user.UUID,
+		Role:         user.Role,
+		AuthProvider: "local",
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session"})
+		return
+	}
+	// Re-bind the role at login so policy changes take effect immediately.
+	_ = auth.SyncUserRole(ac.DB, user.UUID)
+	setSessionCookie(c, sessionToken, 86400)
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token": sessionToken,
@@ -146,9 +172,8 @@ func (ac *AuthController) Me(c *gin.Context) {
 }
 
 func (ac *AuthController) Logout(c *gin.Context) {
-	secure := c.Request.TLS != nil
-	c.SetCookie("mutong_session", "", -1, "/", "", secure, true)
-	c.SetCookie("refresh_token", "", -1, "/oauth2", "", secure, true)
+	setSessionCookie(c, "", -1)
+	c.SetCookie("refresh_token", "", -1, "/oauth2", "", cookieSecure(c), true)
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
 
@@ -245,12 +270,10 @@ func (ac *AuthController) CreateInitialAdmin(username, password string) error {
 	var existing models.User
 	err = ac.DB.Where("username = ?", username).First(&existing).Error
 	if err == nil {
-		// Admin already exists — update password to match current env var
-		return ac.DB.Model(&existing).Updates(map[string]interface{}{
-			"password_hash": hash,
-			"role":          "admin",
-			"status":        "active",
-		}).Error
+		// Admin already exists. Never reset the password from an environment
+		// variable on every startup: that turns a leaked env var into a
+		// permanent, non-rotatable backdoor.
+		return nil
 	}
 
 	return ac.DB.Create(&models.User{

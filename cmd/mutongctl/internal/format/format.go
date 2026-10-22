@@ -38,8 +38,8 @@ func PrintJSON(w io.Writer, data any, color bool) error {
 // PrintTable outputs aligned terminal table.
 func PrintTable(w io.Writer, data any, color bool) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	defer tw.Flush()
-	fmt.Fprintln(tw, "(table format: use -o md for Agent-friendly markdown)")
+	defer func() { _ = tw.Flush() }()
+	_, _ = fmt.Fprintln(tw, "(table format: use -o md for Agent-friendly markdown)")
 	return PrintJSON(tw, data, color)
 }
 
@@ -53,13 +53,13 @@ func PrintMarkdown(w io.Writer, data any) error {
 		v = slice
 	}
 	if v.Len() == 0 {
-		fmt.Fprintln(w, "(empty result)")
+		_, _ = fmt.Fprintln(w, "(empty result)")
 		return nil
 	}
 
 	elem := v.Index(0)
 	t := elem.Type()
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if t.Kind() != reflect.Struct {
@@ -79,32 +79,32 @@ func PrintMarkdown(w io.Writer, data any) error {
 	}
 
 	// Header row
-	fmt.Fprint(w, "|")
+	_, _ = fmt.Fprint(w, "|")
 	for _, h := range headers {
-		fmt.Fprintf(w, " %s |", h)
+		_, _ = fmt.Fprintf(w, " %s |", h)
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Separator
-	fmt.Fprint(w, "|")
+	_, _ = fmt.Fprint(w, "|")
 	for range headers {
-		fmt.Fprint(w, " --- |")
+		_, _ = fmt.Fprint(w, " --- |")
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 
 	// Data rows
 	for i := 0; i < v.Len(); i++ {
 		elem := v.Index(i)
-		if elem.Kind() == reflect.Ptr {
+		if elem.Kind() == reflect.Pointer {
 			elem = elem.Elem()
 		}
-		fmt.Fprint(w, "|")
+		_, _ = fmt.Fprint(w, "|")
 		for j := 0; j < elem.NumField(); j++ {
 			val := elem.Field(j).Interface()
 			s := formatFieldValue(val)
-			fmt.Fprintf(w, " %s |", s)
+			_, _ = fmt.Fprintf(w, " %s |", s)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	}
 	return nil
 }
@@ -114,7 +114,7 @@ func formatFieldValue(v any) string {
 		return ""
 	}
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
 			return ""
 		}

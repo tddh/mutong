@@ -87,6 +87,13 @@ func (oc *OIDCController) Callback(c *gin.Context) {
 		}
 	}
 
+	if oc.Sessions == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "session manager not configured; set MUTONG_SESSION_SECRET or auth.global_secret",
+		})
+		return
+	}
+
 	token, err := oc.Sessions.Issue(auth.SessionClaims{
 		UserID:       user.ID,
 		UUID:         user.UUID,
@@ -98,9 +105,9 @@ func (oc *OIDCController) Callback(c *gin.Context) {
 		return
 	}
 
-	secure := c.Request.TLS != nil
+	secure := cookieSecure(c)
 	maxAge := int(oc.Sessions.TTL().Seconds())
-	c.SetCookie("mutong_session", token, maxAge, "/", "", secure, true)
+	setSessionCookie(c, token, maxAge)
 
 	// Clear OIDC-specific cookies
 	c.SetCookie("mutong_oidc_state", "", -1, "/", "", secure, true)

@@ -17,7 +17,8 @@ func TestGenerateCodeVerifier(t *testing.T) {
 		t.Fatalf("verifier length %d, want 43-128", len(v))
 	}
 	for _, c := range v {
-		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+		valid := (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_'
+		if !valid {
 			t.Fatalf("verifier contains invalid char: %c", c)
 		}
 	}

@@ -51,11 +51,13 @@ import (
 // clients, and Kubernetes cluster connections, and then validates required
 // fields.  This is the production entry point.  For lightweight loading
 // in tests or tooling, use LoadConfig instead.
-func NewConfig(path string) *Config {
+func NewConfig(path string) (*Config, error) {
 	c := Config{}
-	c.LoadConfig(path)
+	if err := c.LoadConfig(path); err != nil {
+		return nil, err
+	}
 	c.validate()
-	return &c
+	return &c, nil
 }
 
 func (c *Config) validate() {
@@ -84,11 +86,11 @@ type LocalRotLogger struct {
 }
 
 func (l *LocalRotLogger) Write(p []byte) (n int, err error) {
-	f, err := os.OpenFile(l.Filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(l.Filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return 0, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return f.Write(p)
 }
 
@@ -120,40 +122,45 @@ func LoadConfig(path string) (*Config, error) {
 	return c, nil
 }
 
-func (c *Config) LoadConfig(path string) {
+func (c *Config) LoadConfig(path string) error {
 	info, err := os.Stat(path)
 	if err == nil && info.IsDir() {
-		c.loadConfigDir(path)
+		if err := c.loadConfigDir(path); err != nil {
+			return err
+		}
 	} else {
-		c.loadConfigFile(path)
+		if err := c.loadConfigFile(path); err != nil {
+			return err
+		}
 	}
-	c.SetDefaultConfig()
+	return c.SetDefaultConfig()
 }
 
 // loadConfigFile loads a single yaml config file (backward compatible path).
-func (c *Config) loadConfigFile(path string) {
+func (c *Config) loadConfigFile(path string) error {
 	viper.SetConfigFile(path)
 	viper.SetConfigType("yaml")
 
 	if err := viper.ReadInConfig(); err != nil {
-		panic(fmt.Errorf("failed to load config: %w", err))
+		return fmt.Errorf("failed to load config: %w", err)
 	}
 
 	if err := viper.Unmarshal(c); err != nil {
-		panic(fmt.Errorf("failed to unmarshal config: %w", err))
+		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
+	return nil
 }
 
 // loadConfigDir loads all config.*.yaml files from a directory, merging them
 // into the Config struct. Each file must have non-overlapping top-level yaml keys.
-func (c *Config) loadConfigDir(dir string) {
+func (c *Config) loadConfigDir(dir string) error {
 	pattern := filepath.Join(dir, "config.*.yaml")
 	files, err := filepath.Glob(pattern)
 	if err != nil {
-		panic(fmt.Errorf("failed to scan config directory %s: %w", dir, err))
+		return fmt.Errorf("failed to scan config directory %s: %w", dir, err)
 	}
 	if len(files) == 0 {
-		panic(fmt.Errorf("no config.*.yaml files found in %s", dir))
+		return fmt.Errorf("no config.*.yaml files found in %s", dir)
 	}
 
 	// Sort for deterministic loading order (alphabetical).
@@ -162,12 +169,13 @@ func (c *Config) loadConfigDir(dir string) {
 	for _, f := range files {
 		data, err := os.ReadFile(f)
 		if err != nil {
-			panic(fmt.Errorf("failed to read config %s: %w", f, err))
+			return fmt.Errorf("failed to read config %s: %w", f, err)
 		}
 		if err := yaml.Unmarshal(data, c); err != nil {
-			panic(fmt.Errorf("failed to parse config %s: %w", f, err))
+			return fmt.Errorf("failed to parse config %s: %w", f, err)
 		}
 	}
+	return nil
 }
 
 func (c *Config) GetConfigClusterClient(name string) *K8sClusterClient {
@@ -182,13 +190,17 @@ func (c *Config) GetConfigGormDB() *gorm.DB {
 	return c.DB
 }
 
-func (c *Config) SetDefaultConfig() {
-	c.initLogger()
+func (c *Config) SetDefaultConfig() error {
+	if err := c.initLogger(); err != nil {
+		return err
+	}
 	c.Logger.Info("SetDefaultConfig start")
 
 	c.loadResourceProfiles()
 
-	c.SetupBigCache()
+	if err := c.SetupBigCache(); err != nil {
+		return err
+	}
 
 	// Allow env vars to override sensitive config values
 	if dbUser := os.Getenv("MUTONG_DB_USER"); dbUser != "" {
@@ -222,29 +234,52 @@ func (c *Config) SetDefaultConfig() {
 		c.ExternalSearch.GitHub.Token = githubToken
 	}
 
-	c.SetupClusterClient()
+	if err := c.initInfrastructure(); err != nil {
+		return err
+	}
+
+	c.setServerDefaults()
+	c.setKafkaInternalDefaults()
+	c.setExecutorInternalDefaults()
+	c.applyDefaults()
+	return nil
+}
+
+// initInfrastructure wires external dependencies. It is separated from
+// SetDefaultConfig so configuration loading stays readable and each failure is
+// returned instead of terminating the process from library code.
+func (c *Config) initInfrastructure() error {
+	if err := c.SetupClusterClient(); err != nil {
+		return err
+	}
 	if c.Postgres.User == "" || c.Postgres.Pass == "" {
 		c.Logger.Warn("PostgreSQL credentials not configured (set MUTONG_DB_USER / MUTONG_DB_PASSWORD env vars), " +
 			"alert persistence / audit log / diagnosis archive will use in-memory fallback")
 	} else if err := c.SetupDB(); err != nil {
 		c.Logger.Warn("PostgreSQL initialization failed, falling back to in-memory storage", zap.Error(err))
 	}
-	c.SetupNubelaGraph()
-	c.SetupKafkaClient()
-	c.SetupTraceKafkaClient()
-	c.SetupBusinessWorkloadClient()
-	c.SetupFlowKafkaClient()
-
-	c.setServerDefaults()
-	c.setKafkaInternalDefaults()
-	c.setExecutorInternalDefaults()
-	c.applyDefaults()
+	if err := c.SetupNubelaGraph(); err != nil {
+		return err
+	}
+	if err := c.SetupKafkaClient(); err != nil {
+		return err
+	}
+	if err := c.SetupTraceKafkaClient(); err != nil {
+		return err
+	}
+	if err := c.SetupBusinessWorkloadClient(); err != nil {
+		return err
+	}
+	if err := c.SetupFlowKafkaClient(); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (c *Config) initLogger() {
+func (c *Config) initLogger() error {
 	level, err := zapcore.ParseLevel(c.Log.Level)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	// Base production config
 	config := zap.NewProductionConfig()
@@ -297,6 +332,7 @@ func (c *Config) initLogger() {
 	zlog := zap.New(finalCore, zap.AddCaller(), zap.AddCallerSkip(1))
 	zlog = zlog.With(zap.String("service", "mutong"))
 	c.Logger = zlog
+	return nil
 }
 
 func (c *Config) CustomCallerField(skip int) zap.Field {
@@ -314,7 +350,7 @@ func (c *Config) CustomFieldWithTraceID(traceID string) zap.Field {
 	return zap.String("X-Trace-ID", traceID)
 }
 
-func (c *Config) SetupClusterClient() {
+func (c *Config) SetupClusterClient() error {
 	c.Logger.Debug("SetupClusterClient start ", c.CustomCallerField(2))
 
 	c.Cluster = &Cluster{}
@@ -322,23 +358,22 @@ func (c *Config) SetupClusterClient() {
 
 	// 新：多集群声明式模式（优先）
 	if len(c.Kubernetes.Clusters) > 0 {
-		c.setupClusterClientsFromConfig()
-		return
+		return c.setupClusterClientsFromConfig()
 	}
 
 	// 旧：单 kubeconfig 文件模式（向后兼容）
 	if c.Kubernetes.Config != "" {
-		c.setupClusterClientsFromFile(c.Kubernetes.Config)
-		return
+		return c.setupClusterClientsFromFile(c.Kubernetes.Config)
 	}
 
 	// 无 kubeconfig 配置 → 跳过
 	c.Logger.Warn("no kubeconfig configured (kubernetes.config or kubernetes.clusters), " +
 		"K8s cluster features will be unavailable")
+	return nil
 }
 
 // setupClusterClientsFromConfig 从配置文件的 clusters 列表初始化（新）
-func (c *Config) setupClusterClientsFromConfig() {
+func (c *Config) setupClusterClientsFromConfig() error {
 	for _, entry := range c.Kubernetes.Clusters {
 		c.setupClusterClientFromFile(entry.Name, entry.Config)
 		// 第一个成功连接的集群作为默认 context
@@ -348,26 +383,27 @@ func (c *Config) setupClusterClientsFromConfig() {
 			}
 		}
 	}
+	return nil
 }
 
 // setupClusterClientsFromFile 从单个 kubeconfig 文件初始化（旧）
-func (c *Config) setupClusterClientsFromFile(configPath string) {
+func (c *Config) setupClusterClientsFromFile(configPath string) error {
 	config, err := os.ReadFile(configPath)
 	if err != nil {
 		c.Logger.Error("read kube config failed", zap.String("path", configPath), zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	clientConfig, err := clientcmd.NewClientConfigFromBytes(config)
 	if err != nil {
 		c.Logger.Error("create root cluster struct failed", zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	RawConfig, err := clientConfig.RawConfig()
 	if err != nil {
 		c.Logger.Error("error loading kube config, please ensure kubectl get namespaces works", zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	RawConfig.CurrentContext = RawConfig.Contexts[RawConfig.CurrentContext].Cluster
@@ -407,6 +443,7 @@ func (c *Config) setupClusterClientsFromFile(configPath string) {
 		}
 		c.createClusterClient(name, ConfigBytes, &RawConfig)
 	}
+	return nil
 }
 
 // setupClusterClientFromFile 从单个集群文件初始化（新：每个文件一个集群）
@@ -563,7 +600,7 @@ func (c *Config) migrateAuthTables() error {
 	)
 }
 
-func (c *Config) SetupNubelaGraph() /*Nebula client*/ {
+func (c *Config) SetupNubelaGraph() error {
 	config, err1 := nebula.NewSessionPoolConf(
 		c.Nebula.User,
 		c.Nebula.Pass,
@@ -586,24 +623,25 @@ func (c *Config) SetupNubelaGraph() /*Nebula client*/ {
 
 	if err1 != nil {
 		c.Logger.Error("create session pool failed,", c.CustomCallerField(2), zap.Error(err1))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 	c.Logger.Debug("config: ", c.CustomCallerField(2), zap.Any("config", *config))
 
 	sessionPool, err := nebula.NewSessionPool(*config, nebula.DefaultLogger{})
 	if err != nil {
 		c.Logger.Error("create session pool failed,", c.CustomCallerField(2), zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	c.Nebula.SessionPool = sessionPool
+	return nil
 }
 
-func (c *Config) SetupKafkaClient() {
+func (c *Config) SetupKafkaClient() error {
 	brokers := strings.Split(c.Kafka.Broker, ",")
 	if len(brokers) == 0 {
 		c.Logger.Error("Invalid Kafka broker configuration", c.CustomCallerField(2))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	maxRecordBytes := c.Kafka.MaxRecordBytes
@@ -683,7 +721,7 @@ func (c *Config) SetupKafkaClient() {
 	c.Kafka.Client, err = kgo.NewClient(opts...)
 	if err != nil {
 		c.Logger.Error("create kafka client failed,", c.CustomCallerField(2), zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 
 	}
 
@@ -695,20 +733,21 @@ func (c *Config) SetupKafkaClient() {
 		zap.Int32("maxBrokerWriteBytes", maxBrokerWriteBytes),
 		zap.Int32("fetchMaxBytes", fetchMaxBytes),
 		zap.Int32("fetchMaxPartBytes", fetchMaxPartBytes))
+	return nil
 }
 
-func (c *Config) SetupTraceKafkaClient() {
+func (c *Config) SetupTraceKafkaClient() error {
 	if c.Kafka.TraceTopic == "" || c.Kafka.TraceGroup == "" {
 		c.Logger.Info("Trace Kafka not configured, skipping",
 			zap.String("traceTopic", c.Kafka.TraceTopic),
 			zap.String("traceGroup", c.Kafka.TraceGroup))
-		return
+		return nil
 	}
 
 	brokers := strings.Split(c.Kafka.Broker, ",")
 	if len(brokers) == 0 {
 		c.Logger.Error("Invalid Kafka broker configuration", c.CustomCallerField(2))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	maxRecordBytes := c.Kafka.MaxRecordBytes
@@ -788,27 +827,28 @@ func (c *Config) SetupTraceKafkaClient() {
 	c.Kafka.TraceClient, err = kgo.NewClient(opts...)
 	if err != nil {
 		c.Logger.Error("create trace kafka client failed,", c.CustomCallerField(2), zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	c.Logger.Info("create trace kafka client success,", c.CustomCallerField(2),
 		zap.String("topic", c.Kafka.TraceTopic),
 		zap.String("group", c.Kafka.TraceGroup),
 		zap.String("broker", c.Kafka.Broker))
+	return nil
 }
 
-func (c *Config) SetupBusinessWorkloadClient() {
+func (c *Config) SetupBusinessWorkloadClient() error {
 	if c.Kafka.BusinessWorkloadTopic == "" || c.Kafka.BusinessWorkloadGroup == "" {
 		c.Logger.Info("Business Workload Kafka not configured, skipping",
 			zap.String("topic", c.Kafka.BusinessWorkloadTopic),
 			zap.String("group", c.Kafka.BusinessWorkloadGroup))
-		return
+		return nil
 	}
 
 	brokers := strings.Split(c.Kafka.Broker, ",")
 	if len(brokers) == 0 {
 		c.Logger.Error("Invalid Kafka broker configuration", c.CustomCallerField(2))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	maxRecordBytes := c.Kafka.MaxRecordBytes
@@ -878,16 +918,17 @@ func (c *Config) SetupBusinessWorkloadClient() {
 	c.Kafka.BusinessWorkloadClient, err = kgo.NewClient(opts...)
 	if err != nil {
 		c.Logger.Error("create business workload kafka client failed,", c.CustomCallerField(2), zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 
 	c.Logger.Info("create business workload kafka client success,", c.CustomCallerField(2),
 		zap.String("topic", c.Kafka.BusinessWorkloadTopic),
 		zap.String("group", c.Kafka.BusinessWorkloadGroup),
 		zap.String("broker", c.Kafka.Broker))
+	return nil
 }
 
-func (c *Config) SetupBigCache() {
+func (c *Config) SetupBigCache() error {
 	// Use configuration values from config.yaml, with sensible defaults
 	// if not specified. This allows runtime configuration of cache behavior
 	// without code changes.
@@ -923,7 +964,7 @@ func (c *Config) SetupBigCache() {
 		Logger:               nil,
 	})
 	if err != nil {
-		panic(err)
+		return err
 	}
 	c.Logger.Info("create bigcache success,", c.CustomCallerField(2))
 	for _, s := range c.ExcludeLabels {
@@ -937,6 +978,7 @@ func (c *Config) SetupBigCache() {
 		_ = cache.Set("ExcludeLabels-"+key, []byte(value))
 	}
 	c.BigCache = cache
+	return nil
 }
 
 // Getter methods for dependency injection
@@ -985,12 +1027,12 @@ func (c *Config) GetBusinessWorkloadMessageQueue() *KafkaAdapter {
 }
 
 // SetupFlowKafkaClient 初始化 Flow Kafka 客户端（消费 Beyla L4 network flow metrics）
-func (c *Config) SetupFlowKafkaClient() {
+func (c *Config) SetupFlowKafkaClient() error {
 	if c.Kafka.FlowTopic == "" || c.Kafka.FlowGroup == "" {
 		c.Logger.Info("Flow Kafka not configured, skipping",
 			zap.String("flowTopic", c.Kafka.FlowTopic),
 			zap.String("flowGroup", c.Kafka.FlowGroup))
-		return
+		return nil
 	}
 
 	brokers := strings.Split(c.Kafka.Broker, ",")
@@ -1009,11 +1051,12 @@ func (c *Config) SetupFlowKafkaClient() {
 	c.Kafka.FlowClient, err = kgo.NewClient(opts...)
 	if err != nil {
 		c.Logger.Error("create flow kafka client failed", zap.Error(err))
-		os.Exit(1)
+		return fmt.Errorf("configuration initialization failed")
 	}
 	c.Logger.Info("create flow kafka client success",
 		zap.String("topic", c.Kafka.FlowTopic),
 		zap.String("group", c.Kafka.FlowGroup))
+	return nil
 }
 
 // GetFlowMessageQueue 获取 Flow 消息队列适配器

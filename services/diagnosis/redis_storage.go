@@ -305,7 +305,7 @@ func (r *RedisStorage) GetCachedDiagnosisResult(ctx context.Context, fingerprint
 		result, pgErr := r.pgStore.GetDiagnosisResult(ctx, fingerprint)
 		if pgErr == nil && result != nil {
 			go func() {
-				bgCtx := context.Background()
+				bgCtx := context.WithoutCancel(ctx)
 				if cacheErr := r.CacheDiagnosisResult(bgCtx, fingerprint, result, r.ttl); cacheErr != nil {
 					r.logger.Warn("Failed to warm Redis cache from PG",
 						zap.String("fingerprint", fingerprint),

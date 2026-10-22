@@ -535,9 +535,10 @@ func isValidResourceName(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.') {
-			return false
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' {
+			continue
 		}
+		return false
 	}
 	return true
 }
@@ -547,9 +548,10 @@ func isValidNamespace(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
-			return false
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			continue
 		}
+		return false
 	}
 	return true
 }
@@ -1209,7 +1211,7 @@ func (s *Server) resolveCRDGVR(apiGroup, kind, explicitVersion string) (schema.G
 				continue
 			}
 			// 只要可 list 的主资源（跳过 status/scale 等子资源）
-			if api.Namespaced == false && apiGroup == "" && gv.Group == "" {
+			if !api.Namespaced && apiGroup == "" && gv.Group == "" {
 				continue
 			}
 			listable := false
@@ -1451,7 +1453,7 @@ func (s *Server) handleGetPodLogs(ctx context.Context, args map[string]string) (
 			return "", fmt.Errorf("获取 Pod 信息失败: %w", err)
 		}
 		if len(podObj.Spec.Containers) == 0 {
-			return "", fmt.Errorf("Pod %s/%s 没有容器", ns, pod)
+			return "", fmt.Errorf("pod %s/%s 没有容器", ns, pod)
 		}
 		container = podObj.Spec.Containers[0].Name
 	}
@@ -1504,12 +1506,12 @@ func (s *Server) handleGetPodLogsES(ctx context.Context, args map[string]string)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "dial tcp") {
-			return "", fmt.Errorf("Elasticsearch 连接失败：无法连接到配置地址。请检查 config.yaml 中 elasticsearch.addresses 配置是否正确且 ES 已启动")
+			return "", fmt.Errorf("elasticsearch 连接失败：无法连接到配置地址。请检查 config.yaml 中 elasticsearch.addresses 配置是否正确且 ES 已启动")
 		}
 		if strings.Contains(errMsg, "404") || strings.Contains(errMsg, "not found") {
 			return "", fmt.Errorf("ES 中未找到 %s/%s 的日志记录 (最近 %d 分钟)", ns, pod, sinceMin)
 		}
-		return "", fmt.Errorf("Elasticsearch 查询日志失败: %w", err)
+		return "", fmt.Errorf("elasticsearch 查询日志失败: %w", err)
 	}
 	data, _ := json.Marshal(entries)
 	result := string(data)
@@ -1547,9 +1549,9 @@ func (s *Server) handleSearchLogs(ctx context.Context, args map[string]string) (
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "connection refused") || strings.Contains(errMsg, "dial tcp") {
-			return "", fmt.Errorf("Elasticsearch 连接失败：无法连接到配置地址。请检查 config.yaml 中 elasticsearch.addresses 配置是否正确且 ES 已启动")
+			return "", fmt.Errorf("elasticsearch 连接失败：无法连接到配置地址。请检查 config.yaml 中 elasticsearch.addresses 配置是否正确且 ES 已启动")
 		}
-		return "", fmt.Errorf("Elasticsearch 关键词搜索失败: %w", err)
+		return "", fmt.Errorf("elasticsearch 关键词搜索失败: %w", err)
 	}
 	data, _ := json.Marshal(entries)
 	result := string(data)

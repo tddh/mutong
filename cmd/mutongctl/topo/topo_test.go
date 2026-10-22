@@ -55,7 +55,7 @@ func TestTopoGetRunURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("topoGetRun error: %v", err)
 	}
-	expected := "/k8s/resources/graph/search?resourceId=uid-abc&depth=3"
+	expected := "/api/v1/k8s/resources/graph/search?resourceId=uid-abc&depth=3"
 	if reqURL != expected {
 		t.Errorf("expected URL %q, got %q", expected, reqURL)
 	}

@@ -72,16 +72,16 @@ func TestMutongSessionCloneDeepCopy(t *testing.T) {
 		if cs.Headers == original.Headers {
 			t.Error("clone shares Headers pointer with original")
 		}
-		if cs.JWTSession.JWTClaims == original.JWTSession.JWTClaims {
+		if cs.JWTClaims == original.JWTClaims {
 			t.Error("clone shares JWTClaims pointer with original")
 		}
-		if cs.JWTSession.JWTHeader == original.JWTSession.JWTHeader {
+		if cs.JWTHeader == original.JWTHeader {
 			t.Error("clone shares JWTHeader pointer with original")
 		}
 	})
 
 	t.Run("map_independence", func(t *testing.T) {
-		cs.JWTSession.ExpiresAt[fosite.AccessToken] = time.Time{}
+		cs.ExpiresAt[fosite.AccessToken] = time.Time{}
 		if original.JWTSession.ExpiresAt[fosite.AccessToken].IsZero() {
 			t.Error("modifying clone's ExpiresAt map affected original")
 		}
@@ -91,8 +91,8 @@ func TestMutongSessionCloneDeepCopy(t *testing.T) {
 			t.Error("modifying clone's Claims.Extra map affected original")
 		}
 
-		cs.JWTSession.JWTClaims.Extra["k"] = "modified"
-		if original.JWTSession.JWTClaims.Extra["k"] == "modified" {
+		cs.JWTClaims.Extra["k"] = "modified"
+		if original.JWTClaims.Extra["k"] == "modified" {
 			t.Error("modifying clone's JWTClaims.Extra map affected original")
 		}
 	})
@@ -106,18 +106,18 @@ func TestMutongSessionCloneDeepCopy(t *testing.T) {
 			t.Error("modifying clone's Claims.Audience slice affected original")
 		}
 
-		if len(cs.JWTSession.JWTClaims.Scope) == 0 {
+		if len(cs.JWTClaims.Scope) == 0 {
 			t.Skip("clone JWTClaims.Scope is empty")
 		}
-		cs.JWTSession.JWTClaims.Scope[0] = "modified-scope"
-		if original.JWTSession.JWTClaims.Scope[0] == "modified-scope" {
+		cs.JWTClaims.Scope[0] = "modified-scope"
+		if original.JWTClaims.Scope[0] == "modified-scope" {
 			t.Error("modifying clone's JWTClaims.Scope slice affected original")
 		}
 	})
 
 	t.Run("field_modification_isolation", func(t *testing.T) {
-		cs.JWTSession.Subject = "modified"
-		if original.JWTSession.Subject == "modified" {
+		cs.Subject = "modified"
+		if original.Subject == "modified" {
 			t.Error("modifying clone's JWTSession.Subject affected original")
 		}
 
@@ -126,8 +126,8 @@ func TestMutongSessionCloneDeepCopy(t *testing.T) {
 			t.Error("modifying clone's Claims.JTI affected original")
 		}
 
-		cs.JWTSession.Username = "modified-user"
-		if original.JWTSession.Username == "modified-user" {
+		cs.Username = "modified-user"
+		if original.Username == "modified-user" {
 			t.Error("modifying clone's JWTSession.Username affected original")
 		}
 	})

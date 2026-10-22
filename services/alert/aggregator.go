@@ -131,14 +131,17 @@ func (ag *AlertAggregator) StartFlushScheduler(interval time.Duration, callback 
 		return
 	}
 	ag.window = interval
-	ag.ticker = time.NewTicker(interval)
+	ticker := time.NewTicker(interval)
+	ag.ticker = ticker
 	done := ag.done
 	ag.mu.Unlock()
 
 	go func() {
+		// Capture the ticker locally: Stop() may nil the field concurrently.
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ag.ticker.C:
+			case <-ticker.C:
 				groups := ag.Flush()
 				if len(groups) > 0 && callback != nil {
 					callback(groups)

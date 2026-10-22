@@ -41,6 +41,6 @@ func exportRun(opts *ExportOptions) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprint(opts.IO.Out, text)
+	_, _ = fmt.Fprint(opts.IO.Out, text)
 	return nil
 }

@@ -517,9 +517,11 @@ type ZitadelConfig struct {
 
 // AuthConfig holds authentication and authorization configuration.
 type AuthConfig struct {
-	Mode         string        `yaml:"mode" json:"mode"`
-	GlobalSecret string        `yaml:"global_secret" json:"global_secret"`
-	Zitadel      ZitadelConfig `yaml:"zitadel" json:"zitadel"`
+	Mode         string `yaml:"mode" json:"mode"`
+	GlobalSecret string `yaml:"global_secret" json:"global_secret"`
+	// RBACMode controls policy enforcement: enforce (default), shadow, or off.
+	RBACMode string        `yaml:"rbac_mode" json:"rbac_mode"`
+	Zitadel  ZitadelConfig `yaml:"zitadel" json:"zitadel"`
 }
 
 // ServerConfig holds HTTP server tuning parameters.
@@ -531,6 +533,8 @@ type ServerConfig struct {
 	IdleTimeoutSec     int    `mapstructure:"idleTimeoutSec"`
 	ShutdownTimeoutSec int    `mapstructure:"shutdownTimeoutSec"`
 	RateLimitPerSec    int    `mapstructure:"rateLimitPerSec"`
+	// EnableSwagger exposes /swagger/*any. Disabled by default.
+	EnableSwagger bool `mapstructure:"enableSwagger"`
 	// SSEWriteTimeoutSec is the write timeout for SSE streaming endpoints.
 	// SSE connections (diagnosis chat/stream) need a much longer timeout than
 	// regular HTTP requests because LLM inference can pause for tens of seconds

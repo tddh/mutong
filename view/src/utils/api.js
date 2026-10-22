@@ -30,9 +30,9 @@ export const API = {
     resourceTotal: () => request('/api/v1/stats/resource-total').catch(() => null),
   },
   resources: {
-    nodes: () => request('/k8s/resources/graph/nodes'),
-    edges: () => request('/k8s/resources/graph/edges'),
-    metadata: () => request('/k8s/resources/graph/metadata'),
+    nodes: () => request('/api/v1/k8s/resources/graph/nodes'),
+    edges: () => request('/api/v1/k8s/resources/graph/edges'),
+    metadata: () => request('/api/v1/k8s/resources/graph/metadata'),
   },
   alerts: {
     list: (params) => {

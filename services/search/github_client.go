@@ -111,7 +111,7 @@ func (c *GitHubClient) SearchIssues(ctx context.Context, query, repo, state stri
 		)
 		return nil, fmt.Errorf("GitHub API request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

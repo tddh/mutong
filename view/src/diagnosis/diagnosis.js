@@ -1,5 +1,6 @@
 import { createApp, ref, nextTick, onMounted, computed } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { NavBar } from '../components/SharedComponents.js'
 import { API } from '../utils/api.js'
 import '../styles/common.css'
@@ -9,7 +10,8 @@ marked.use({ breaks: true, gfm: true })
 
 function renderMarkdown(text) {
   if (!text) return ''
-  return marked.parse(text)
+  // LLM and alert content are untrusted; never inject raw HTML into v-html.
+  return DOMPurify.sanitize(marked.parse(text))
 }
 
 function buildHistory(messages) {

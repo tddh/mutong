@@ -58,18 +58,18 @@ func (s *Server) handleSearchKnowledgeBase(ctx context.Context, args map[string]
 	filtered := sanitizer.FilterResults(toSearchResults(results))
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("搜索查询: %s\n\n", sanitized))
+	fmt.Fprintf(&sb, "搜索查询: %s\n\n", sanitized)
 	if answer != "" {
-		sb.WriteString(fmt.Sprintf("AI 摘要: %s\n\n", answer))
+		fmt.Fprintf(&sb, "AI 摘要: %s\n\n", answer)
 	}
 	for i, r := range filtered {
 		content := r.Content
 		if len(content) > 400 {
 			content = content[:400] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("[%d] %s\n", i+1, r.Title))
-		sb.WriteString(fmt.Sprintf("    来源: %s\n", r.URL))
-		sb.WriteString(fmt.Sprintf("    内容: %s\n\n", content))
+		fmt.Fprintf(&sb, "[%d] %s\n", i+1, r.Title)
+		fmt.Fprintf(&sb, "    来源: %s\n", r.URL)
+		fmt.Fprintf(&sb, "    内容: %s\n\n", content)
 	}
 
 	if len(filtered) == 0 {

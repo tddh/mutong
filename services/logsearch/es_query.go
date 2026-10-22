@@ -254,7 +254,7 @@ func (s *ESQueryService) searchLogs(ctx context.Context, query map[string]interf
 	if err != nil {
 		return nil, fmt.Errorf("failed to search ES: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.IsError() {
 		return nil, fmt.Errorf("ES search error: %s", resp.Status())

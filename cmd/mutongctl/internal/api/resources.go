@@ -36,7 +36,7 @@ type graphNodesResponse struct {
 
 // ListPods retrieves Pod resources, optionally filtered by namespace.
 func (a *ResourcesAPI) ListPods(namespace string) ([]K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=Pod"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=Pod"
 	if namespace != "" {
 		path += "&namespace=" + namespace
 	}
@@ -45,12 +45,12 @@ func (a *ResourcesAPI) ListPods(namespace string) ([]K8sResource, error) {
 
 // ListNodes retrieves Node resources.
 func (a *ResourcesAPI) ListNodes() ([]K8sResource, error) {
-	return a.listResources("/k8s/resources/graph/nodes?kind=Node")
+	return a.listResources("/api/v1/k8s/resources/graph/nodes?kind=Node")
 }
 
 // ListDeployments retrieves Deployment resources, optionally filtered by namespace.
 func (a *ResourcesAPI) ListDeployments(namespace string) ([]K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=Deployment"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=Deployment"
 	if namespace != "" {
 		path += "&namespace=" + namespace
 	}
@@ -59,7 +59,7 @@ func (a *ResourcesAPI) ListDeployments(namespace string) ([]K8sResource, error) 
 
 // ListStatefulSets retrieves StatefulSet resources, optionally filtered by namespace.
 func (a *ResourcesAPI) ListStatefulSets(namespace string) ([]K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=StatefulSet"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=StatefulSet"
 	if namespace != "" {
 		path += "&namespace=" + namespace
 	}
@@ -68,7 +68,7 @@ func (a *ResourcesAPI) ListStatefulSets(namespace string) ([]K8sResource, error)
 
 // ListDaemonSets retrieves DaemonSet resources, optionally filtered by namespace.
 func (a *ResourcesAPI) ListDaemonSets(namespace string) ([]K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=DaemonSet"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=DaemonSet"
 	if namespace != "" {
 		path += "&namespace=" + namespace
 	}
@@ -77,7 +77,7 @@ func (a *ResourcesAPI) ListDaemonSets(namespace string) ([]K8sResource, error) {
 
 // ListServices retrieves Service resources, optionally filtered by namespace.
 func (a *ResourcesAPI) ListServices(namespace string) ([]K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=Service"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=Service"
 	if namespace != "" {
 		path += "&namespace=" + namespace
 	}
@@ -86,7 +86,7 @@ func (a *ResourcesAPI) ListServices(namespace string) ([]K8sResource, error) {
 
 // GetPod retrieves a single Pod by name and namespace.
 func (a *ResourcesAPI) GetPod(name, ns string) (*K8sResource, error) {
-	path := fmt.Sprintf("/k8s/resources/graph/nodes?kind=Pod&namespace=%s", ns)
+	path := fmt.Sprintf("/api/v1/k8s/resources/graph/nodes?kind=Pod&namespace=%s", ns)
 	resources, err := a.listResources(path)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (a *ResourcesAPI) GetPod(name, ns string) (*K8sResource, error) {
 
 // GetNode retrieves a single Node by name.
 func (a *ResourcesAPI) GetNode(name string) (*K8sResource, error) {
-	path := "/k8s/resources/graph/nodes?kind=Node"
+	path := "/api/v1/k8s/resources/graph/nodes?kind=Node"
 	resources, err := a.listResources(path)
 	if err != nil {
 		return nil, err
@@ -144,13 +144,13 @@ type topoGraphRaw struct {
 
 // TopoGet retrieves topology around a resource by UID and depth.
 func (a *ResourcesAPI) TopoGet(uid string, depth int) (*TopoGraph, error) {
-	path := fmt.Sprintf("/k8s/resources/graph/search?resourceId=%s&depth=%d", uid, depth)
+	path := fmt.Sprintf("/api/v1/k8s/resources/graph/search?resourceId=%s&depth=%d", uid, depth)
 	return a.getTopoGraph(path)
 }
 
 // TopoSearch searches topology by kind and name.
 func (a *ResourcesAPI) TopoSearch(kind, name string) (*TopoGraph, error) {
-	path := fmt.Sprintf("/k8s/resources/graph/nodes?kind=%s", kind)
+	path := fmt.Sprintf("/api/v1/k8s/resources/graph/nodes?kind=%s", kind)
 	graph, err := a.getTopoGraph(path)
 	if err != nil {
 		return nil, err

@@ -39,8 +39,6 @@ func (h *TokenHandler) HandleToken(c *gin.Context) {
 		domain := ""
 		c.SetCookie("refresh_token", accessResp.GetExtra("refresh_token").(string),
 			604800, "/oauth2", domain, secure, true)
-		c.SetCookie("mutong_session", "1",
-			86400, "/", domain, secure, false)
 	}
 
 	h.OAuth2.WriteAccessResponse(ctx, c.Writer, accessReq, accessResp)

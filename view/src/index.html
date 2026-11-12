@@ -11,6 +11,11 @@
         <div class="container">
             <page-header title="运维仪表盘" :desc="desc"></page-header>
 
+            <div class="error-banner" v-if="error">
+                <span>概览数据加载失败：{{ error }}</span>
+                <button class="m-btn is-default is-sm" type="button" @click="load">重试</button>
+            </div>
+
             <div class="m-stat-grid" v-if="loading">
                 <div class="m-stat-card" v-for="i in 6" :key="i">
                     <div class="m-stat-card-text">
@@ -19,7 +24,7 @@
                     </div>
                 </div>
             </div>
-            <div class="m-stat-grid" v-else>
+            <div class="m-stat-grid" v-else-if="!error">
                 <stat-card title="资源总数" :value="stats.resources.total" tone="accent" icon="table"></stat-card>
                 <stat-card title="节点数" :value="stats.resources.nodes" tone="success" icon="cluster"></stat-card>
                 <stat-card title="Pod 数" :value="stats.resources.pods" tone="alt" icon="topology"></stat-card>

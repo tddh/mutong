@@ -258,15 +258,6 @@
   }
 }
 
-/* ---------- 工具条 ---------- */
-:where(.m-toolbar) {
-  display: flex;
-  align-items: flex-end;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  margin-bottom: var(--sp-4);
-}
-
 /* ---------- 空态 ---------- */
 :where(.m-empty) {
   display: flex;

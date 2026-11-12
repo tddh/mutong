@@ -3,6 +3,7 @@ import ForceGraph from 'force-graph'
 import { forceManyBody, forceLink, forceCenter, forceCollide } from 'd3-force'
 import { NavBar } from '../components/SharedComponents.js'
 import { API } from '../utils/api.js'
+import { readTheme, onThemeChange } from '../styles/theme.js'
 import '../styles/common.css'
 import './topology.css'
 
@@ -117,6 +118,9 @@ createApp({
     )
 
     let fgInstance = null
+    // canvas 取色缓存：draw 函数每帧读它，主题切换时整体刷新，避免逐节点 getComputedStyle
+    let canvasTheme = readTheme()
+    let offTheme = null
     let hoveredLink = null
     let hoveredNode = null
     let driftMode = 'float'
@@ -487,8 +491,14 @@ createApp({
         ctx.shadowBlur = highlighted ? 20 : 12
       }
 
-      const bgColor = isGhost ? '#f5f5f5' : isSeed ? '#fffbe6' : color
-      const borderColor = highlighted ? '#1890ff' : isGhost ? '#bfbfbf' : isSeed ? '#faad14' : color
+      const bgColor = isGhost ? canvasTheme.surface : isSeed ? canvasTheme.nodeFill : color
+      const borderColor = highlighted
+        ? canvasTheme.accent
+        : isGhost
+          ? canvasTheme.edge
+          : isSeed
+            ? canvasTheme.sev.warning
+            : color
       const borderWidth = highlighted ? 2.5 : isSeed ? 2.5 : 1.5
 
       ctx.beginPath()
@@ -510,20 +520,24 @@ createApp({
       ctx.font = `${highlighted ? '600' : '400'} 11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'top'
-      ctx.fillStyle = highlighted ? '#1890ff' : isGhost ? '#999' : isSeed ? '#333' : '#555'
+      ctx.fillStyle = highlighted
+        ? canvasTheme.accent
+        : isGhost
+          ? canvasTheme.textMuted
+          : canvasTheme.text
       ctx.fillText(displayLabel, node.x, node.y + r + 4)
 
       const subLabel =
         kind === 'BusinessApp' ? (isGhost ? '链路推断' : node.ownerKind || 'BusinessApp') : kind
       ctx.font = '500 9px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-      ctx.fillStyle = highlighted ? '#1890ff' : '#888'
+      ctx.fillStyle = highlighted ? canvasTheme.accent : canvasTheme.textMuted
       ctx.globalAlpha = 0.75
       ctx.fillText(subLabel, node.x, node.y + r + 18)
       ctx.globalAlpha = 1
 
       if (isSeed) {
         ctx.font = '12px sans-serif'
-        ctx.fillStyle = '#faad14'
+        ctx.fillStyle = canvasTheme.sev.warning
         ctx.fillText('\u2605', node.x, node.y - r - 6)
       }
 
@@ -536,7 +550,7 @@ createApp({
       if (src.x == null || tgt.x == null) return
 
       ctx.save()
-      ctx.strokeStyle = link.__highlighted ? 'rgba(24,144,255,0.6)' : 'rgba(160,174,192,0.35)'
+      ctx.strokeStyle = link.__highlighted ? canvasTheme.accent + '99' : canvasTheme.edge + '59'
       ctx.lineWidth = link.__highlighted ? 2 : 1
 
       if (showCurves.value) {
@@ -627,7 +641,7 @@ createApp({
 
       fgInstance = ForceGraph()(container)
         .graphData({ nodes: fgNodes, links: fgLinks })
-        .backgroundColor('#f8f9fa')
+        .backgroundColor(canvasTheme.canvasBg)
         .nodeRelSize(NODE_REL_SIZE)
         .nodeVal((n) => n.val || 2)
         .nodeCanvasObject((node, ctx) => drawK8sNode(node, ctx))
@@ -1495,10 +1509,16 @@ createApp({
         await fetchResourceList()
       }
       window.addEventListener('resize', handleResize)
+      // 主题切换：刷新取色缓存并重设画布底；节点/连线每帧读缓存，自动跟随
+      offTheme = onThemeChange((t) => {
+        canvasTheme = t
+        if (fgInstance) fgInstance.backgroundColor(t.canvasBg)
+      })
     })
 
     onUnmounted(() => {
       stopAnimLoop()
+      if (offTheme) offTheme()
       if (fgInstance) {
         fgInstance._destructor && fgInstance._destructor()
         fgInstance = null

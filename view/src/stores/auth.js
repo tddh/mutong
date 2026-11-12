@@ -1,8 +1,9 @@
 import { reactive } from 'vue'
 
+/* 凭据单轨：会话只认后端 HttpOnly cookie（mutong_session），前端不持有 token。
+   sessionStorage 仅缓存非敏感的用户展示信息，供首帧免闪烁；真实状态以 /api/auth/me 为准。 */
 const authState = reactive({
-  status: sessionStorage.getItem('access_token') ? 'loggedIn' : 'unknown',
-  accessToken: sessionStorage.getItem('access_token') || null,
+  status: sessionStorage.getItem('user') ? 'loggedIn' : 'unknown',
   user: JSON.parse(sessionStorage.getItem('user') || 'null'),
 
   get isAuthenticated() {
@@ -10,7 +11,6 @@ const authState = reactive({
   },
 
   async init() {
-    // Try session cookie first (set by backend on /api/auth/login)
     try {
       const res = await fetch('/api/auth/me', { credentials: 'include' })
       if (res.ok) {
@@ -20,39 +20,22 @@ const authState = reactive({
         return
       }
     } catch {
-      // 解析 session 失败时静默处理，继续尝试 token 验证
-    }
-
-    if (this.accessToken) {
-      try {
-        const res = await fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${this.accessToken}` },
-        })
-        if (res.ok) {
-          this.user = await res.json()
-          sessionStorage.setItem('user', JSON.stringify(this.user))
-          this.status = 'loggedIn'
-          return
-        }
-      } catch {
-        // token 验证失败时静默处理，标记为未登录
-      }
+      // 网络失败按未登录处理，由页面引导重新登录
     }
 
     this.status = 'loggedOut'
-    this.accessToken = null
     this.user = null
-    sessionStorage.removeItem('access_token')
     sessionStorage.removeItem('user')
+    // 清理旧版本残留的 token
+    sessionStorage.removeItem('access_token')
   },
 
   async logout() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-    this.accessToken = null
     this.user = null
     this.status = 'loggedOut'
-    sessionStorage.removeItem('access_token')
     sessionStorage.removeItem('user')
+    sessionStorage.removeItem('access_token')
     window.location.href = '/view/login.html'
   },
 })

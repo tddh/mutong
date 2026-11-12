@@ -6,6 +6,7 @@
       "name": "mutong-frontend",
       "dependencies": {
         "@antv/g6": "^4.8.24",
+        "@xterm/xterm": "5.5.0",
         "d3-force": "^3.0.0",
         "d3-zoom": "^3.0.0",
         "dompurify": "^3.4.17",
@@ -363,6 +364,8 @@
     "@vue/shared": ["@vue/shared@3.5.35", "https://repo.huaweicloud.com/repository/npm/@vue/shared/-/shared-3.5.35.tgz", {}, "sha512-zSbjL7gRXwks2ZQLRGCajBtBXEOXW9Ddhn/HvSdrGkE2dqGnumzW8XtusRrxrE9LvqtiqDXQ+A60Hp6mvdYxfA=="],
 
     "@vue/test-utils": ["@vue/test-utils@2.4.10", "https://repo.huaweicloud.com/repository/npm/@vue/test-utils/-/test-utils-2.4.10.tgz", { "dependencies": { "js-beautify": "^1.14.9", "vue-component-type-helpers": "^3.0.0" }, "peerDependencies": { "@vue/compiler-dom": "3.x", "@vue/server-renderer": "3.x", "vue": "3.x" }, "optionalPeers": ["@vue/server-renderer"] }, "sha512-SmoZ5EA1kYiAFs9NkYdiFFQF+cSnUwnvlYEbY+DogWQZUiqOm/Y29eSbc5T6yi75SgSF9863SBeXniIEoPajCA=="],
+
+    "@xterm/xterm": ["@xterm/xterm@5.5.0", "https://repo.huaweicloud.com/repository/npm/@xterm/xterm/-/xterm-5.5.0.tgz", {}, "sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A=="],
 
     "abbrev": ["abbrev@2.0.0", "https://repo.huaweicloud.com/repository/npm/abbrev/-/abbrev-2.0.0.tgz", {}, "sha512-6/mh1E2u2YgEsCHdY0Yx5oW+61gZU+1vXaoiHHrpKeuRNNgFvS+/jrwHiQhB5apAf5oB7UB7E19ol2R2LKH8hQ=="],
 

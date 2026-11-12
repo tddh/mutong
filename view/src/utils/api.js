@@ -1,33 +1,40 @@
+import { toast } from '../components/toast.js'
+
 const API_BASE = ''
 
 async function request(url, options = {}) {
   const defaultHeaders = { 'Content-Type': 'application/json' }
   const config = { ...options, headers: { ...defaultHeaders, ...options.headers } }
-  try {
-    const response = await fetch(`${API_BASE}${url}`, config)
-    if (!response.ok) {
-      // 尽量带出服务端的错误详情，而不是只显示 HTTP 状态
-      let detail = ''
-      try {
-        const body = await response.json()
-        detail = body.error || body.message || ''
-      } catch (_) {
-        /* 非 JSON 响应忽略 */
-      }
-      throw new Error(detail ? `${detail}` : `API Error: ${response.status} ${response.statusText}`)
+  const response = await fetch(`${API_BASE}${url}`, config)
+  if (!response.ok) {
+    // 尽量带出服务端的错误详情，而不是只显示 HTTP 状态
+    let detail = ''
+    try {
+      const body = await response.json()
+      detail = body.error || body.message || ''
+    } catch {
+      /* 非 JSON 响应忽略 */
     }
-    if (options.responseType === 'text') return await response.text()
-    return await response.json()
-  } catch (error) {
-    console.error(`[API] ${url} failed:`, error)
-    throw error
+    throw new Error(detail ? `${detail}` : `API Error: ${response.status} ${response.statusText}`)
   }
+  if (options.responseType === 'text') return await response.text()
+  return await response.json()
 }
+
+/* 软失败：保持返回形状兼容（页面不崩），但故障必须可感知——toast 报错而不是
+   静默返回 null/[] 把"后端挂了"伪装成"没有数据"。只用于调用方没有错误态的查询路径；
+   调用方自带错误横幅的（status/clusters）继续静默降级，避免双重报错。 */
+const soft = (promise, fallback, label) =>
+  promise.catch((e) => {
+    toast.error(`${label}失败: ${e.message || '未知错误'}`)
+    return fallback
+  })
 
 export const API = {
   stats: {
-    overview: () => request('/api/v1/stats/overview').catch(() => null),
-    resourceTotal: () => request('/api/v1/stats/resource-total').catch(() => null),
+    // 不吞错：仪表盘依赖抛错进入错误态（FUNC-03），不得回退假数据
+    overview: () => request('/api/v1/stats/overview'),
+    resourceTotal: () => request('/api/v1/stats/resource-total'),
   },
   resources: {
     nodes: () => request('/api/v1/k8s/resources/graph/nodes'),
@@ -44,17 +51,30 @@ export const API = {
   },
   metrics: {
     pod: (namespace, name) =>
-      request(
-        `/api/v1/metrics/pod?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`,
-      ).catch(() => null),
+      soft(
+        request(
+          `/api/v1/metrics/pod?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`,
+        ),
+        null,
+        '获取 Pod 指标',
+      ),
     node: (name) =>
-      request(`/api/v1/metrics/node?name=${encodeURIComponent(name)}`).catch(() => null),
+      soft(
+        request(`/api/v1/metrics/node?name=${encodeURIComponent(name)}`),
+        null,
+        '获取节点指标',
+      ),
     deployment: (namespace, name) =>
-      request(
-        `/api/v1/metrics/deployment?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`,
-      ).catch(() => null),
+      soft(
+        request(
+          `/api/v1/metrics/deployment?namespace=${encodeURIComponent(namespace)}&name=${encodeURIComponent(name)}`,
+        ),
+        null,
+        '获取 Deployment 指标',
+      ),
   },
   diagnosis: {
+    // 静默降级仅限调用方自带错误态的探测类接口（status 页按 null 列出失败服务）
     status: () => request('/api/v1/diagnosis/status').catch(() => null),
     run: (fingerprint) =>
       request('/api/v1/diagnosis/run', { method: 'POST', body: JSON.stringify({ fingerprint }) }),
@@ -83,7 +103,11 @@ export const API = {
     status: () => request('/api/v1/executor/status').catch(() => null),
     audit: (params) => {
       const q = new URLSearchParams(params).toString()
-      return request(`/api/v1/executor/audit${q ? '?' + q : ''}`).catch(() => [])
+      return soft(
+        request(`/api/v1/executor/audit${q ? '?' + q : ''}`),
+        [],
+        '获取执行审计',
+      )
     },
     approve: (id) =>
       request(`/api/v1/executor/audit/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
@@ -111,7 +135,7 @@ export const API = {
       if (since) params.set('since', since)
       if (tail) params.set('tail', tail)
       const q = params.toString()
-      return request(`/api/v1/logs/pod${q ? '?' + q : ''}`).catch(() => null)
+      return soft(request(`/api/v1/logs/pod${q ? '?' + q : ''}`), null, '获取 Pod 日志')
     },
     searchLogs: (namespace, query, since, max) => {
       const params = new URLSearchParams()
@@ -120,32 +144,32 @@ export const API = {
       if (since) params.set('since', since)
       if (max) params.set('max', max)
       const q = params.toString()
-      return request(`/api/v1/logs/search${q ? '?' + q : ''}`).catch(() => null)
+      return soft(request(`/api/v1/logs/search${q ? '?' + q : ''}`), null, '搜索日志')
     },
     errorLogs: (namespace, since) => {
       const params = new URLSearchParams()
       if (namespace) params.set('namespace', namespace)
       if (since) params.set('since', since)
       const q = params.toString()
-      return request(`/api/v1/logs/errors${q ? '?' + q : ''}`).catch(() => null)
+      return soft(request(`/api/v1/logs/errors${q ? '?' + q : ''}`), null, '获取错误日志')
     },
     warnLogs: (namespace, since) => {
       const params = new URLSearchParams()
       if (namespace) params.set('namespace', namespace)
       if (since) params.set('since', since)
       const q = params.toString()
-      return request(`/api/v1/logs/warn${q ? '?' + q : ''}`).catch(() => null)
+      return soft(request(`/api/v1/logs/warn${q ? '?' + q : ''}`), null, '获取警告日志')
     },
     infoLogs: (namespace, since) => {
       const params = new URLSearchParams()
       if (namespace) params.set('namespace', namespace)
       if (since) params.set('since', since)
       const q = params.toString()
-      return request(`/api/v1/logs/info${q ? '?' + q : ''}`).catch(() => null)
+      return soft(request(`/api/v1/logs/info${q ? '?' + q : ''}`), null, '获取信息日志')
     },
   },
   trace: {
-    services: () => request('/api/v1/trace/services').catch(() => []),
+    services: () => soft(request('/api/v1/trace/services'), [], '获取追踪服务列表'),
     query: (serviceName, operationName, traceId, limit) => {
       const params = new URLSearchParams()
       if (serviceName) params.set('serviceName', serviceName)
@@ -153,10 +177,14 @@ export const API = {
       if (traceId) params.set('traceId', traceId)
       if (limit) params.set('limit', limit)
       const q = params.toString()
-      return request(`/api/v1/trace/query${q ? '?' + q : ''}`).catch(() => [])
+      return soft(request(`/api/v1/trace/query${q ? '?' + q : ''}`), [], '查询 Trace')
     },
     spans: (traceId) =>
-      request(`/api/v1/trace/spans?traceId=${encodeURIComponent(traceId)}`).catch(() => []),
+      soft(
+        request(`/api/v1/trace/spans?traceId=${encodeURIComponent(traceId)}`),
+        [],
+        '获取 Span 列表',
+      ),
   },
   retrospective: {
     timeline: (fingerprint) =>

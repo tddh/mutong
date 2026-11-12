@@ -1,4 +1,4 @@
-import { createApp, ref, nextTick, onMounted, computed } from 'vue'
+import { createApp, ref, nextTick, onMounted, onUnmounted, computed } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { NavBar } from '../components/SharedComponents.js'
@@ -8,7 +8,7 @@ import './diagnosis.css'
 
 marked.use({ breaks: true, gfm: true })
 
-function renderMarkdown(text) {
+export function renderMarkdown(text) {
   if (!text) return ''
   // LLM and alert content are untrusted; never inject raw HTML into v-html.
   return DOMPurify.sanitize(marked.parse(text))
@@ -25,7 +25,7 @@ function buildHistory(messages) {
     })
 }
 
-const App = {
+export const App = {
   components: { NavBar },
   setup() {
     const messages = ref([])
@@ -67,6 +67,8 @@ const App = {
     // 流式超时控制
     let ttftTimer = null
     let idleTimer = null
+    // 当前流式请求的控制器：组件卸载时必须中止，否则 fetch 与 reader 继续存活
+    let activeController = null
 
     // 会话历史
     const isAuthenticated = ref(false)
@@ -172,7 +174,6 @@ const App = {
           })
         }
       } catch (error) {
-        console.error('Failed to start chat:', error)
         messages.value.push({
           id: 'msg_error',
           role: 'system',
@@ -225,6 +226,7 @@ const App = {
         const IDLE_TIMEOUT = 0 // 空闲超时：禁用
 
         const controller = new AbortController()
+        activeController = controller
         const fetchTimeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
         let firstTokenReceived = false
 
@@ -253,8 +255,6 @@ const App = {
           }, TTFT_TIMEOUT)
         }
 
-        let lastChunkTime = Date.now()
-
         const resetIdleTimer = () => {
           if (IDLE_TIMEOUT <= 0) return
           if (idleTimer) clearTimeout(idleTimer)
@@ -267,7 +267,6 @@ const App = {
           const { value, done } = await reader.read()
           if (done) break
 
-          lastChunkTime = Date.now()
           resetIdleTimer()
 
           buffer += decoder.decode(value, { stream: true })
@@ -351,8 +350,8 @@ const App = {
                   }, 3000)
                   break
               }
-            } catch (e) {
-              console.warn('[Diagnosis] JSON parse error, line:', line.substring(0, 100), e)
+            } catch {
+              // 流式分行可能截断 JSON，解析失败的残行留待下一 chunk 拼接，忽略
             }
           }
         }
@@ -394,6 +393,7 @@ const App = {
         scrollToBottom()
       } finally {
         currentStreamMsg = null
+        activeController = null
         if (flushTimer) {
           clearTimeout(flushTimer)
           flushTimer = null
@@ -433,10 +433,6 @@ const App = {
         }
       }
       return null
-    }
-
-    function toggleToolCall(msg) {
-      msg.collapsed = !msg.collapsed
     }
 
     async function retryMessage() {
@@ -484,6 +480,14 @@ const App = {
     onMounted(() => {
       checkAuth()
       init()
+    })
+
+    onUnmounted(() => {
+      // 中止进行中的流式请求并清掉所有定时器，避免卸载后回调继续写已销毁的 ref
+      if (activeController) activeController.abort()
+      if (flushTimer) clearTimeout(flushTimer)
+      if (ttftTimer) clearTimeout(ttftTimer)
+      if (idleTimer) clearTimeout(idleTimer)
     })
 
     return {
@@ -540,7 +544,7 @@ const App = {
                                 <div class="context-group-title">告警信息</div>
                                 <div v-if="context?.severity" class="info-item">
                                     <span class="label">严重级别</span>
-                                    <span class="value" :style="{ color: context?.severity === 'critical' ? '#cf1322' : '#d46b08' }">{{ context?.severity }}</span>
+                                    <span class="value" :style="{ color: context?.severity === 'critical' ? 'var(--sev-critical-fg)' : 'var(--sev-warning-fg)' }">{{ context?.severity }}</span>
                                 </div>
                                 <div v-if="context?.alert_name" class="info-item">
                                     <span class="label">告警名称</span>

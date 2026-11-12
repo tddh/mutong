@@ -5,8 +5,9 @@ body,
   width: 100%;
   margin: 0;
   padding: 0;
-  background: #0f1220;
-  color: #e6e6e6;
+  /* 终端两主题同为深色（运维惯例），取语义 token 而非写死色号 */
+  background: var(--terminal-bg);
+  color: var(--terminal-fg);
 }
 /* 导航通铺占掉 --nav-height，容器必须扣除——原先 100vh 使页底 60px 被截掉
    并多出等量滚动条（工具条那段已由下方 #terminal 的 flex:1 处理） */
@@ -23,39 +24,40 @@ body,
   padding-block: 6px;
   padding-inline: var(--shell-pad);
   gap: 12px;
-  background: #1b1b2b;
-  color: #ddd;
+  background: var(--surface-raised);
+  color: var(--text-primary);
 }
 .terminal-toolbar select {
-  background: #2a2a46;
-  color: #fff;
-  border: 1px solid #444;
+  background: var(--surface-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-default);
   padding: 4px 8px;
 }
 .terminal-toolbar button {
-  background: #4a9eff;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-on);
   border: none;
   padding: 4px 12px;
   cursor: pointer;
   border-radius: 3px;
 }
 .terminal-toolbar button:hover {
-  background: #3a8eef;
+  background: var(--accent-hover);
 }
 .status {
   margin-left: auto;
   padding-right: 8px;
   font-family: monospace;
+  color: var(--text-muted);
 }
-.status[style*='green'] {
-  color: #4caf50;
+.status[data-state='connected'] {
+  color: var(--st-success-fg);
 }
-.status[style*='red'] {
-  color: #f44336;
+.status[data-state='error'] {
+  color: var(--st-danger-fg);
 }
-.status[style*='gray'] {
-  color: #9e9e9e;
+.status[data-state='connecting'] {
+  color: var(--st-warning-fg);
 }
 #terminal {
   flex: 1;

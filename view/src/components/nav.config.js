@@ -47,8 +47,3 @@ export const NAV_HIDDEN = [
 
 export const NAV_PRIMARY = NAV_ITEMS.filter((i) => i.group === 'primary')
 export const NAV_MORE = NAV_ITEMS.filter((i) => i.group === 'more')
-
-/** 当前路径是否命中某项（供 active 态与"更多"按钮高亮共用） */
-export function isNavActive(item, path) {
-  return path === item.href
-}

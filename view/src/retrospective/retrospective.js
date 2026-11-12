@@ -1,21 +1,21 @@
-import { createApp, ref, h, onMounted, onUnmounted, nextTick } from 'vue'
+import { createApp, ref, h, onMounted, onUnmounted, getCurrentInstance } from 'vue'
 import { NavBar } from '../components/SharedComponents.js'
+import { StatusBadge } from '../components/primitives.js'
 import { API } from '../utils/api.js'
+import { onThemeChange } from '../styles/theme.js'
+import { renderTopoGraph, renderCausalGraph, destroyGraph } from '../utils/topo-graph.js'
 import '../styles/common.css'
-import G6 from '@antv/g6'
 
-const SEVERITY_COLORS = {
-  critical: '#cf1322',
-  error: '#cf1322',
-  warning: '#faad14',
-  info: '#1890ff',
-}
-
-const SEVERITY_BG = {
-  critical: '#fff1f0',
-  error: '#fff1f0',
-  warning: '#fff7e6',
-  info: '#e6f7ff',
+/* 严重度/优先级 → 语义档位，颜色由组件层 data-sev 决定，两主题自动适配 */
+const SEV_TONES = {
+  critical: 'critical',
+  error: 'error',
+  high: 'critical',
+  warning: 'warning',
+  medium: 'warning',
+  info: 'info',
+  low: 'pass',
+  pass: 'pass',
 }
 
 function formatTime(ts) {
@@ -24,22 +24,8 @@ function formatTime(ts) {
 }
 
 function severityBadge(severity, text) {
-  const s = (severity || '').toLowerCase()
-  return h(
-    'span',
-    {
-      style: {
-        display: 'inline-block',
-        padding: '2px 8px',
-        borderRadius: '4px',
-        fontSize: '12px',
-        fontWeight: 500,
-        color: SEVERITY_COLORS[s] || '#666',
-        background: SEVERITY_BG[s] || '#f5f5f5',
-      },
-    },
-    text || severity,
-  )
+  const s = SEV_TONES[(severity || '').toLowerCase()] || 'pending'
+  return h(StatusBadge, { sev: s, text: text || severity || '—' })
 }
 
 function sectionBlock(title, content) {
@@ -68,8 +54,8 @@ function infoCard(label, value) {
     'div',
     {
       style: {
-        background: '#fff',
-        border: '1px solid var(--border-color)',
+        background: 'var(--surface-card)',
+        border: '1px solid var(--border-default)',
         borderRadius: '6px',
         padding: '12px',
       },
@@ -98,8 +84,8 @@ function infoCard(label, value) {
 
 function timelineItem(event, idx, isLast) {
   const severity = event.severity || 'info'
-  const timeColor = SEVERITY_COLORS[severity.toLowerCase()] || '#1890ff'
-  const borderColor = SEVERITY_BG[severity.toLowerCase()] || '#e6f7ff'
+  const tone = SEV_TONES[severity.toLowerCase()] || 'info'
+  const timeColor = `var(--sev-${tone}-fg)`
 
   return h(
     'div',
@@ -130,14 +116,19 @@ function timelineItem(event, idx, isLast) {
               height: '12px',
               borderRadius: '50%',
               background: timeColor,
-              border: '2px solid #fff',
+              border: '2px solid var(--surface-card)',
               boxShadow: '0 0 0 2px ' + timeColor,
               flexShrink: 0,
             },
           }),
           !isLast
             ? h('div', {
-                style: { flex: 1, width: '2px', background: '#e8e8e8', marginTop: '4px' },
+                style: {
+                  flex: 1,
+                  width: '2px',
+                  background: 'var(--border-default)',
+                  marginTop: '4px',
+                },
               })
             : null,
         ],
@@ -147,8 +138,8 @@ function timelineItem(event, idx, isLast) {
         {
           style: {
             flex: 1,
-            background: '#fff',
-            border: '1px solid var(--border-color)',
+            background: 'var(--surface-card)',
+            border: '1px solid var(--border-default)',
             borderRadius: '8px',
             padding: '12px 16px',
             borderLeft: '4px solid ' + timeColor,
@@ -187,8 +178,8 @@ function timelineItem(event, idx, isLast) {
                         fontSize: '11px',
                         padding: '1px 6px',
                         borderRadius: '3px',
-                        background: '#f0f0f0',
-                        color: '#666',
+                        background: 'var(--st-neutral-bg)',
+                        color: 'var(--st-neutral-fg)',
                       },
                     },
                     '来源: ' + event.source,
@@ -210,7 +201,7 @@ function timelineItem(event, idx, isLast) {
                     color: 'var(--text-secondary)',
                     marginTop: '6px',
                     fontFamily: 'monospace',
-                    background: '#fafafa',
+                    background: 'var(--surface-inset)',
                     padding: '4px 8px',
                     borderRadius: '4px',
                     display: 'inline-block',
@@ -226,16 +217,15 @@ function timelineItem(event, idx, isLast) {
 }
 
 function causalLinkItem(link, idx) {
-  const confColor =
-    link.confidence >= 0.8 ? '#52c41a' : link.confidence >= 0.5 ? '#faad14' : '#ff4d4f'
-  const confBg = link.confidence >= 0.8 ? '#f6ffed' : link.confidence >= 0.5 ? '#fff7e6' : '#fff1f0'
+  const confTone =
+    link.confidence >= 0.8 ? 'pass' : link.confidence >= 0.5 ? 'warning' : 'critical'
 
   return h(
     'div',
     {
       style: {
-        background: '#fff',
-        border: '1px solid var(--border-color)',
+        background: 'var(--surface-card)',
+        border: '1px solid var(--border-default)',
         borderRadius: '8px',
         padding: '14px',
         marginBottom: idx > 0 ? '12px' : 0,
@@ -256,13 +246,13 @@ function causalLinkItem(link, idx) {
         [
           h(
             'span',
-            { style: { fontSize: '14px', fontWeight: 600, color: 'var(--error-color)' } },
+            { style: { fontSize: '14px', fontWeight: 600, color: 'var(--st-danger-fg)' } },
             link.cause || '-',
           ),
-          h('span', { style: { fontSize: '16px', color: '#999' } }, '→'),
+          h('span', { style: { fontSize: '16px', color: 'var(--text-muted)' } }, '→'),
           h(
             'span',
-            { style: { fontSize: '14px', fontWeight: 600, color: 'var(--primary-color)' } },
+            { style: { fontSize: '14px', fontWeight: 600, color: 'var(--accent)' } },
             link.effect || '-',
           ),
           h(
@@ -272,8 +262,8 @@ function causalLinkItem(link, idx) {
                 fontSize: '11px',
                 padding: '1px 8px',
                 borderRadius: '10px',
-                background: confBg,
-                color: confColor,
+                background: `var(--sev-${confTone}-bg)`,
+                color: `var(--sev-${confTone}-fg)`,
                 fontWeight: 500,
                 marginLeft: 'auto',
               },
@@ -289,7 +279,7 @@ function causalLinkItem(link, idx) {
               style: {
                 fontSize: '12px',
                 color: 'var(--text-secondary)',
-                background: '#fafafa',
+                background: 'var(--surface-inset)',
                 padding: '8px 12px',
                 borderRadius: '4px',
                 lineHeight: '1.5',
@@ -303,11 +293,10 @@ function causalLinkItem(link, idx) {
 }
 
 function actionItemRow(item, idx) {
-  const priorityColors = { high: '#ff4d4f', medium: '#faad14', low: '#52c41a' }
   const priorityLabels = { high: '高', medium: '中', low: '低' }
   const priority = (item.priority || 'medium').toLowerCase()
 
-  return h('tr', { style: { borderBottom: '1px solid #f0f0f0' } }, [
+  return h('tr', { style: { borderBottom: '1px solid var(--border-subtle)' } }, [
     h(
       'td',
       { style: { padding: '10px 12px', fontSize: '13px', color: 'var(--text-primary)' } },
@@ -333,53 +322,6 @@ function actionItemRow(item, idx) {
 
 // G6 图实例存储（模块级，供 setup 和 methods 共享）
 const graphStore = {}
-
-// 根据 causal_chain.links 推断拓扑节点角色
-function inferNodeRoles(topologyNodes, causalLinks) {
-  const roles = {}
-  if (!topologyNodes || !topologyNodes.length || !causalLinks || !causalLinks.length) {
-    ;(topologyNodes || []).forEach((n) => {
-      roles[n.uid] = 'normal'
-    })
-    return roles
-  }
-  const nodeNameSet = new Set(topologyNodes.map((n) => n.name))
-  const uidByName = {}
-  topologyNodes.forEach((n) => {
-    uidByName[n.name] = n.uid
-  })
-  // root_cause: 第一个 cause 对应的拓扑节点
-  const rootCauseName = causalLinks[0].cause
-  const rootCauseNode = topologyNodes.find((n) => rootCauseName.indexOf(n.name) >= 0)
-  const affectedNames = new Set()
-  const indirectNames = new Set()
-  causalLinks.forEach((link, idx) => {
-    if (idx === 0) affectedNames.add(link.cause)
-    affectedNames.add(link.effect)
-  })
-  // 判断某个拓扑节点名是否匹配因果链中的 cause/effect（模糊匹配）
-  function matches(name, causalText) {
-    return causalText.indexOf(name) >= 0
-  }
-  topologyNodes.forEach((n) => {
-    if (
-      n.name === rootCauseName ||
-      n.uid === rootCauseName ||
-      (rootCauseNode && n.uid === rootCauseNode.uid)
-    ) {
-      roles[n.uid] = 'root_cause'
-    } else if (
-      affectedNames.has(n.name) ||
-      affectedNames.has(n.uid) ||
-      [...affectedNames].some((t) => matches(n.name, t))
-    ) {
-      roles[n.uid] = 'affected'
-    } else {
-      roles[n.uid] = 'normal'
-    }
-  })
-  return roles
-}
 
 createApp({
   components: { NavBar },
@@ -483,20 +425,24 @@ createApp({
       }
     }
 
+    // 主题切换后按新 token 重建 G6（canvas 吃不了 CSS 变量，只能重绘）
+    const instance = getCurrentInstance()
+    const offTheme = onThemeChange(() => {
+      const proxy = instance && instance.proxy
+      if (proxy && proxy.postmortem) proxy.reinitGraphs()
+    })
+
     onMounted(() => {
       document.addEventListener('keydown', handleKeydown)
     })
 
     onUnmounted(() => {
       document.removeEventListener('keydown', handleKeydown)
-      if (graphStore._topoGraphInstance) {
-        graphStore._topoGraphInstance.destroy()
-        graphStore._topoGraphInstance = null
-      }
-      if (graphStore._causalGraphInstance) {
-        graphStore._causalGraphInstance.destroy()
-        graphStore._causalGraphInstance = null
-      }
+      offTheme()
+      destroyGraph(graphStore._topoGraphInstance)
+      graphStore._topoGraphInstance = null
+      destroyGraph(graphStore._causalGraphInstance)
+      graphStore._causalGraphInstance = null
     })
 
     return {
@@ -520,310 +466,32 @@ createApp({
   },
   methods: {
     _destroyTopoGraph() {
-      if (graphStore._topoGraphInstance) {
-        graphStore._topoGraphInstance.destroy()
-        graphStore._topoGraphInstance = null
-      }
+      destroyGraph(graphStore._topoGraphInstance)
+      graphStore._topoGraphInstance = null
     },
     _destroyCausalGraph() {
-      if (graphStore._causalGraphInstance) {
-        graphStore._causalGraphInstance.destroy()
-        graphStore._causalGraphInstance = null
-      }
+      destroyGraph(graphStore._causalGraphInstance)
+      graphStore._causalGraphInstance = null
     },
     _initTopoGraph() {
       this._destroyTopoGraph()
-      const r = this.postmortem
-      if (!r) return
-      const container = this.$refs.topoGraphContainer
-      if (!container) return
-
-      const bc = r.business_calls
-      if (!bc) return
-
-      const centerName = bc.app_name || (r.business_context && r.business_context.app_name) || ''
-      if (!centerName) return
-
-      const nodes = []
-      const edges = []
-      const centerId = 'center'
-      nodes.push({
-        id: centerId,
-        label: centerName,
-        role: 'root_cause',
-        criticality: (r.business_context && r.business_context.criticality) || 'high',
-      })
-      ;(bc.upstreams || []).forEach((u, i) => {
-        const uid = 'up_' + i
-        nodes.push({
-          id: uid,
-          label: u.app_name || '',
-          role: 'upstream',
-          criticality: u.criticality || 'medium',
-        })
-        edges.push({ source: uid, target: centerId, label: '调用' })
-      })
-      ;(bc.downstreams || []).forEach((d, i) => {
-        const did = 'dn_' + i
-        nodes.push({
-          id: did,
-          label: d.app_name || '',
-          role: 'downstream',
-          criticality: d.criticality || 'medium',
-        })
-        edges.push({ source: centerId, target: did, label: '调用' })
-      })
-
-      if (nodes.length <= 1) return
-
-      const critColors = { high: '#cf1322', medium: '#faad14', low: '#52c41a' }
-      const roleLabels = {
-        root_cause: '故障业务',
-        upstream: '上游调用方',
-        downstream: '下游依赖方',
-      }
-      const roleColors = { root_cause: '#cf1322', upstream: '#fa8c16', downstream: '#1890ff' }
-
-      const g6Nodes = nodes.map((n) => ({
-        id: n.id,
-        label: n.label,
-        role: n.role,
-        color: roleColors[n.role] || '#d9d9d9',
-        criticality: n.criticality,
-      }))
-      const g6Edges = edges.map((e) => ({ source: e.source, target: e.target, label: e.label }))
-
-      const width = container.clientWidth || 700
-      const height = 400
-      const graph = new G6.Graph({
-        container,
-        width,
-        height,
-        layout: { type: 'dagre', rankdir: 'LR', nodesep: 60, ranksep: 100 },
-        modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] },
-        defaultNode: {
-          type: 'rect',
-          size: [140, 40],
-          style: { radius: 8, fill: '#fafbfc', stroke: '#d9d9d9', lineWidth: 1 },
-          labelCfg: { style: { fontSize: 12, fill: '#333' } },
-        },
-        defaultEdge: {
-          type: 'polyline',
-          style: { stroke: '#aaa', lineWidth: 1.5, endArrow: true },
-        },
-      })
-      graph.node((node) => {
-        const color = node.color || '#18900ff'
-        const critColor = critColors[node.criticality] || '#faad14'
-        return {
-          style: { fill: color + '10', stroke: color, lineWidth: 2 },
-          labelCfg: { style: { fill: '#333', fontSize: 12 } },
-        }
-      })
-      graph.edge(() => ({ labelCfg: { autoRotate: true, style: { fontSize: 10, fill: '#999' } } }))
-      const tooltipEl = document.createElement('div')
-      tooltipEl.style.cssText =
-        'position:absolute;display:none;background:rgba(0,0,0,0.8);color:#fff;padding:6px 10px;border-radius:4px;font-size:12px;pointer-events:none;z-index:100;max-width:250px;line-height:1.5;'
-      container.appendChild(tooltipEl)
-      graph.on('node:mouseenter', (e) => {
-        const model = e.item.getModel()
-        const items = [model.label]
-        if (model.role) items.push('角色: ' + (roleLabels[model.role] || model.role))
-        if (model.criticality) items.push('关键度: ' + model.criticality)
-        tooltipEl.innerHTML = items.join('<br>')
-        tooltipEl.style.display = 'block'
-        tooltipEl.style.left = e.canvasX + 15 + 'px'
-        tooltipEl.style.top = e.canvasY - 10 + 'px'
-      })
-      graph.on('node:mouseleave', () => {
-        tooltipEl.style.display = 'none'
-      })
-      graph.data({ nodes: g6Nodes, edges: g6Edges })
-      graph.render()
-      graphStore._topoGraphInstance = graph
+      graphStore._topoGraphInstance = renderTopoGraph(
+        this.$refs.topoGraphContainer,
+        this.postmortem,
+        { height: this.fullscreenGraph === 'topo' ? window.innerHeight : 400 },
+      )
     },
     _initCausalGraph() {
       this._destroyCausalGraph()
-      const r = this.postmortem
-      if (!r) return
-      const cc = r.causal_chain
-      if (!cc || !cc.links || cc.links.length === 0) return
-      const container = this.$refs.causalGraphContainer
-      if (!container) return
-
-      const linkList = cc.links || []
-      const dedupNameMap = {}
-      linkList.forEach((link, idx) => {
-        const causeName = link.cause || ''
-        const effectName = link.effect || ''
-        const causeId = 'n_' + causeName.replace(/[^a-zA-Z0-9]/g, '_')
-        const effectId = 'n_' + effectName.replace(/[^a-zA-Z0-9]/g, '_')
-        const isFirst = idx === 0
-        const isLast = idx === linkList.length - 1
-        if (!dedupNameMap[causeName]) {
-          dedupNameMap[causeName] = {
-            id: causeId,
-            label: causeName || '?',
-            role: isFirst ? 'root_cause' : 'intermediate',
-          }
-        } else if (isFirst) {
-          dedupNameMap[causeName].role = 'root_cause'
-        }
-        if (!dedupNameMap[effectName]) {
-          dedupNameMap[effectName] = {
-            id: effectId,
-            label: effectName || '?',
-            role: isLast ? 'effect' : 'intermediate',
-          }
-        } else if (isLast) {
-          dedupNameMap[effectName].role = 'effect'
-        }
-      })
-
-      const roleColors = { root_cause: '#cf1322', intermediate: '#fa8c16', effect: '#1890ff' }
-      const g6Nodes = Object.values(dedupNameMap).map((n) => ({
-        id: n.id,
-        label: n.label,
-        role: n.role,
-        color: roleColors[n.role] || '#fa8c16',
-      }))
-
-      const g6Edges = linkList.map((link) => {
-        const conf = link.confidence || 0
-        let confColor = '#ff4d4f'
-        if (conf >= 0.8) confColor = '#52c41a'
-        else if (conf >= 0.5) confColor = '#faad14'
-        const causeId = 'n_' + (link.cause || '').replace(/[^a-zA-Z0-9]/g, '_')
-        const effectId = 'n_' + (link.effect || '').replace(/[^a-zA-Z0-9]/g, '_')
-        return {
-          source: causeId,
-          target: effectId,
-          label: (conf * 100).toFixed(0) + '%',
-          confidence: conf,
-          confColor,
-          evidence: link.evidence,
-        }
-      })
-
-      const width = container.clientWidth || 700
-      const height = 300
-
-      if (!G6._flowLineRegistered) {
-        G6.registerEdge(
-          'flow-line',
-          {
-            afterDraw(cfg, group) {
-              const shape = group.get('children')[0]
-              if (!shape) return
-              const length = shape.getTotalLength ? shape.getTotalLength() : 0
-              if (length === 0) return
-              let start = 0
-              const circle = group.addShape('circle', {
-                attrs: {
-                  x: 0,
-                  y: 0,
-                  r: 4,
-                  fill: cfg.confColor || '#faad14',
-                  opacity: 0.8,
-                },
-                name: 'flow-circle',
-              })
-              const step = () => {
-                if (!circle || circle.destroyed) return
-                start += 0.02
-                if (start > 1) start = 0
-                const point = shape.getPoint(start)
-                if (point) {
-                  circle.attr({ x: point.x, y: point.y })
-                }
-                cfg._rafId = requestAnimationFrame(step)
-              }
-              step()
-            },
-            destroy() {
-              if (this.cfg && this.cfg._rafId) {
-                cancelAnimationFrame(this.cfg._rafId)
-                this.cfg._rafId = null
-              }
-            },
-          },
-          'polyline',
-        )
-        G6._flowLineRegistered = true
-      }
-
-      const graph = new G6.Graph({
-        container,
-        width,
-        height,
-        layout: { type: 'dagre', rankdir: 'LR', nodesep: 50, ranksep: 100 },
-        modes: { default: ['drag-canvas', 'zoom-canvas', 'drag-node'] },
-        defaultNode: {
-          type: 'rect',
-          size: [120, 40],
-          style: { fill: '#fff', stroke: '#ccc', radius: 6 },
-          labelCfg: { style: { fontSize: 12, fill: '#333', fontWeight: 500 } },
-        },
-        defaultEdge: {
-          type: 'flow-line',
-          style: {
-            stroke: '#aaa',
-            lineWidth: 1.5,
-            lineDash: [4, 2],
-            endArrow: { path: G6.Arrow.triangle(6, 8, 0), fill: '#aaa' },
-          },
-          labelCfg: { autoRotate: true, style: { fontSize: 10, fontWeight: 600 } },
-        },
-      })
-
-      graph.node((node) => {
-        const base = { fill: '#fff' }
-        if (node.role === 'root_cause') base.stroke = '#cf1322'
-        else if (node.role === 'effect') base.stroke = '#1890ff'
-        else base.stroke = '#fa8c16'
-        base.lineWidth = 2
-        return { style: base }
-      })
-
-      graph.edge((edge) => ({
-        style: { stroke: edge.confColor || '#faad14' },
-        labelCfg: { style: { fill: edge.confColor || '#faad14', fontSize: 10, fontWeight: 600 } },
-      }))
-
-      graph.on('node:mouseenter', (e) => {
-        const model = e.item.getModel()
-        const tooltipEl = document.createElement('div')
-        tooltipEl.style.cssText =
-          'position:absolute;background:rgba(0,0,0,0.85);color:#fff;padding:8px 12px;border-radius:6px;font-size:12px;pointer-events:none;z-index:100;max-width:280px;line-height:1.5;'
-        tooltipEl.innerHTML = '<strong>' + model.label + '</strong>'
-        if (model.role) {
-          const roleLabels = { root_cause: '根因', intermediate: '中间节点', effect: '最终影响' }
-          tooltipEl.innerHTML +=
-            '<br><span style="color:#aaa">角色: ' +
-            (roleLabels[model.role] || model.role) +
-            '</span>'
-        }
-        container.appendChild(tooltipEl)
-        tooltipEl.style.left = e.canvasX + 15 + 'px'
-        tooltipEl.style.top = e.canvasY - 10 + 'px'
-        e.item._tooltipEl = tooltipEl
-      })
-      graph.on('node:mouseleave', (e) => {
-        if (e.item._tooltipEl) {
-          e.item._tooltipEl.remove()
-          e.item._tooltipEl = null
-        }
-      })
-      graph.on('node:mousemove', (e) => {
-        if (e.item._tooltipEl) {
-          e.item._tooltipEl.style.left = e.canvasX + 15 + 'px'
-          e.item._tooltipEl.style.top = e.canvasY - 10 + 'px'
-        }
-      })
-
-      graph.data({ nodes: g6Nodes, edges: g6Edges })
-      graph.render()
-      graphStore._causalGraphInstance = graph
+      graphStore._causalGraphInstance = renderCausalGraph(
+        this.$refs.causalGraphContainer,
+        this.postmortem,
+        { height: this.fullscreenGraph === 'causal' ? window.innerHeight : 300 },
+      )
+    },
+    reinitGraphs() {
+      this._initTopoGraph()
+      this._initCausalGraph()
     },
     renderPostmortemReport() {
       const r = this.postmortem
@@ -922,8 +590,8 @@ createApp({
                               fontSize: '11px',
                               padding: '1px 6px',
                               borderRadius: '3px',
-                              background: '#fff1f0',
-                              color: '#cf1322',
+                              background: 'var(--sev-critical-bg)',
+                              color: 'var(--sev-critical-fg)',
                             },
                           },
                           u.criticality,
@@ -937,8 +605,8 @@ createApp({
                               fontSize: '11px',
                               padding: '1px 6px',
                               borderRadius: '3px',
-                              background: '#e6f7ff',
-                              color: '#096dd9',
+                              background: 'var(--st-info-bg)',
+                              color: 'var(--st-info-fg)',
                             },
                           },
                           u.team,
@@ -988,8 +656,8 @@ createApp({
                               fontSize: '11px',
                               padding: '1px 6px',
                               borderRadius: '3px',
-                              background: '#fff1f0',
-                              color: '#cf1322',
+                              background: 'var(--sev-critical-bg)',
+                              color: 'var(--sev-critical-fg)',
                             },
                           },
                           d.criticality,
@@ -1003,8 +671,8 @@ createApp({
                               fontSize: '11px',
                               padding: '1px 6px',
                               borderRadius: '3px',
-                              background: '#e6f7ff',
-                              color: '#096dd9',
+                              background: 'var(--st-info-bg)',
+                              color: 'var(--st-info-fg)',
                             },
                           },
                           d.team,
@@ -1023,8 +691,8 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fff',
-                  border: '1px solid var(--border-color)',
+                  background: 'var(--surface-card)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '6px',
                   padding: '12px',
                 },
@@ -1071,8 +739,8 @@ createApp({
                 {
                   key: 'di' + idx,
                   style: {
-                    background: '#fafafa',
-                    border: '1px solid #f0f0f0',
+                    background: 'var(--surface-inset)',
+                    border: '1px solid var(--border-subtle)',
                     borderRadius: '6px',
                     padding: '8px 10px',
                     marginBottom: '6px',
@@ -1099,8 +767,8 @@ createApp({
                                 fontSize: '11px',
                                 padding: '1px 6px',
                                 borderRadius: '3px',
-                                background: '#fff1f0',
-                                color: '#cf1322',
+                                background: 'var(--sev-critical-bg)',
+                                color: 'var(--sev-critical-fg)',
                               },
                             },
                             item.criticality,
@@ -1114,8 +782,8 @@ createApp({
                                 fontSize: '11px',
                                 padding: '1px 6px',
                                 borderRadius: '3px',
-                                background: '#e6f7ff',
-                                color: '#096dd9',
+                                background: 'var(--st-info-bg)',
+                                color: 'var(--st-info-fg)',
                               },
                             },
                             item.team,
@@ -1126,7 +794,7 @@ createApp({
                   item.reasoning
                     ? h(
                         'div',
-                        { style: { color: '#999', fontSize: '12px', marginTop: '4px' } },
+                        { style: { color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' } },
                         item.reasoning,
                       )
                     : null,
@@ -1158,8 +826,8 @@ createApp({
                 {
                   key: 'ii' + idx,
                   style: {
-                    background: '#fafafa',
-                    border: '1px solid #f0f0f0',
+                    background: 'var(--surface-inset)',
+                    border: '1px solid var(--border-subtle)',
                     borderRadius: '6px',
                     padding: '8px 10px',
                     marginBottom: '6px',
@@ -1186,8 +854,8 @@ createApp({
                                 fontSize: '11px',
                                 padding: '1px 6px',
                                 borderRadius: '3px',
-                                background: '#fff1f0',
-                                color: '#cf1322',
+                                background: 'var(--sev-critical-bg)',
+                                color: 'var(--sev-critical-fg)',
                               },
                             },
                             item.criticality,
@@ -1201,8 +869,8 @@ createApp({
                                 fontSize: '11px',
                                 padding: '1px 6px',
                                 borderRadius: '3px',
-                                background: '#e6f7ff',
-                                color: '#096dd9',
+                                background: 'var(--st-info-bg)',
+                                color: 'var(--st-info-fg)',
                               },
                             },
                             item.team,
@@ -1213,14 +881,14 @@ createApp({
                   item.impact_path
                     ? h(
                         'div',
-                        { style: { color: '#888', fontSize: '12px', fontFamily: 'monospace' } },
+                        { style: { color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace' } },
                         item.impact_path,
                       )
                     : null,
                   item.reasoning
                     ? h(
                         'div',
-                        { style: { color: '#999', fontSize: '12px', marginTop: '4px' } },
+                        { style: { color: 'var(--text-muted)', fontSize: '12px', marginTop: '4px' } },
                         item.reasoning,
                       )
                     : null,
@@ -1236,8 +904,8 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fafbfc',
-                  border: '1px solid var(--border-color)',
+                  background: 'var(--surface-raised)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '8px',
                   padding: '14px',
                 },
@@ -1256,8 +924,8 @@ createApp({
             'div',
             {
               style: {
-                background: '#fff7e6',
-                border: '1px solid #ffd591',
+                background: 'var(--sev-warning-bg)',
+                border: '1px solid var(--sev-warning-bd)',
                 borderRadius: '8px',
                 padding: '14px',
                 marginBottom: '12px',
@@ -1269,7 +937,7 @@ createApp({
                 {
                   style: {
                     fontSize: '14px',
-                    color: '#d46b08',
+                    color: 'var(--sev-warning-fg)',
                     lineHeight: '1.6',
                     marginBottom: '8px',
                   },
@@ -1278,7 +946,7 @@ createApp({
               ),
               h(
                 'div',
-                { style: { fontSize: '12px', color: '#999' } },
+                { style: { fontSize: '12px', color: 'var(--text-muted)' } },
                 '置信度: ' + Math.round(ad.confidence * 100) + '%',
               ),
             ],
@@ -1319,12 +987,12 @@ createApp({
               {
                 style: {
                   marginTop: '8px',
-                  background: '#f6ffed',
-                  border: '1px solid #b7eb8f',
+                  background: 'var(--sev-pass-bg)',
+                  border: '1px solid var(--sev-pass-bd)',
                   borderRadius: '6px',
                   padding: '10px 14px',
                   fontSize: '13px',
-                  color: '#389e0d',
+                  color: 'var(--sev-pass-fg)',
                 },
               },
               '建议: ' + ad.remediation,
@@ -1346,9 +1014,9 @@ createApp({
                   padding: '6px 10px',
                   borderRadius: '4px',
                   fontSize: '13px',
-                  background: p.is_alerted ? '#fff1f0' : '#f6ffed',
-                  border: p.is_alerted ? '1px solid #ffa39e' : '1px solid #b7eb8f',
-                  color: p.is_alerted ? '#cf1322' : '#389e0d',
+                  background: p.is_alerted ? 'var(--sev-critical-bg)' : 'var(--sev-pass-bg)',
+                  border: p.is_alerted ? '1px solid var(--sev-critical-bd)' : '1px solid var(--sev-pass-bd)',
+                  color: p.is_alerted ? 'var(--sev-critical-fg)' : 'var(--sev-pass-fg)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
@@ -1377,7 +1045,7 @@ createApp({
                   ),
                   h(
                     'span',
-                    { style: { marginLeft: '12px', fontSize: '13px', color: '#666' } },
+                    { style: { marginLeft: '12px', fontSize: '13px', color: 'var(--text-secondary)' } },
                     '副本: ' + wc.healthy_pods + '/' + wc.total_pods + ' 健康',
                   ),
                 ],
@@ -1409,10 +1077,10 @@ createApp({
                     style: {
                       padding: '4px 12px',
                       borderRadius: '4px',
-                      background: '#f0f5ff',
-                      color: '#2f54eb',
+                      background: 'var(--st-info-bg)',
+                      color: 'var(--st-info-fg)',
                       fontSize: '13px',
-                      border: '1px solid #adc6ff',
+                      border: '1px solid var(--st-info-bd)',
                     },
                   },
                   svc,
@@ -1435,11 +1103,11 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fff7e6',
-                  border: '1px solid #ffd591',
+                  background: 'var(--sev-warning-bg)',
+                  border: '1px solid var(--sev-warning-bd)',
                   borderRadius: '8px',
                   padding: '16px',
-                  color: '#8c4b0a',
+                  color: 'var(--sev-warning-fg)',
                   lineHeight: '1.6',
                   fontSize: '14px',
                   whiteSpace: 'pre-wrap',
@@ -1463,11 +1131,11 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#f6ffed',
-                  border: '1px solid #b7eb8f',
+                  background: 'var(--sev-pass-bg)',
+                  border: '1px solid var(--sev-pass-bd)',
                   borderRadius: '8px',
                   padding: '16px',
-                  color: '#389e0d',
+                  color: 'var(--sev-pass-fg)',
                   lineHeight: '1.6',
                   fontSize: '14px',
                   whiteSpace: 'pre-wrap',
@@ -1493,13 +1161,13 @@ createApp({
                   {
                     key: 'www' + idx,
                     style: {
-                      background: '#f6ffed',
-                      border: '1px solid #b7eb8f',
+                      background: 'var(--sev-pass-bg)',
+                      border: '1px solid var(--sev-pass-bd)',
                       borderRadius: '6px',
                       padding: '10px 14px',
                       marginBottom: '6px',
                       fontSize: '13px',
-                      color: '#389e0d',
+                      color: 'var(--sev-pass-fg)',
                       lineHeight: '1.5',
                     },
                   },
@@ -1523,13 +1191,13 @@ createApp({
                   {
                     key: 'wwwr' + idx,
                     style: {
-                      background: '#fff1f0',
-                      border: '1px solid #ffa39e',
+                      background: 'var(--sev-critical-bg)',
+                      border: '1px solid var(--sev-critical-bd)',
                       borderRadius: '6px',
                       padding: '10px 14px',
                       marginBottom: '6px',
                       fontSize: '13px',
-                      color: '#cf1322',
+                      color: 'var(--sev-critical-fg)',
                       lineHeight: '1.5',
                     },
                   },
@@ -1553,13 +1221,13 @@ createApp({
                   {
                     key: 'cf' + idx,
                     style: {
-                      background: '#fff7e6',
-                      border: '1px solid #ffd591',
+                      background: 'var(--sev-warning-bg)',
+                      border: '1px solid var(--sev-warning-bd)',
                       borderRadius: '6px',
                       padding: '10px 14px',
                       marginBottom: '6px',
                       fontSize: '13px',
-                      color: '#8c4b0a',
+                      color: 'var(--sev-warning-fg)',
                       lineHeight: '1.5',
                     },
                   },
@@ -1579,7 +1247,7 @@ createApp({
               key: idx,
               style: {
                 padding: '8px 0',
-                borderBottom: idx < r.lessons_learned.length - 1 ? '1px solid #f0f0f0' : 'none',
+                borderBottom: idx < r.lessons_learned.length - 1 ? '1px solid var(--border-subtle)' : 'none',
                 fontSize: '13px',
                 color: 'var(--text-primary)',
                 lineHeight: '1.6',
@@ -1588,7 +1256,7 @@ createApp({
             [
               h(
                 'span',
-                { style: { fontWeight: 600, marginRight: '8px', color: '#1890ff' } },
+                { style: { fontWeight: 600, marginRight: '8px', color: 'var(--accent)' } },
                 idx + 1 + '.',
               ),
               lesson,
@@ -1607,8 +1275,8 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fff',
-                  border: '1px solid var(--border-color)',
+                  background: 'var(--surface-card)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '8px',
                   overflow: 'hidden',
                 },
@@ -1623,8 +1291,8 @@ createApp({
                         'tr',
                         {
                           style: {
-                            borderBottom: '2px solid var(--border-color)',
-                            background: 'var(--bg-color)',
+                            borderBottom: '2px solid var(--border-default)',
+                            background: 'var(--surface-page)',
                           },
                         },
                         [
@@ -1703,8 +1371,8 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fafbfc',
-                  border: '1px solid var(--border-color)',
+                  background: 'var(--surface-raised)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '8px',
                   padding: '20px',
                 },
@@ -1743,13 +1411,13 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fff1f0',
-                  border: '1px solid #ffa39e',
+                  background: 'var(--sev-critical-bg)',
+                  border: '1px solid var(--sev-critical-bd)',
                   borderRadius: '6px',
                   padding: '8px 14px',
                   marginBottom: '12px',
                   fontSize: '13px',
-                  color: '#cf1322',
+                  color: 'var(--sev-critical-fg)',
                   fontWeight: 600,
                 },
               },
@@ -1783,10 +1451,10 @@ createApp({
                       style: {
                         padding: '2px 10px',
                         borderRadius: '4px',
-                        background: '#f0f5ff',
-                        color: '#2f54eb',
+                        background: 'var(--st-info-bg)',
+                        color: 'var(--st-info-fg)',
                         fontSize: '12px',
-                        border: '1px solid #adc6ff',
+                        border: '1px solid var(--st-info-bd)',
                       },
                     },
                     s,
@@ -1803,7 +1471,7 @@ createApp({
             if (item.kind && item.kind !== diLastKind) {
               diLastKind = item.kind
               diRows.push(
-                h('tr', { key: 'dih' + idx, style: { background: '#fafafa' } }, [
+                h('tr', { key: 'dih' + idx, style: { background: 'var(--surface-inset)' } }, [
                   h(
                     'td',
                     {
@@ -1812,7 +1480,7 @@ createApp({
                         padding: '6px 12px',
                         fontSize: '12px',
                         fontWeight: 600,
-                        color: '#666',
+                        color: 'var(--text-secondary)',
                       },
                     },
                     item.kind,
@@ -1821,7 +1489,7 @@ createApp({
               )
             }
             diRows.push(
-              h('tr', { key: 'di' + idx, style: { borderBottom: '1px solid #f0f0f0' } }, [
+              h('tr', { key: 'di' + idx, style: { borderBottom: '1px solid var(--border-subtle)' } }, [
                 h('td', { style: { padding: '6px 12px', fontSize: '13px' } }, item.kind || '-'),
                 h(
                   'td',
@@ -1830,7 +1498,7 @@ createApp({
                 ),
                 h(
                   'td',
-                  { style: { padding: '6px 12px', fontSize: '13px', color: '#666' } },
+                  { style: { padding: '6px 12px', fontSize: '13px', color: 'var(--text-secondary)' } },
                   item.namespace || '-',
                 ),
               ]),
@@ -1854,8 +1522,8 @@ createApp({
                 'div',
                 {
                   style: {
-                    background: '#fff',
-                    border: '1px solid var(--border-color)',
+                    background: 'var(--surface-card)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: '6px',
                     overflow: 'hidden',
                   },
@@ -1866,7 +1534,7 @@ createApp({
                     { width: '100%', style: { borderCollapse: 'collapse', fontSize: '13px' } },
                     [
                       h('thead', null, [
-                        h('tr', { style: { borderBottom: '2px solid var(--border-color)' } }, [
+                        h('tr', { style: { borderBottom: '2px solid var(--border-default)' } }, [
                           h(
                             'th',
                             {
@@ -1920,7 +1588,7 @@ createApp({
             if (item.kind && item.kind !== iiLastKind) {
               iiLastKind = item.kind
               iiRows.push(
-                h('tr', { key: 'iih' + idx, style: { background: '#fafafa' } }, [
+                h('tr', { key: 'iih' + idx, style: { background: 'var(--surface-inset)' } }, [
                   h(
                     'td',
                     {
@@ -1929,7 +1597,7 @@ createApp({
                         padding: '6px 12px',
                         fontSize: '12px',
                         fontWeight: 600,
-                        color: '#666',
+                        color: 'var(--text-secondary)',
                       },
                     },
                     item.kind,
@@ -1938,7 +1606,7 @@ createApp({
               )
             }
             iiRows.push(
-              h('tr', { key: 'ii' + idx, style: { borderBottom: '1px solid #f0f0f0' } }, [
+              h('tr', { key: 'ii' + idx, style: { borderBottom: '1px solid var(--border-subtle)' } }, [
                 h('td', { style: { padding: '6px 12px', fontSize: '13px' } }, item.kind || '-'),
                 h(
                   'td',
@@ -1947,7 +1615,7 @@ createApp({
                 ),
                 h(
                   'td',
-                  { style: { padding: '6px 12px', fontSize: '13px', color: '#666' } },
+                  { style: { padding: '6px 12px', fontSize: '13px', color: 'var(--text-secondary)' } },
                   item.namespace || '-',
                 ),
               ]),
@@ -1971,8 +1639,8 @@ createApp({
                 'div',
                 {
                   style: {
-                    background: '#fff',
-                    border: '1px solid var(--border-color)',
+                    background: 'var(--surface-card)',
+                    border: '1px solid var(--border-default)',
                     borderRadius: '6px',
                     overflow: 'hidden',
                   },
@@ -1983,7 +1651,7 @@ createApp({
                     { width: '100%', style: { borderCollapse: 'collapse', fontSize: '13px' } },
                     [
                       h('thead', null, [
-                        h('tr', { style: { borderBottom: '2px solid var(--border-color)' } }, [
+                        h('tr', { style: { borderBottom: '2px solid var(--border-default)' } }, [
                           h(
                             'th',
                             {
@@ -2036,7 +1704,11 @@ createApp({
       if (r.diagnosis_metrics && r.diagnosis_metrics.length > 0) {
         const metrics = r.diagnosis_metrics
         const maxVal = Math.max(...metrics.map((m) => m.value || 0), 1)
-        const barColors = { critical: '#cf1322', warning: '#faad14', normal: '#52c41a' }
+        const barColors = {
+          critical: 'var(--sev-critical-fg)',
+          warning: 'var(--sev-warning-fg)',
+          normal: 'var(--sev-pass-fg)',
+        }
         const barItems = metrics.map((m, idx) => {
           const val = m.value || 0
           const pct = Math.round((val / maxVal) * 100)
@@ -2085,7 +1757,7 @@ createApp({
                   style: {
                     flex: 1,
                     height: '20px',
-                    background: '#f0f0f0',
+                    background: 'var(--surface-sunken)',
                     borderRadius: '4px',
                     overflow: 'hidden',
                     position: 'relative',
@@ -2096,7 +1768,7 @@ createApp({
                     style: {
                       height: '100%',
                       width: pct + '%',
-                      background: barColors[m.status] || '#52c41a',
+                      background: barColors[m.status] || 'var(--sev-pass-fg)',
                       borderRadius: '4px',
                       minWidth: pct > 0 ? '4px' : '0',
                       transition: 'width 0.4s ease',
@@ -2110,7 +1782,7 @@ createApp({
                   style: {
                     minWidth: '52px',
                     fontSize: '11px',
-                    color: barColors[m.status] || '#666',
+                    color: barColors[m.status] || 'var(--text-secondary)',
                     fontWeight: 500,
                   },
                 },
@@ -2126,8 +1798,8 @@ createApp({
               'div',
               {
                 style: {
-                  background: '#fafbfc',
-                  border: '1px solid var(--border-color)',
+                  background: 'var(--surface-raised)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '8px',
                   padding: '14px',
                 },
@@ -2155,14 +1827,14 @@ createApp({
                   width: '100vw',
                   height: '100vh',
                   zIndex: 9999,
-                  background: '#fff',
+                  background: 'var(--surface-card)',
                 }
               : {
                   width: '100%',
                   height: '400px',
-                  border: '1px solid var(--border-color)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '6px',
-                  background: '#fafbfc',
+                  background: 'var(--surface-raised)',
                   position: 'relative',
                 },
           }),
@@ -2180,11 +1852,11 @@ createApp({
                     display: 'flex',
                     gap: '8px',
                     fontSize: '11px',
-                    color: '#666',
-                    background: 'rgba(255,255,255,0.95)',
+                    color: 'var(--text-secondary)',
+                    background: 'color-mix(in srgb, var(--surface-card) 95%, transparent)',
                     padding: '6px 12px',
                     borderRadius: '6px',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border-default)',
                   }
                 : {
                     position: 'absolute',
@@ -2193,11 +1865,11 @@ createApp({
                     display: 'flex',
                     gap: '12px',
                     fontSize: '11px',
-                    color: '#666',
-                    background: 'rgba(255,255,255,0.9)',
+                    color: 'var(--text-secondary)',
+                    background: 'color-mix(in srgb, var(--surface-card) 92%, transparent)',
                     padding: '4px 10px',
                     borderRadius: '4px',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border-default)',
                     zIndex: 10,
                   },
             },
@@ -2208,7 +1880,7 @@ createApp({
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    background: '#cf1322',
+                    background: 'var(--sev-critical-fg)',
                     display: 'inline-block',
                   },
                 }),
@@ -2220,7 +1892,7 @@ createApp({
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    background: '#fa8c16',
+                    background: 'var(--chart-7)',
                     display: 'inline-block',
                   },
                 }),
@@ -2232,7 +1904,7 @@ createApp({
                     width: '10px',
                     height: '10px',
                     borderRadius: '50%',
-                    background: '#1890ff',
+                    background: 'var(--chart-1)',
                     display: 'inline-block',
                   },
                 }),
@@ -2244,7 +1916,7 @@ createApp({
                   style: {
                     cursor: 'pointer',
                     fontWeight: 600,
-                    color: '#1890ff',
+                    color: 'var(--accent)',
                     userSelect: 'none',
                   },
                   onClick: () => this.toggleFullscreen('topo'),
@@ -2290,14 +1962,14 @@ createApp({
                   width: '100vw',
                   height: '100vh',
                   zIndex: 9999,
-                  background: '#fff',
+                  background: 'var(--surface-card)',
                 }
               : {
                   width: '100%',
                   height: '300px',
-                  border: '1px solid var(--border-color)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '6px',
-                  background: '#fafbfc',
+                  background: 'var(--surface-raised)',
                 },
           }),
           h(
@@ -2310,22 +1982,22 @@ createApp({
                     right: '12px',
                     zIndex: 10001,
                     fontSize: '11px',
-                    color: '#666',
-                    background: 'rgba(255,255,255,0.95)',
+                    color: 'var(--text-secondary)',
+                    background: 'color-mix(in srgb, var(--surface-card) 95%, transparent)',
                     padding: '6px 12px',
                     borderRadius: '6px',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border-default)',
                   }
                 : {
                     position: 'absolute',
                     top: '8px',
                     right: '12px',
                     fontSize: '11px',
-                    color: '#666',
-                    background: 'rgba(255,255,255,0.9)',
+                    color: 'var(--text-secondary)',
+                    background: 'color-mix(in srgb, var(--surface-card) 92%, transparent)',
                     padding: '4px 10px',
                     borderRadius: '4px',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border-default)',
                     zIndex: 10,
                   },
             },
@@ -2336,7 +2008,7 @@ createApp({
                   style: {
                     cursor: 'pointer',
                     fontWeight: 600,
-                    color: '#1890ff',
+                    color: 'var(--accent)',
                     userSelect: 'none',
                   },
                   onClick: () => this.toggleFullscreen('causal'),
@@ -2378,18 +2050,17 @@ createApp({
         const displayLogs = showAll ? logs : logs.slice(0, 10)
         const logItems = displayLogs.map((log, idx) => {
           const sev = (log.level || 'INFO').toUpperCase()
-          const sevColor =
-            { ERROR: '#cf1322', WARN: '#faad14', INFO: '#1890ff', DEBUG: '#666' }[sev] || '#666'
-          const sevBg =
-            { ERROR: '#fff1f0', WARN: '#fff7e6', INFO: '#e6f7ff', DEBUG: '#f5f5f5' }[sev] ||
-            '#f5f5f5'
+          const sevTone =
+            { ERROR: 'critical', WARN: 'warning', INFO: 'info', DEBUG: 'pending' }[sev] || 'pending'
+          const sevColor = `var(--sev-${sevTone}-fg)`
+          const sevBg = `var(--sev-${sevTone}-bg)`
           return h(
             'div',
             {
               key: 'log' + idx,
               style: {
-                background: '#fff',
-                border: '1px solid var(--border-color)',
+                background: 'var(--surface-card)',
+                border: '1px solid var(--border-default)',
                 borderRadius: '6px',
                 marginBottom: '8px',
                 overflow: 'hidden',
@@ -2404,8 +2075,8 @@ createApp({
                     alignItems: 'center',
                     gap: '10px',
                     padding: '8px 14px',
-                    borderBottom: '1px solid #f0f0f0',
-                    background: '#fafafa',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    background: 'var(--surface-inset)',
                   },
                 },
                 [
@@ -2414,7 +2085,7 @@ createApp({
                     {
                       style: {
                         fontSize: '12px',
-                        color: '#999',
+                        color: 'var(--text-muted)',
                         fontFamily: 'monospace',
                         minWidth: '130px',
                       },
@@ -2443,14 +2114,14 @@ createApp({
                         fontSize: '11px',
                         padding: '1px 8px',
                         borderRadius: '3px',
-                        background: '#f0f0f0',
-                        color: '#666',
+                        background: 'var(--st-neutral-bg)',
+                        color: 'var(--st-neutral-fg)',
                       },
                     },
                     (log.pod || '') + (log.container ? '/' + log.container : ''),
                   ),
                   log.namespace
-                    ? h('span', { style: { fontSize: '11px', color: '#999' } }, log.namespace)
+                    ? h('span', { style: { fontSize: '11px', color: 'var(--text-muted)' } }, log.namespace)
                     : null,
                 ].filter(Boolean),
               ),
@@ -2459,8 +2130,8 @@ createApp({
                 {
                   style: {
                     padding: '10px 14px',
-                    background: '#1e1e1e',
-                    color: '#d4d4d4',
+                    background: 'var(--terminal-bg)',
+                    color: 'var(--terminal-fg)',
                     fontFamily: 'monospace',
                     fontSize: '12px',
                     lineHeight: '1.6',
@@ -2489,8 +2160,8 @@ createApp({
                   margin: '10px auto 0',
                   padding: '6px 20px',
                   background: 'none',
-                  color: 'var(--primary-color)',
-                  border: '1px solid var(--primary-color)',
+                  color: 'var(--accent)',
+                  border: '1px solid var(--accent)',
                   borderRadius: '6px',
                   cursor: 'pointer',
                   fontSize: '13px',
@@ -2508,10 +2179,10 @@ createApp({
 
       if (r.action_items && r.action_items.length > 0) {
         const categories = {
-          prevent: { label: '🛡️ 预防 (Prevent)', color: '#1890ff', bg: '#e6f7ff', items: [] },
-          detect: { label: '🔍 检测 (Detect)', color: '#52c41a', bg: '#f6ffed', items: [] },
-          mitigate: { label: '🛟 缓解 (Mitigate)', color: '#fa8c16', bg: '#fff7e6', items: [] },
-          other: { label: '📋 其他', color: '#666', bg: '#fafafa', items: [] },
+          prevent: { label: '🛡️ 预防 (Prevent)', tone: 'info', items: [] },
+          detect: { label: '🔍 检测 (Detect)', tone: 'pass', items: [] },
+          mitigate: { label: '🛟 缓解 (Mitigate)', tone: 'warning', items: [] },
+          other: { label: '📋 其他', tone: 'pending', items: [] },
         }
         r.action_items.forEach((item) => {
           const cat = item.category || 'other'
@@ -2522,7 +2193,6 @@ createApp({
           (k) => categories[k].items.length > 0,
         )
         if (catKeys.length > 0) {
-          const priorityColors = { high: '#ff4d4f', medium: '#faad14', low: '#52c41a' }
           const kanbanCols = catKeys.map((catKey) => {
             const cat = categories[catKey]
             return h(
@@ -2530,8 +2200,8 @@ createApp({
               {
                 key: catKey,
                 style: {
-                  background: cat.bg,
-                  border: '1px solid ' + cat.color + '30',
+                  background: `var(--sev-${cat.tone}-bg)`,
+                  border: `1px solid var(--sev-${cat.tone}-bd)`,
                   borderRadius: '8px',
                   padding: '12px',
                   minWidth: '220px',
@@ -2544,10 +2214,10 @@ createApp({
                     style: {
                       fontSize: '13px',
                       fontWeight: 600,
-                      color: cat.color,
+                      color: `var(--sev-${cat.tone}-fg)`,
                       marginBottom: '10px',
                       paddingBottom: '8px',
-                      borderBottom: '1px solid ' + cat.color + '30',
+                      borderBottom: `1px solid var(--sev-${cat.tone}-bd)`,
                     },
                   },
                   cat.label + ' (' + cat.items.length + ')',
@@ -2561,8 +2231,8 @@ createApp({
                       {
                         key: 'ai' + idx,
                         style: {
-                          background: '#fff',
-                          border: '1px solid var(--border-color)',
+                          background: 'var(--surface-card)',
+                          border: '1px solid var(--border-default)',
                           borderRadius: '6px',
                           padding: '10px 12px',
                           fontSize: '13px',
@@ -2600,8 +2270,8 @@ createApp({
                                     style: {
                                       padding: '1px 8px',
                                       borderRadius: '3px',
-                                      background: '#f0f0f0',
-                                      color: '#666',
+                                      background: 'var(--surface-sunken)',
+                                      color: 'var(--text-secondary)',
                                     },
                                   },
                                   item.owner,
@@ -2616,7 +2286,7 @@ createApp({
                                 )
                               : null,
                             item.due_date
-                              ? h('span', { style: { color: '#999' } }, '截止: ' + item.due_date)
+                              ? h('span', { style: { color: 'var(--text-muted)' } }, '截止: ' + item.due_date)
                               : null,
                             item.category
                               ? h(
@@ -2626,8 +2296,8 @@ createApp({
                                       fontSize: '10px',
                                       padding: '1px 6px',
                                       borderRadius: '3px',
-                                      background: '#f5f5f5',
-                                      color: '#999',
+                                      background: 'var(--surface-sunken)',
+                                      color: 'var(--text-muted)',
                                     },
                                   },
                                   item.category,
@@ -2638,7 +2308,7 @@ createApp({
                         item.exit_criteria
                           ? h(
                               'div',
-                              { style: { fontSize: '11px', color: '#999', marginTop: '4px' } },
+                              { style: { fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' } },
                               '退出条件: ' + item.exit_criteria,
                             )
                           : null,
@@ -2686,31 +2356,14 @@ createApp({
         )
       }
 
-      this.$nextTick(() => {
-        if (
-          this.postmortem &&
-          this.postmortem.business_calls &&
-          (this.postmortem.business_calls.upstreams?.length ||
-            this.postmortem.business_calls.downstreams?.length)
-        ) {
-          this._initTopoGraph()
-        }
-        if (
-          this.postmortem &&
-          this.postmortem.causal_chain &&
-          this.postmortem.causal_chain.links &&
-          this.postmortem.causal_chain.links.length > 0
-        ) {
-          this._initCausalGraph()
-        }
-      })
+      this.$nextTick(() => this.reinitGraphs())
 
       return h(
         'div',
         {
           style: {
-            background: '#fff',
-            border: '1px solid var(--border-color)',
+            background: 'var(--surface-card)',
+            border: '1px solid var(--border-default)',
             borderRadius: '12px',
             padding: '24px',
             marginTop: '12px',
@@ -2746,11 +2399,11 @@ createApp({
                   flex: 1,
                   minWidth: '300px',
                   padding: '10px 16px',
-                  border: '1px solid var(--border-color)',
+                  border: '1px solid var(--border-default)',
                   borderRadius: '6px',
                   fontSize: '14px',
                   outline: 'none',
-                  background: '#fff',
+                  background: 'var(--surface-card)',
                   transition: 'border-color 0.2s',
                 },
               }),
@@ -2761,8 +2414,8 @@ createApp({
                   disabled: this.loading,
                   style: {
                     padding: '10px 24px',
-                    background: 'var(--primary-color)',
-                    color: '#fff',
+                    background: 'var(--accent)',
+                    color: 'var(--text-on-accent)',
                     border: 'none',
                     borderRadius: '6px',
                     cursor: this.loading ? 'not-allowed' : 'pointer',
@@ -2773,10 +2426,10 @@ createApp({
                     whiteSpace: 'nowrap',
                   },
                   onMouseenter: (e) => {
-                    if (!this.loading) e.currentTarget.style.background = '#40a9ff'
+                    if (!this.loading) e.currentTarget.style.background = 'var(--accent-hover)'
                   },
                   onMouseleave: (e) => {
-                    e.currentTarget.style.background = 'var(--primary-color)'
+                    e.currentTarget.style.background = 'var(--accent)'
                   },
                 },
                 this.loading ? '分析中...' : '开始分析',
@@ -2788,8 +2441,8 @@ createApp({
                   disabled: this.generating || !this.fingerprint.trim(),
                   style: {
                     padding: '10px 24px',
-                    background: '#722ed1',
-                    color: '#fff',
+                    background: 'var(--chart-5)',
+                    color: 'var(--text-on-accent)',
                     border: 'none',
                     borderRadius: '6px',
                     cursor: this.generating || !this.fingerprint.trim() ? 'not-allowed' : 'pointer',
@@ -2801,10 +2454,10 @@ createApp({
                   },
                   onMouseenter: (e) => {
                     if (!this.generating && this.fingerprint.trim())
-                      e.currentTarget.style.background = '#9254de'
+                      e.currentTarget.style.background = 'color-mix(in srgb, var(--chart-5), white 15%)'
                   },
                   onMouseleave: (e) => {
-                    e.currentTarget.style.background = '#722ed1'
+                    e.currentTarget.style.background = 'var(--chart-5)'
                   },
                 },
                 this.generating ? '生成中...' : '生成复盘报告',
@@ -2817,8 +2470,8 @@ createApp({
                   style: {
                     padding: '10px 24px',
                     background: 'none',
-                    color: 'var(--primary-color)',
-                    border: '1px solid var(--primary-color)',
+                    color: 'var(--accent)',
+                    border: '1px solid var(--accent)',
                     borderRadius: '6px',
                     cursor: !this.fingerprint.trim() ? 'not-allowed' : 'pointer',
                     fontSize: '14px',
@@ -2829,13 +2482,13 @@ createApp({
                   },
                   onMouseenter: (e) => {
                     if (this.fingerprint.trim()) {
-                      e.currentTarget.style.background = 'var(--primary-color)'
-                      e.currentTarget.style.color = '#fff'
+                      e.currentTarget.style.background = 'var(--accent)'
+                      e.currentTarget.style.color = 'var(--text-on-accent)'
                     }
                   },
                   onMouseleave: (e) => {
                     e.currentTarget.style.background = 'none'
-                    e.currentTarget.style.color = 'var(--primary-color)'
+                    e.currentTarget.style.color = 'var(--accent)'
                   },
                 },
                 '导出 Markdown',
@@ -2853,10 +2506,10 @@ createApp({
                 style: {
                   padding: '16px 20px',
                   marginBottom: '20px',
-                  background: '#fff2f0',
-                  border: '1px solid #ffccc7',
+                  background: 'var(--st-danger-bg)',
+                  border: '1px solid var(--st-danger-bd)',
                   borderRadius: '8px',
-                  color: 'var(--error-color)',
+                  color: 'var(--st-danger-fg)',
                   fontSize: '14px',
                 },
               },
@@ -2890,8 +2543,8 @@ createApp({
                       'div',
                       {
                         style: {
-                          background: '#fafbfc',
-                          border: '1px solid var(--border-color)',
+                          background: 'var(--surface-raised)',
+                          border: '1px solid var(--border-default)',
                           borderRadius: '8px',
                           padding: '20px',
                         },
@@ -2913,8 +2566,8 @@ createApp({
                             'div',
                             {
                               style: {
-                                background: '#fff7e6',
-                                border: '1px solid #ffd591',
+                                background: 'var(--sev-warning-bg)',
+                                border: '1px solid var(--sev-warning-bd)',
                                 borderRadius: '8px',
                                 padding: '14px',
                                 marginBottom: '16px',
@@ -2927,7 +2580,7 @@ createApp({
                                   style: {
                                     fontSize: '13px',
                                     fontWeight: 600,
-                                    color: '#d46b08',
+                                    color: 'var(--sev-warning-fg)',
                                     marginBottom: '6px',
                                   },
                                 },
@@ -2936,7 +2589,7 @@ createApp({
                               h(
                                 'div',
                                 {
-                                  style: { fontSize: '14px', color: '#8c4b0a', lineHeight: '1.6' },
+                                  style: { fontSize: '14px', color: 'var(--sev-warning-fg)', lineHeight: '1.6' },
                                 },
                                 this.causalChain.root_cause,
                               ),
@@ -2956,8 +2609,8 @@ createApp({
                             {
                               style: {
                                 marginTop: '12px',
-                                background: '#fff',
-                                border: '1px solid var(--border-color)',
+                                background: 'var(--surface-card)',
+                                border: '1px solid var(--border-default)',
                                 borderRadius: '8px',
                                 padding: '14px',
                               },

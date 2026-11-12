@@ -1,20 +1,42 @@
-import { Terminal } from 'https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/+esm'
+import { Terminal } from '@xterm/xterm'
+import '@xterm/xterm/css/xterm.css'
 import { createApp } from 'vue'
 import { NavBar } from '../components/SharedComponents.js'
+import { toast } from '../components/toast.js'
+import { tok } from '../styles/theme.js'
 import '../styles/common.css'
 
 // 独立挂载 NavBar 到 #vue-nav
-createApp({ components: { NavBar } }).mount('#vue-nav')
+const navApp = createApp({ components: { NavBar } })
+navApp.mount('#vue-nav')
 
 let term = null
 let ws = null
+let removeResizeListener = null
+
+/* 页面卸载路径：xterm 实例、WebSocket、window 监听都必须显式释放，
+   否则 bfcache 往返或单页跳转后 resize 回调与 socket 继续存活。 */
+function teardown() {
+  if (removeResizeListener) {
+    removeResizeListener()
+    removeResizeListener = null
+  }
+  if (ws) {
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null
+    ws.close()
+    ws = null
+  }
+  if (term) {
+    term.dispose()
+    term = null
+  }
+  navApp.unmount()
+}
+window.addEventListener('pagehide', teardown)
 
 async function init() {
   const namespaceSel = document.getElementById('namespaceSelect')
   const podSel = document.getElementById('podSelect')
-  const containerSel = document.getElementById('containerSelect')
-  const shellSel = document.getElementById('shellSelect')
-  const status = document.getElementById('status')
 
   const resizeSender = (w, h) => {
     try {
@@ -38,8 +60,8 @@ async function init() {
     if (Array.isArray(d.namespaces) && d.namespaces.length > 0) {
       namespaces = d.namespaces
     }
-  } catch (e) {
-    console.error('Failed to fetch namespaces:', e)
+  } catch {
+    toast.error('获取命名空间列表失败')
   }
 
   namespaces.forEach((ns) => {
@@ -72,7 +94,12 @@ async function init() {
     }
   }
 
-  term = new Terminal({ cols: 80, rows: 24, cursorBlink: true, theme: { background: '#1e1e1e' } })
+  term = new Terminal({
+    cols: 80,
+    rows: 24,
+    cursorBlink: true,
+    theme: { background: tok('--terminal-bg', '#1e1e1e') },
+  })
   const host = document.getElementById('terminal')
   term.open(host)
   /* 以容器自身尺寸算行列：window.innerHeight 含导航与工具条，
@@ -101,6 +128,7 @@ async function init() {
   })
 
   window.addEventListener('resize', fit)
+  removeResizeListener = () => window.removeEventListener('resize', fit)
 }
 
 async function refreshPods() {
@@ -120,8 +148,8 @@ async function refreshPods() {
       opt.text = p
       podSel.appendChild(opt)
     })
-  } catch (e) {
-    console.error('Failed to fetch pods:', e)
+  } catch {
+    toast.error('获取 Pod 列表失败')
   }
 }
 
@@ -154,9 +182,15 @@ async function refreshContainers() {
     if (d.containers && d.containers.length > 0) {
       containerSel.value = d.containers[0]
     }
-  } catch (e) {
-    console.error('Failed to fetch containers:', e)
+  } catch {
+    toast.error('获取容器列表失败')
   }
+}
+
+function setStatus(state, text) {
+  const status = document.getElementById('status')
+  status.dataset.state = state
+  status.textContent = text
 }
 
 function connect() {
@@ -168,7 +202,6 @@ function connect() {
   const pod = document.getElementById('podSelect').value
   const container = document.getElementById('containerSelect').value
   const shell = document.getElementById('shellSelect').value || '/bin/sh'
-  const status = document.getElementById('status')
 
   if (!pod || !container) {
     term.writeln('\x1b[31mError: Please select pod and container first\x1b[0m')
@@ -179,26 +212,24 @@ function connect() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${protocol}://${location.host}/api/v1/terminal/ws?cluster=${encodeURIComponent(cluster)}&namespace=${encodeURIComponent(namespace)}&pod=${encodeURIComponent(pod)}&container=${encodeURIComponent(container)}&shell=${encodeURIComponent(shell)}`
 
-  status.textContent = 'connecting...'
+  setStatus('connecting', 'connecting...')
   term.writeln(`\x1b[33mConnecting to ${namespace}/${pod}/${container}...\x1b[0m`)
 
+  // 鉴权走同源 HttpOnly 会话 cookie，握手自动携带，无需在 URL 暴露 token
   ws = new WebSocket(url)
   ws.onopen = () => {
-    status.textContent = 'connected'
-    status.style.color = 'green'
+    setStatus('connected', 'connected')
     term.writeln('\x1b[32mConnected!\x1b[0m')
   }
   ws.onmessage = (ev) => {
     term.write(ev.data)
   }
-  ws.onerror = (ev) => {
-    status.textContent = 'error'
-    status.style.color = 'red'
+  ws.onerror = () => {
+    setStatus('error', 'error')
     term.writeln('\x1b[31mConnection error\x1b[0m')
   }
   ws.onclose = () => {
-    status.textContent = 'disconnected'
-    status.style.color = 'gray'
+    setStatus('disconnected', 'disconnected')
     term.writeln('\x1b[33mDisconnected\x1b[0m')
   }
 }

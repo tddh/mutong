@@ -120,14 +120,6 @@ export const MBtn = {
   },
 }
 
-/** 工具条：筛选器与操作的统一容器，自动换行 */
-export const Toolbar = {
-  name: 'Toolbar',
-  setup(props, { slots }) {
-    return () => h('div', { class: 'm-toolbar' }, slots.default ? slots.default() : null)
-  },
-}
-
 /** 空态：区分"还没有数据"与"筛选后无结果"，后者给清除筛选的出口 */
 export const EmptyState = {
   name: 'EmptyState',

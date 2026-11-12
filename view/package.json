@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@antv/g6": "^4.8.24",
+    "@xterm/xterm": "5.5.0",
     "d3-force": "^3.0.0",
     "d3-zoom": "^3.0.0",
     "dompurify": "^3.4.17",

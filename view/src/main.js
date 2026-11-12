@@ -1,6 +1,7 @@
 import { createApp, ref, computed, onMounted } from 'vue'
 import { NavBar } from './components/SharedComponents.js'
 import { PageHeader, StatCard, Skeleton, Icon } from './components/primitives.js'
+import { toast } from './components/toast.js'
 import { fetchOverviewStats } from './utils/stats.js'
 import './styles/common.css'
 
@@ -14,20 +15,31 @@ createApp({
       inspection: { issues: 0 },
     })
     const loading = ref(true)
+    const error = ref('')
     const updatedAt = ref('')
-    const desc = computed(() =>
-      loading.value ? '正在加载概览数据…' : updatedAt.value ? `数据更新于 ${updatedAt.value}` : '',
-    )
-
-    onMounted(async () => {
-      try {
-        stats.value = await fetchOverviewStats()
-      } finally {
-        loading.value = false
-        updatedAt.value = new Date().toLocaleTimeString()
-      }
+    const desc = computed(() => {
+      if (loading.value) return '正在加载概览数据…'
+      if (error.value) return '概览数据加载失败'
+      return updatedAt.value ? `数据更新于 ${updatedAt.value}` : ''
     })
 
-    return { stats, loading, desc }
+    const load = async () => {
+      loading.value = true
+      error.value = ''
+      try {
+        stats.value = await fetchOverviewStats()
+        // 只有真实拿到数据才标注更新时间，失败时不得制造"数据新鲜"的假象
+        updatedAt.value = new Date().toLocaleTimeString()
+      } catch (e) {
+        error.value = e.message || '未知错误'
+        toast.error('概览数据加载失败: ' + error.value)
+      } finally {
+        loading.value = false
+      }
+    }
+
+    onMounted(load)
+
+    return { stats, loading, error, desc, load }
   },
 }).mount('#app')

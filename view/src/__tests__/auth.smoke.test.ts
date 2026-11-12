@@ -34,7 +34,7 @@ describe('auth store init', () => {
     const store = useAuth()
     await store.init()
     expect(store.status).toBe('loggedOut')
-    expect(store.accessToken).toBeNull()
+    expect(store.accessToken).toBeUndefined()
     expect(store.user).toBeNull()
     expect(sessionStorage.getItem('access_token')).toBeNull()
     expect(sessionStorage.getItem('user')).toBeNull()

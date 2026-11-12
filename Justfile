@@ -3,8 +3,15 @@
 
 # 变量定义
 output_dir := "artifacts"
-output := "artifacts/mutong-linux-amd64"
 source := "./cmd/main.go"
+
+# 宿主机平台（just 的 arch() 返回 aarch64/x86_64，需映射为 GOARCH）
+host_os := if os() == "macos" { "darwin" } else { os() }
+host_arch := if arch() == "aarch64" { "arm64" } else if arch() == "x86_64" { "amd64" } else { arch() }
+
+# run 系列使用宿主机产物；linux 产物路径供 CI / deploy 使用
+output := output_dir / "mutong-" + host_os + "-" + host_arch
+linux_output := output_dir / "mutong-linux-amd64"
 
 # 默认命令：显示帮助
 default:
@@ -22,15 +29,11 @@ swagger:
 # 构建命令
 # ═══════════════════════════════════════════════════════════════
 
-# 编译项目（生成 Linux amd64/arm64 和 macOS arm64 二进制文件）
+# 编译项目（生成 Linux amd64 和 macOS arm64 二进制文件）
 build:
     mkdir -p {{output_dir}}
-    go mod tidy
-    gofmt -w .
-    # Linux x86_64
-    GOOS=linux GOARCH=amd64 go build -mod=mod -o {{output_dir}}/mutong-linux-amd64 {{source}}
-    # Linux ARM64
-    #GOOS=linux GOARCH=arm64 go build -mod=mod -o {{output_dir}}/mutong-linux-arm64 {{source}}
+    # Linux x86_64（CI / deploy 产物）
+    GOOS=linux GOARCH=amd64 go build -mod=mod -o {{linux_output}} {{source}}
     # macOS ARM64 (Apple Silicon M1/M2/M3)
     GOOS=darwin GOARCH=arm64 go build -mod=mod -o {{output_dir}}/mutong-darwin-arm64 {{source}}
     # 同步配置文件
@@ -39,10 +42,17 @@ build:
     @echo "✅ 构建完成:"
     @ls -lh {{output_dir}}/mutong-*
 
+# 仅构建宿主机平台版本（just run 使用的产物）
+build-host:
+    mkdir -p {{output_dir}}
+    GOOS={{host_os}} GOARCH={{host_arch}} go build -mod=mod -o {{output}} {{source}}
+    cp -r configs {{output_dir}}/
+    mkdir -p {{output_dir}}/configs/prompts && cp -r configs/prompts/* {{output_dir}}/configs/prompts/
+    @echo "✅ 宿主机构建完成: {{output}}"
+
 # 仅构建 macOS 版本（本地开发调试）
 build-mac:
     mkdir -p {{output_dir}}
-    go mod tidy
     GOOS=darwin GOARCH=arm64 go build -mod=mod -o {{output_dir}}/mutong-darwin-arm64 {{source}}
     cp -r configs {{output_dir}}/
     mkdir -p {{output_dir}}/configs/prompts && cp -r configs/prompts/* {{output_dir}}/configs/prompts/
@@ -52,8 +62,6 @@ build-mac:
 # 编译项目（带SkyWalking代理）
 build-skywalking:
     mkdir -p {{output_dir}}
-    go mod tidy
-    gofmt -w .
     GOOS=linux GOARCH=amd64 go build -toolexec="skywalking-go-agent-0.6.0 -config=agent.yaml" -a -o {{output_dir}}/mutong-linux-amd64-skywalking {{source}}
     GOOS=linux GOARCH=arm64 go build -toolexec="skywalking-go-agent-0.6.0 -config=agent.yaml" -a -o {{output_dir}}/mutong-linux-arm64-skywalking {{source}}
     cp -r configs {{output_dir}}/
@@ -119,12 +127,12 @@ test-ui:
 # 数据库命令
 # ═══════════════════════════════════════════════════════════════
 
-# 初始化 Nebula Graph 数据库
+# 初始化 Nebula Graph 数据库（需环境变量 NEBULA_USER / NEBULA_PASS）
 init-nebula:
     chmod +x scripts/update_nebula.sh
     cd scripts && ./update_nebula.sh
 
-# 更新 Nebula Graph nGQL 语句
+# 更新 Nebula Graph nGQL 语句（需环境变量 NEBULA_USER / NEBULA_PASS）
 update-nebula:
     chmod +x scripts/update_nebula.sh
     cd scripts && ./update_nebula.sh
@@ -138,7 +146,7 @@ init-es-template:
 # 运行命令
 # ═══════════════════════════════════════════════════════════════
 
-# 运行项目（使用 configs/ 目录模式）
+# 运行项目（使用 configs/ 目录模式，自动选择宿主机平台产物）
 run:
     ./{{output}} -c configs/
 
@@ -162,6 +170,11 @@ run-js:
 fmt:
     gofmt -w .
     @echo "代码格式化完成"
+
+# 整理依赖（独立于 build，构建不应改写 go.mod/go.sum）
+tidy:
+    go mod tidy
+    @echo "依赖整理完成"
 
 # 检查代码静态分析
 lint:

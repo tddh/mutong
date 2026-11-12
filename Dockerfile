@@ -1,5 +1,9 @@
 # Stage 1: Build
-FROM golang:1.26-alpine AS builder
+# 交叉编译：buildx 传入 TARGETOS/TARGETARCH，普通 docker build 时为空即本机平台
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -8,7 +12,7 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o mutong ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o mutong ./cmd/main.go
 
 # Stage 2: Runtime
 FROM alpine:3.21

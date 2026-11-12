@@ -7,6 +7,9 @@ services:
       POSTGRES_USER: mutong
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: mutong
+    # 仅绑定回环地址：供宿主机 scripts/init_postgres.sh 与本地 just run 连接
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,19 +20,100 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # NebulaGraph graphd service
-  nebula:
-    image: vesoft/nebula-graphd:v3.8.0
-    container_name: mutong-nebula
-    environment:
-      USER: root
+  # NebulaGraph：metad + storaged x2 + graphd
+  # scripts/schema.ngql 使用 replica_factor=2，因此需要两个 storaged 实例
+  nebula-metad:
+    image: vesoft/nebula-metad:v3.8.0
+    container_name: mutong-nebula-metad
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-metad", "--port=9559", "--data_path=/data/meta", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 9669 || exit 1"]
+      test: ["CMD", "curl", "-sf", "http://nebula-metad:19559/status"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    volumes:
+      - nebula_meta:/data/meta
+      - nebula_meta_logs:/logs
     restart: unless-stopped
+
+  nebula-storaged-0:
+    image: vesoft/nebula-storaged:v3.8.0
+    container_name: mutong-nebula-storaged-0
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-storaged-0", "--port=9779", "--data_path=/data/storage", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-storaged-0:19779/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - nebula_storage_0:/data/storage
+      - nebula_storage_logs_0:/logs
+    restart: unless-stopped
+
+  nebula-storaged-1:
+    image: vesoft/nebula-storaged:v3.8.0
+    container_name: mutong-nebula-storaged-1
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-storaged-1", "--port=9779", "--data_path=/data/storage", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-storaged-1:19779/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - nebula_storage_1:/data/storage
+      - nebula_storage_logs_1:/logs
+    restart: unless-stopped
+
+  nebula-graphd:
+    image: vesoft/nebula-graphd:v3.8.0
+    container_name: mutong-nebula-graphd
+    command: ["--meta_server_addrs=nebula-metad:9559", "--local_ip=nebula-graphd", "--port=9669", "--log_dir=/logs", "--v=0", "--minloglevel=0"]
+    # 供宿主机 just init-nebula（nebula-console -addr localhost -port 9669）连接
+    ports:
+      - "127.0.0.1:9669:9669"
+    depends_on:
+      nebula-metad:
+        condition: service_healthy
+      nebula-storaged-0:
+        condition: service_healthy
+      nebula-storaged-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://nebula-graphd:19669/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - nebula_graph_logs:/logs
+    restart: unless-stopped
+
+  # 注册 storage 节点并建图空间，之后 just init-nebula 只需补 TAG/INDEX
+  nebula-init:
+    image: vesoft/nebula-console:v3.8.0
+    container_name: mutong-nebula-init
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      NEBULA_PASSWORD: ${NEBULA_PASSWORD:?set NEBULA_PASSWORD}
+    command:
+      - |
+        nebula-console -addr nebula-graphd -port 9669 -u root -p "$$NEBULA_PASSWORD" \
+          -e 'ADD HOSTS "nebula-storaged-0":9779,"nebula-storaged-1":9779;' || true
+        nebula-console -addr nebula-graphd -port 9669 -u root -p "$$NEBULA_PASSWORD" \
+          -e 'CREATE SPACE IF NOT EXISTS mutong(partition_num=3, replica_factor=2, vid_type=FIXED_STRING(128));' || true
+    depends_on:
+      nebula-graphd:
+        condition: service_healthy
+    restart: "no"
 
   # Redpanda (Kafka-compatible lightweight message queue)
   kafka:
@@ -48,9 +132,12 @@ services:
       - --node-id
       - "0"
       - --kafka-addr
-      - PLAINTEXT://0.0.0.0:9092
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      # 容器内用 kafka:9092；宿主机用 localhost:9092（映射到 external 监听端口）
       - --advertise-kafka-addr
-      - PLAINTEXT://kafka:9092
+      - internal://kafka:9092,external://localhost:9092
+    ports:
+      - "127.0.0.1:9092:19092"
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
       interval: 10s
@@ -64,6 +151,8 @@ services:
     image: redis:7-alpine
     container_name: mutong-redis
     command: redis-server --requirepass ${MUTONG_REDIS_PASSWORD:?set MUTONG_REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "${MUTONG_REDIS_PASSWORD:?set MUTONG_REDIS_PASSWORD}", "ping"]
       interval: 5s
@@ -89,7 +178,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      nebula:
+      nebula-graphd:
         condition: service_healthy
       kafka:
         condition: service_healthy
@@ -99,3 +188,10 @@ services:
 
 volumes:
   postgres_data:
+  nebula_meta:
+  nebula_meta_logs:
+  nebula_storage_0:
+  nebula_storage_logs_0:
+  nebula_storage_1:
+  nebula_storage_logs_1:
+  nebula_graph_logs:

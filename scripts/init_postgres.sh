@@ -9,7 +9,7 @@ DB_PASS="${DB_PASS:-$MUTONG_DB_PASSWORD}"
 
 echo "Initializing PostgreSQL database..."
 
-PGPASSWORD="${DB_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U postgres <<EOF
+PGPASSWORD="${DB_PASS}" psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" <<EOF
 SELECT 'CREATE DATABASE ${DB_NAME} ENCODING ''UTF8'''
 WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
 

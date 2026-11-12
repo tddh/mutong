@@ -1,16 +1,21 @@
 # ─── 阶段 1：Go 编译 ───
-FROM golang:1.26-alpine AS go-builder
+# 交叉编译：buildx 传入 TARGETOS/TARGETARCH，普通 docker build 时为空即本机平台
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS go-builder
+
+ARG TARGETOS
+ARG TARGETARCH
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /mutong ./cmd/main.go
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /mutongctl ./cmd/mutongctl
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /mutong ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o /mutongctl ./cmd/mutongctl
 
 # ─── 阶段 2：前端构建 ───
-FROM oven/bun:1-alpine AS ui-builder
+# 静态产物与 CPU 架构无关，固定在构建平台执行，避免 QEMU 模拟
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS ui-builder
 
 WORKDIR /ui
 COPY view/package.json view/bun.lock ./

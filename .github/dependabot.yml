@@ -10,3 +10,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+
+  # 前端（view/ 使用 bun 管理依赖，dependabot 的 npm 生态覆盖 package.json/bun.lock）
+  - package-ecosystem: "npm"
+    directory: "/view"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

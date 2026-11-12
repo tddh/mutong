@@ -84,3 +84,9 @@ docs/superpowers/
 /dist/
 coverage.html
 /data/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/

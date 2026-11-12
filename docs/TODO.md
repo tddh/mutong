@@ -1,6 +1,8 @@
 # 重明 (Mutong) 待办事项
 
-> 最后更新：2026-09-04（前端菜单收敛 + Grafana 内嵌调研结论 + tf001 后端可用性实测；含此前的代码审计报告与竞品对标分析）
+> 最后更新：2026-11（安全加固与发布工程落地后复核：webhook 签名 / admin 门禁 / 导航数据驱动 / 前端测试框架已闭合；含此前的代码审计报告与竞品对标分析）
+>
+> 版本级计划见 [ROADMAP.md](../ROADMAP.md)，安全修复明细见 [remediation-plan.md](remediation-plan.md)。
 
 ---
 
@@ -19,8 +21,8 @@
 - *估时：16h*
 
 ### 2. RBAC 用户 / 角色管理
-- **后端**：三种角色（admin / operator / viewer）已注册，Casbin 中间件已生效
-- **现状**：用户 API 仅 `GET /users`（返回当前用户），角色 API 仅 `GET /roles`
+- **后端**：三种角色（admin / operator / viewer）已注册，Casbin 中间件已挂载并按 `auth.rbac_mode`（enforce/shadow/off）生效
+- **现状**：用户 API 仅 `GET /api/v1/users`（返回当前用户），角色 API 仅 `GET /api/v1/roles`；旧路径 `/users`、`/roles` 已 301 到新路径
 - **缺口**：
   - 缺少 POST/PUT/DELETE 端点
   - `UserService` 仅有 `CreateUserFromZitadel` 自动创建
@@ -34,7 +36,7 @@
 
 ### 4. 巡检自定义规则
 - **后端**：`/api/v1/inspection/rules` 已实现 POST/PUT/DELETE/toggle 完整 CRUD；`configs/rules/inspection/*.yml` YAML 文件加载（YAML > Go 内置 > DB 优先级）
-- **现状**：前端巡检页面以表格展示 5 类内置规则结果（证书/cert_expiry 仍由 Go 规则处理）
+- **现状**：前端巡检页面以表格展示 6 类内置规则结果（证书/cert_expiry 仍由 Go 规则处理）
 - **缺口**：无规则创建 / 编辑 / 删除 / 启停的 UI
 
 ### 5. 外部告警源管理
@@ -75,12 +77,14 @@
 
 ## 前端菜单收敛与监控重建（2026-09-04）
 
-### 已落地：三个菜单入口暂时隐藏
+### 已落地：三个菜单入口暂时隐藏（实现方式已改为数据驱动）
 
-`view/src/components/SharedComponents.js` 的 NavBar 模板中，**监控 / 日志 / 链路追踪** 三个 `<a>` 已各自包进跨三行注释块，统一标记 `[暂时隐藏-勿删]`（可 `grep -rn "\[暂时隐藏-勿删\]" view/` 定位）。注释块内含隐藏原因、页面代码位置与恢复方法；**页面代码全部保留**（`src/monitoring/`、`src/logs/`、`src/trace/`），只收菜单入口。
+**当前实现**：导航单一真源是 `view/src/components/nav.config.js`，导出 `NAV_ITEMS`（12 个可见入口：8 个 `group: 'primary'` + 4 个 `group: 'more'` 收进「更多」菜单）与 `NAV_HIDDEN`（日志 / 监控 / 追踪 3 项，每项带 `href`/`label`/`source`/`reason`）。**页面代码全部保留**（`src/monitoring/`、`src/logs/`、`src/trace/`），只收菜单入口。恢复方式：把该项移回 `NAV_ITEMS` 并指定 `group`，无需改任何模板。
 
-- 已构建并部署 tf001（`/root/code/mutong/artifacts/view`，备份 `view.bak.20260904-134620-pre3`）
-- 验证方式：用产物自身的模板跑 `@vue/compiler-dom`（生产构建 `comments:false` 丢弃注释节点）→ logs / monitoring / trace 三项 0 refs，其余菜单项各 2 refs。**未在浏览器目视确认**
+> **历史实现已废弃**：早期靠在 `SharedComponents.js` 的 NavBar 模板里把三个 `<a>` 包进跨三行注释块、标记 `[暂时隐藏-勿删]` 来隐藏。该标记现已不存在（`grep -rn "\[暂时隐藏-勿删\]" view/` 无结果）。废弃原因：注释在开发模式保留、生产构建 `comments:false` 丢弃，隐藏行为在两种模式下不一致。
+
+- 历史验证记录（2026-09-04，注释块方案）：已构建并部署 tf001（`/root/code/mutong/artifacts/view`，备份 `view.bak.20260904-134620-pre3`）；用产物自身的模板跑 `@vue/compiler-dom` → logs / monitoring / trace 三项 0 refs，其余菜单项各 2 refs。**未在浏览器目视确认**
+- 数据驱动改造后需重新验证：`NAV_HIDDEN` 三项在生产构建中确实不渲染，「更多」菜单在 1280px 下不溢出
 
 ### tf001 后端可用性实测（2026-09-04，pid 307048，:8888）
 
@@ -96,9 +100,9 @@
 
 - [ ] **监控页重建为 Grafana 内嵌**（方向已定，见下）
 - [ ] **日志页**：为测试/生产环境配置真实可用的 Elasticsearch 地址（`config.infra.yaml`），或让 `initializeElasticsearch` 在探测失败时返回 nil 以彻底关闭路由，避免"页面能开、查询全错"
-- [ ] **修复 `view/src/monitoring/index.html:8-12` 的悬空 preload**：硬编码了 4 个构建产物名（`modulepreload-polyfill-B5Qt9EMX.js`、`common-Co0gRJD4.js`、`api-CWUkSNXl.js`、`common-Cxju-u-v.css`），这些文件在 dist 中已不存在（既存问题，非本次引入；其余页面由 Vite 注入 hash）
-- [ ] **去掉 `view/src/monitoring/monitoring.js:43` 的 `pageSize=5000` 全量扫**：该请求打的是 `/k8s/resources/graph/nodes`（Nebula 全量），是内存压力诱因之一；改由 Grafana 面板自带资源选择器后此调用应整体删除
-- [ ] **Nebula 清理做成可选功能**（需求未闭合）：现有 `StartPeriodicCleanup`（`services/k8sresource_nebula.go:437`）用 `time.NewTicker`，首次触发在"启动 + interval"，代码中**没有"启动即清理"路径**；用户描述的"每次运行之后会清掉已删除资源"与代码不符，需先澄清观察来源。注意 `CleanupInterval` 为 int（小时），配 0.5 会被解析成 0 并回落 24h；调成 1h 会让每 tick 的 `ForceSyncResources` 全量扫变成 24 次/天
+- [x] **修复 `view/src/monitoring/index.html` 的悬空 preload**：已改为引用 `./monitoring.js` / `./monitoring.css`，不再硬编码 4 个已失效的构建产物名（`modulepreload-polyfill-*.js`、`common-*.js`、`api-*.js`、`common-*.css`）
+- [ ] **去掉 `view/src/monitoring/monitoring.js:43` 的 `pageSize=5000` 全量扫**：该请求打的是 `/api/v1/k8s/resources/graph/nodes`（Nebula 全量），是内存压力诱因之一；改由 Grafana 面板自带资源选择器后此调用应整体删除
+- [ ] **Nebula 清理做成可选功能**（需求未闭合）：现有 `StartPeriodicCleanup`（`services/k8sresource_nebula.go:443`）用 `time.NewTicker`，首次触发在"启动 + interval"，代码中**没有"启动即清理"路径**；用户描述的"每次运行之后会清掉已删除资源"与代码不符，需先澄清观察来源。注意 `CleanupInterval` 为 int（小时），配 0.5 会被解析成 0 并回落 24h；调成 1h 会让每 tick 的 `ForceSyncResources` 全量扫变成 24 次/天
 
 ### Grafana 内嵌 — 调研结论与设计草案（只调研，未实现）
 
@@ -137,7 +141,7 @@
 
 ### P1（高优先级）
 
-- [ ] **初始版本标签**：`git tag v0.1.0` + Release 说明
+- [ ] **初始版本标签**：`git tag v0.1.0` + Release 说明（发布工程已就绪：`release.yml` 由 tag `v*` 触发并推送镜像到 `ghcr.io`，`CHANGELOG.md` 的 `[Unreleased]` 待收敛为 `0.1.0`）
   *估时：10min*
 
 ### P2（中等优先级）
@@ -146,7 +150,7 @@
   *涉及：`view/src/` 下全部页面及共享组件*
   *估时：8h*
 
-- [ ] **用户/角色 CRUD**：当前仅 GET /users 和 GET /roles，需补充 POST/PUT/DELETE + DB 表操作
+- [ ] **用户/角色 CRUD**：当前仅 `GET /api/v1/users` 和 `GET /api/v1/roles`，需补充 POST/PUT/DELETE + DB 表操作
   *涉及文件：`controllers/user_controller.go`、`controllers/role_controller.go`、`services/user_service.go`、`services/role_service.go`、`models/`*
 
 - [ ] **ServiceAccount 管理 API**：当前 `models/service_account.go` 数据模型已定义且通过 GORM AutoMigrate，但缺少 CRUD 端点（`/api/auth/service-accounts`）。OAuth2 认证（fosite Provider、Zitadel OIDC、PAT/SAT Token）已完整实现
@@ -162,9 +166,8 @@
 
 - [ ] **API 文档全量注解**：当前仅完成项目级配置和 Swagger UI，handler 注解待全面推进
 
-- [ ] **前端测试框架搭建**：vitest + @vue/test-utils + jsdom，为核心页面写冒烟测试
-  *涉及：`view/package.json`、新建 `vitest.config.ts`、`view/src/**/*.test.ts`*
-  *估时：3h*
+- [x] **前端测试框架搭建**：vitest 4 + jsdom 已配置（`view/vitest.setup.ts` 注入 Storage，`.nvmrc` 固定 Node 24），`view/src/__tests__/` 下 14 个测试文件覆盖核心页面冒烟 + 组件/布局/导航/主题；CI `frontend` job 跑 `bun run lint && bun run test && bun run build`
+  *剩余：提高断言深度，从冒烟走向交互与边界用例*
 
 - [ ] **替换废弃依赖 gogo/protobuf**：→ `google.golang.org/protobuf`
   *涉及：`go.mod` + 依赖该库的源文件*
@@ -176,44 +179,43 @@
 
 ### 废弃代码待清理
 
-- [ ] **清除 6 个 `//nolint:unused` 废弃函数/类型** — `controllers/diagnosis_controller.go` 中 `startChat`、`streamChat`、`sendChatMessage`、`streamLLMResponse` 及 2 个响应结构体
+- [ ] **清除 6 个 `//nolint:unused` 废弃函数/类型** — `controllers/diagnosis_controller.go` 中 `startChat`、`streamChat`、`sendChatMessage`、`streamLLMResponse` 及 2 个响应结构体（复核仍存在，6 处 `nolint:unused`）
   *估时：5min*
 
-- [ ] **清除 2 个 `// 未调用` 遗留方法** — `controllers/controller.go` 中 `K8sResourceCollect()` 和 `K8sResourceRelationship()`
-  *估时：5min*
+- [x] **清除 2 个 `// 未调用` 遗留方法** — `controllers/controller.go` 中 `K8sResourceCollect()` 和 `K8sResourceRelationship()` 已删除
 
-- [ ] **清除 1 个空函数** — `RegisterControllersRoutes()` 方法体已被注释
+- [ ] **清除 1 个空函数** — `RegisterControllersRoutes()` 方法体仍为空，且仍被 `RegisterRoutes()` 调用（`controllers/controller.go:29,32`），需连同调用点一起删除
   *估时：1min*
 
 ### 零测试的关键模块
 
-- [ ] **巡检服务测试** — `services/inspection/` 下 12 个文件（6 服务 + 6 规则）完全无测试
+- [ ] **巡检服务测试** — `services/inspection/` 已有 `inspection_test.go`，但 7 个服务文件中的 `yaml_engine.go` / `rule_store.go` / `db_backed_rule.go` 与 `rules/` 下 6 个规则文件仍无专测
   *风险：🔴 高。巡检引擎为核心业务功能*
   *估时：2h*
 
-- [ ] **MCP Server 测试** — `services/mcp/server.go`（20 个工具处理函数）无测试
+- [ ] **MCP Server 测试** — `services/mcp/exec_tools_test.go` 已覆盖执行类工具，但 `server.go`（22 个诊断工具处理函数）与 `search_tools.go` 仍无测试
   *风险：🟡 中*
   *估时：1h*
 
 - [ ] **核心服务层测试** — `k8sresource_service.go`（~500 行）、`business_topology_service.go`、`query_builder.go`（~300 行）、`role_service.go`、`user_service.go`
   *估时：2h*
 
-- [ ] **其他无测试模块** — `services/audit/`、`services/terminal/`、`services/trace/`、`services/logsearch/`、`services/prompt/`
+- [ ] **其他无测试模块** — `services/audit/`、`services/trace/`、`services/logsearch/`、`services/prompt/` 仍为 0 测试；`services/terminal/` 已有 `session_test.go`，需补 WebSocket 生命周期与 namespace 白名单用例
   *估时：1.5h*
 
-### 安全债（认证 / 告警接入，2026-09-02 排查发现）
+### 安全债（认证 / 告警接入，2026-09-02 排查发现；2026-11 复核）
 
-- [ ] **告警 webhook 实际公开无鉴权** — `/api/v1/alerts/webhook` 与 `/api/v1/alerts/external/` 在 `RequireAuthMiddleware` 白名单里（`controllers/auth_middleware.go`），而本应保护它的两个中间件 `AuthMiddleware`（IP 白名单 `MUTONG_WEBHOOK_TRUSTED_IPS`）和 `WebhookSignatureMiddleware`（HMAC 签名 `MUTONG_WEBHOOK_SECRET`，`controllers/webhook_verifier.go`）**都写了却从未 `.Use()` 挂载 = 死代码**。任何人都能伪造告警打入。
-  *修复方向：在 webhook 路由组挂载签名或 IP 白名单中间件，并同步配置 Alertmanager 侧的签名/来源；或二者择一*
-  *风险：🔴 高（可伪造告警触发自动诊断/自愈提议）*
+- [x] **告警 webhook 实际公开无鉴权** — 已修复。`AuthMiddleware`（IP 白名单 `MUTONG_WEBHOOK_TRUSTED_IPS`）与 `WebhookSignatureMiddleware`（HMAC 签名 `MUTONG_WEBHOOK_SECRET`）均已在 `cmd/main.go` 的 `setupMiddleware` 中 `.Use()` 挂载，路径为 `/api/v1/alerts/webhook` 与 `/api/v1/alerts/external/`。签名升级为 `HMAC-SHA256(secret, 时间戳头值 + "\n" + 原始 body)`，头名 `X-Alertmanager-Signature` / `X-Alertmanager-Timestamp`，±300s 时间窗 + 重放拒绝 + 1MB body 上限；未配置 secret 时默认拒绝（`MUTONG_WEBHOOK_ALLOW_UNSIGNED=true` 可显式放行）。外部源需 `X-Alert-Token` 或受信 IP，两者都未配置时拒绝。
+  *剩余：Alertmanager 原生 webhook 不支持自定义签名头，需在中间加签名代理；重放缓存为进程内存，多副本各自去重*
 
-- [ ] **`X-Admin-Key` 未设置即放行** — `controllers/executor_controller.go` `requireAdminKey()` 只读 `MUTONG_ADMIN_KEY`，环境变量未设置时**直接 `return true` 放行**危险执行操作。注释声称"same as MUTONG_API_KEY"，但 `MUTONG_API_KEY` 全仓仅存在于该注释、代码从未读取——文档与实现不符。
-  *修复方向：未配置 admin key 时应拒绝而非放行（或强制启动时校验）；对齐注释与实际读取的环境变量*
-  *风险：🟡 中（依赖部署方是否设置了 MUTONG_ADMIN_KEY）*
+- [x] **`X-Admin-Key` 未设置即放行** — 已修复。`controllers/executor_controller.go` 的 `requireAdminKey()` 在 `MUTONG_ADMIN_KEY` 未配置时回退为要求 `admin` 角色（不再无条件 `return true`），配置了密钥则用 `subtle.ConstantTimeCompare` 比较。
+  *剩余：注释仍声称 "same as MUTONG_API_KEY"，但 `MUTONG_API_KEY` 全仓只存在于该注释、代码从未读取——需删除这句误导性注释*
 
-- [ ] **登录 access_token 作为 Bearer 不可用（认证"双轨"表象）** — `/api/auth/login` 返回的 `access_token` 与 `mutong_session` cookie 是同一个 HMAC session token，但 `BearerTokenMiddleware`（`controllers/auth_middleware.go`）的 Bearer 分支只校验 PAT/OIDC/OAuth2，从不对 Bearer 调 `sessions.Verify()`，导致同一 token 放 cookie 能用、放 Bearer 报 `invalid token`。前端全程靠 cookie，故不影响使用，但 access_token 名义签发实际不可用。
-  *修复方向（方案 B，最小改动）：Bearer 分支末尾对 token 也调 `sessions.Verify()` 注入用户上下文，使 cookie/Bearer 等价*
+- [ ] **登录 access_token 作为 Bearer 不可用（认证"双轨"表象）** — 复核仍未修复。`/api/auth/login` 返回的 `access_token` 与 `mutong_session` cookie 是同一个 HMAC session token，但 `BearerTokenMiddleware`（`controllers/auth_middleware.go`）的 Bearer 分支只校验 PAT/SAT、OIDC、OAuth2，从不对 Bearer 调 `sessions.Verify()`（该方法只出现在 cookie 分支），导致同一 token 放 cookie 能用、放 Bearer 报 `invalid token`。前端全程靠 cookie，故不影响使用，但 access_token 名义签发实际不可用。
+  *修复方向（方案 B，最小改动）：Bearer 分支末尾对 token 也调 `sessions.Verify()` + `SessionGuard.Validate()` 注入用户上下文，使 cookie/Bearer 等价*
   *风险：🟢 低（现状前端不受影响，属能力缺失而非漏洞）*
+
+- [x] **PAT/SAT 不校验用户状态** — 已修复。Bearer 分支查库后校验 `user.Status != "active"` / `sa.Status != "active"` 即拒绝，OIDC 与 OAuth2 路径同样校验；只读 scope 的 token 调用写操作返回 403。cookie 路径由 `SessionGuard`（30s TTL 快照）在禁用用户/改角色/改密码后失效会话。
 
 ---
 

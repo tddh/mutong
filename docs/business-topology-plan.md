@@ -1,12 +1,14 @@
 # 业务拓扑身份建模修复 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **实施说明**：本计划按 Task 分解，每个 Step 用 checkbox（`- [ ]`）跟踪进度，可逐项独立交付与验证。
+>
+> **状态（2026-11 逐项对照代码复核）**：Task 1–8 的实现步骤均已落地（相关 commit 见文末与各 Task 备注），Task 9 经评估决定不做。**未勾选项为仍未闭合的部分**：`lookupByOwnerName` / `parseK8sFQDN` / `extractPodNameFromAddress` 的专项单测、Task 8 的 flow 指标解析单测、Task 5 Step 4 的三参签名改造，以及 Task 6 存量合并的实际执行（已 dry-run 就绪，待人工确认）。复核证据：`go build ./...` 通过，`go test ./services/ -run 'TestParsePeerServiceName|TestResolvePeer|TestProcessSpan|TestLookup|TestBuildUID|TestResolveCaller'` 全绿。
 
 **Goal:** 消除业务拓扑的双身份分裂（BLS 用 label 名、Trace 用 owner 名建出两个 BusinessApp），修正 STS DNS 解析错误与 self-call 过滤误杀有状态副本互连，并以统一身份解析收敛三方（BLS/Trace/告警）。
 
 **Architecture:** 保持 workload 级为业务拓扑规范中心（Pod 留在物理层），引入 `owner_name` 别名属性作为「workload 技术名 → 业务名」的桥接：BLS 建点时把 workload 的 owner 名写入 BusinessApp，Trace 解析 caller 时先按 owner 名反查 canonical 顶点，命中则复用、miss 才自动建点（并带 owner 名供后续合并）。self-call 过滤从「同 app 丢」收紧为「同 pod 才丢」。
 
-**Tech Stack:** Go 1.25 + NebulaGraph v3（nGQL）+ OTLP trace protobuf + BigCache。
+**Tech Stack:** Go 1.27 + NebulaGraph v3（nGQL）+ OTLP trace protobuf + BigCache。
 
 ---
 
@@ -46,7 +48,7 @@
 - Modify: `models/business_app.go`
 - Migration: 生产环境执行 `ALTER TAG`（一次性）
 
-- [ ] **Step 1: 更新 schema.ngql**
+- [x] **Step 1: 更新 schema.ngql**（已落地：`scripts/schema.ngql:174-188`，BusinessApp 含 `owner_name`/`owner_kind`，并建 `bizapp_owner_name` 索引）
 
 把 `scripts/schema.ngql` 的 BusinessApp 定义改为：
 
@@ -68,7 +70,7 @@ CREATE TAG INDEX IF NOT EXISTS `bizapp_ns` ON `BusinessApp`(`namespace`(128));
 CREATE TAG INDEX IF NOT EXISTS `bizapp_owner_name` ON `BusinessApp`(`owner_name`(128));
 ```
 
-- [ ] **Step 2: 更新 models.BusinessApp**
+- [x] **Step 2: 更新 models.BusinessApp**（已落地：`models/business_app.go:14-15` 的 `OwnerName`/`OwnerKind` 字段）
 
 `models/business_app.go` 的 struct 末尾加两个字段：
 
@@ -86,7 +88,7 @@ type BusinessApp struct {
 }
 ```
 
-- [ ] **Step 3: 生产环境一次性迁移（已有部署必须执行）**
+- [x] **Step 3: 生产环境一次性迁移（已有部署必须执行）**（tf001 已执行——文末「增量」章节记录了带 `owner_name` 的 `INSERT VERTEX` / `INSERT VERTEX IF NOT EXISTS` 经真实 Nebula 验证有效、启动后 BLS 无插入错误，这以属性已存在为前提。**其他已有部署仍需各自执行一次**）
 
 `CREATE TAG IF NOT EXISTS` 不会给已存在的 tag 加属性，需在 NebulaGraph 手动执行（k8s-m1 的 nebula-console pod）：
 
@@ -101,12 +103,12 @@ kubectl exec -i -n nebula-cluster nebula-console -- nebula-console \
 
 Expected: `Execution succeeded`。
 
-- [ ] **Step 4: 编译验证**
+- [x] **Step 4: 编译验证**（2026-11 复核：`go build ./...` exit 0）
 
 Run: `go build ./...`
 Expected: exit 0（Step 2 只加字段，不影响编译）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**（已提交：`dfaf8ac`）
 
 ```bash
 git add scripts/schema.ngql models/business_app.go
@@ -120,7 +122,7 @@ git commit -m "feat(topology): BusinessApp 增加 owner_name/owner_kind 别名�
 **Files:**
 - Modify: `services/business_label_syncer.go:275-283, 316-322, 477-493`
 
-- [ ] **Step 1: syncApp 填充 OwnerName/OwnerKind**
+- [x] **Step 1: syncApp 填充 OwnerName/OwnerKind**（已落地：`services/business_label_syncer.go:293-294`；后续加固见 `86f6348`——只有控制器级资源才写 owner，避免归属漂移）
 
 在 `syncApp`（`business_label_syncer.go`）构造 `app := models.BusinessApp{...}` 处（现第 275-283 行），补两个字段：
 
@@ -138,7 +140,7 @@ git commit -m "feat(topology): BusinessApp 增加 owner_name/owner_kind 别名�
 	}
 ```
 
-- [ ] **Step 2: hashBusinessAttrs 覆盖 owner_name**
+- [x] **Step 2: hashBusinessAttrs 覆盖 owner_name**（已落地，但实现与计划不同：拆成 `hashBaseAttrs(appName, namespace, bizAttrs)` 与 `hashOwnerAttrs(ownerName, ownerKind)` 双键（`services/business_label_syncer.go:355,363`），避免 Pod 等非控制器资源反复触发写）
 
 `hashBusinessAttrs`（现第 316-322 行）把 OwnerName/OwnerKind 加入 hash 输入，确保 owner 名变化会触发重写：
 
@@ -170,7 +172,7 @@ func (s *BusinessLabelSyncer) hashBusinessAttrs(appName, namespace, ownerName, o
 	attrsHash := s.hashBusinessAttrs(appName, namespace, unstructuredObj.GetName(), unstructuredObj.GetKind(), bizAttrs)
 ```
 
-- [ ] **Step 3: batchUpsertBusinessApp 写入 owner_name/owner_kind**
+- [x] **Step 3: batchUpsertBusinessApp 写入 owner_name/owner_kind**（已落地：`services/business_label_syncer.go:543-544,571,583`；分区写入——控制器级 `INSERT VERTEX` 覆盖，非控制器级 `INSERT VERTEX IF NOT EXISTS` 不覆盖已有 owner）
 
 `batchUpsertBusinessApp`（现第 477-509 行）的 INSERT 语句加两列：
 
@@ -193,12 +195,12 @@ func (s *BusinessLabelSyncer) hashBusinessAttrs(appName, namespace, ownerName, o
 		strings.Join(values, ", "))
 ```
 
-- [ ] **Step 4: 编译 + 测试**
+- [x] **Step 4: 编译 + 测试**（2026-11 复核：`go build ./...` exit 0）
 
 Run: `go build ./... && go test -race -count=1 ./services/ ./services/... 2>&1 | tail -20`
 Expected: build exit 0；`services` 与 `services/auth` 测试 PASS（BLS 单测若断言了 hash/INSERT 内容，需同步更新——运行后按失败提示修）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**（已提交：`fdb5ff2`）
 
 ```bash
 git add services/business_label_syncer.go
@@ -214,7 +216,7 @@ git commit -m "feat(topology): BLS 写入 BusinessApp 的 owner_name/owner_kind 
 - Modify: `services/trace_topology_syncer.go:370-408, 526-638`
 - Test: `services/trace_topology_syncer_alias_test.go`
 
-- [ ] **Step 1: 写失败测试（lookupByOwnerName）**
+- [ ] **Step 1: 写失败测试（lookupByOwnerName）**（**未落地**：`services/trace_topology_syncer_alias_test.go` 不存在，全仓无 `TestLookupByOwnerName_*`；别名解析目前只被集成路径间接覆盖，需补专项单测）
 
 `services/trace_topology_syncer_alias_test.go`：
 
@@ -248,12 +250,12 @@ func TestLookupByOwnerName_Hit(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] **Step 2: 运行确认失败**（依赖 Step 1 的测试，尚未编写）
 
 Run: `go test ./services/ -run TestLookupByOwnerName_Hit -count=1 -v`
 Expected: 编译失败（`lookupByOwnerName` 未定义）。
 
-- [ ] **Step 3: 实现 lookupByOwnerName + parseK8sFQDN + extractPodNameFromAddress**
+- [x] **Step 3: 实现 lookupByOwnerName + parseK8sFQDN + extractPodNameFromAddress**（已落地：`services/trace_topology_syncer_alias.go:19,46,66`）
 
 新建 `services/trace_topology_syncer_alias.go`：
 
@@ -362,12 +364,12 @@ func (s *TraceTopologySyncer) lookupByOwnerName(ownerName, namespace string) (bu
 }
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行测试确认通过**（该命名测试不存在，无法执行；现有 `TestResolveCaller_*` / `TestLookup_*` 系列已复核全绿）
 
 Run: `go test ./services/ -run TestLookupByOwnerName_Hit -count=1 -v`
 Expected: PASS。
 
-- [ ] **Step 5: 改造 resolveCallerBusinessApp 走别名**
+- [x] **Step 5: 改造 resolveCallerBusinessApp 走别名**（已落地：`services/trace_topology_syncer.go:397` 先 `lookupByOwnerName` 反查 canonical 顶点，命中即复用，miss 才 `lookupOrInsertBusinessApp`）
 
 `services/trace_topology_syncer.go` 的 `resolveCallerBusinessApp`（现第 370-408 行），在得到 `appName`（owner 名）与 `namespace` 之后、`lookupOrInsertBusinessApp` 之前插入别名查找：
 
@@ -393,7 +395,7 @@ Expected: PASS。
 
 注意：`lookupOrInsertBusinessApp` 签名从 2 参改为 3 参（第三个参数 `ownerName`，peer 路径传空串），见 Task 5 一并处理。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**（已提交：`6a6f487`；注意实际未包含 `trace_topology_syncer_alias_test.go`，该文件至今不存在）
 
 ```bash
 git add services/trace_topology_syncer.go services/trace_topology_syncer_alias.go services/trace_topology_syncer_alias_test.go
@@ -408,7 +410,7 @@ git commit -m "feat(topology): trace caller 经 owner_name 别名解析，消除
 - Modify: `services/trace_topology_syncer.go:486-524`
 - Test: `services/trace_topology_syncer_alias_test.go`
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: 写失败测试**（**未落地**：`trace_topology_syncer_alias_test.go` 不存在，`TestParseK8sFQDN_*` / `TestExtractPodNameFromAddress_*` 均未编写。现有 `TestParsePeerServiceName_FQDN*` / `TestResolvePeer_FQDNKeepsParsedNS` 经 `parsePeerServiceName` 间接覆盖了 FQDN 解析，但缺直接单测）
 
 `services/trace_topology_syncer_alias_test.go` 追加：
 
@@ -444,12 +446,12 @@ func TestExtractPodNameFromAddress_Service(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] **Step 2: 运行确认失败**（依赖 Step 1 的测试，尚未编写）
 
 Run: `go test ./services/ -run 'TestParseK8sFQDN|TestExtractPodName' -count=1 -v`
 Expected: 编译失败（函数未定义）。
 
-- [ ] **Step 3: 让 resolvePeerFromAddress 改用 parseK8sFQDN**
+- [x] **Step 3: 让 resolvePeerFromAddress 改用 parseK8sFQDN**（已落地：`services/trace_topology_syncer.go:520` 末尾 `return parseK8sFQDN(host)`，knownServices/IP 逻辑保留）
 
 `resolvePeerFromAddress` 现第 486-524 行，保留 knownServices/IP 逻辑，把末尾两段式解析替换为：
 
@@ -482,12 +484,12 @@ func (s *TraceTopologySyncer) resolvePeerFromAddress(rawPeer string) (appName, n
 }
 ```
 
-- [ ] **Step 4: 运行全部相关测试**
+- [x] **Step 4: 运行全部相关测试**（2026-11 复核：`TestParsePeerServiceName_*` 与 `TestResolvePeer_*` 全 PASS；命令中的 `TestParseK8sFQDN|TestExtractPodName` 因 Step 1 未落地而无匹配用例）
 
 Run: `go test ./services/ -run 'TestParsePeerServiceName|TestParseK8sFQDN|TestExtractPodName|TestResolvePeer' -count=1 -v`
 Expected: 既有 `TestParsePeerServiceName_*` 与新增测试全部 PASS（parseK8sFQDN 保持了 legacy 两段式语义）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**（已提交：`8696c8d`；实际未包含 `trace_topology_syncer_alias_test.go`）
 
 ```bash
 git add services/trace_topology_syncer.go services/trace_topology_syncer_alias_test.go
@@ -502,7 +504,7 @@ git commit -m "fix(topology): 修正 resolvePeerFromAddress 对 K8s FQDN/STS pod
 - Modify: `services/trace_topology_syncer.go`（businessAppRef、resolveCaller/resolvePeer、过滤逻辑、lookupOrInsertBusinessApp 签名）
 - Test: `services/trace_topology_syncer_test.go:374-391`（更新）
 
-- [ ] **Step 1: businessAppRef 增加 podName 字段**
+- [x] **Step 1: businessAppRef 增加 podName 字段**（已落地：`services/trace_topology_syncer.go:61`）
 
 `services/trace_topology_syncer.go:58-62`：
 
@@ -515,7 +517,7 @@ type businessAppRef struct {
 }
 ```
 
-- [ ] **Step 2: resolvePeerBusinessApp 提取 callee pod 名**
+- [x] **Step 2: resolvePeerBusinessApp 提取 callee pod 名**（已落地：`services/trace_topology_syncer.go:493` 用 `extractPodNameFromAddress(rawPeer)` 填 `podName`）
 
 `resolvePeerBusinessApp` 返回处（现第 483 行）加 `podName: extractPodNameFromAddress(rawPeer)`：
 
@@ -525,7 +527,7 @@ type businessAppRef struct {
 
 （resolveCaller 的 podName 已在 Task 3 Step 5 里通过 `extractResourceAttr(rs, "k8s.pod.name")` 填充。）
 
-- [ ] **Step 3: 改过滤逻辑**
+- [x] **Step 3: 改过滤逻辑**（已落地：`services/trace_topology_syncer.go:342` 改为 `caller.uid == callee.uid && caller.podName != "" && caller.podName == callee.podName`，同 app 不同 pod 的副本互连得以保留）
 
 `processSpanRecord` 现第 342-348 行：
 
@@ -542,7 +544,7 @@ type businessAppRef struct {
 
 （语义变化：同 workload 不同副本（kafka-0→kafka-1）不再被丢，产出 self-loop 边；只有确认同 pod 才丢。）
 
-- [ ] **Step 4: lookupOrInsertBusinessApp 增加 ownerName 参数**
+- [ ] **Step 4: lookupOrInsertBusinessApp 增加 ownerName 参数**（**未落地**：`services/trace_topology_syncer.go:523` 仍为两参签名 `(appName, namespace string)`，自动建点的 INSERT 未补 `owner_name`/`owner_kind` 两列。影响：trace 自动建出的顶点 owner 为空，即文末「增量」章节记录的 86 个幽灵点成因之一。下面的三参改造仍是待办）
 
 签名从 `(appName, namespace string)` 改为 `(appName, namespace, ownerName string)`；自动建点的 INSERT 补两列：
 
@@ -564,7 +566,7 @@ type businessAppRef struct {
 
 （caller 路径传 owner 名，peer 路径传空串。所有既有 `lookupOrInsertBusinessApp("x","y")` 调用点补第三参。）
 
-- [ ] **Step 5: 更新 self-call 测试**
+- [x] **Step 5: 更新 self-call 测试**（已落地：`services/trace_topology_syncer_test.go` 的 `TestProcessSpan_SamePodSelfCallFiltered`（同 pod 才滤）+ 新增 `TestProcessSpan_CrossReplicaSameWorkloadKept`（跨副本保留），复核全绿）
 
 `services/trace_topology_syncer_test.go:374-391` 的 `TestProcessSpan_SelfCallFiltered` 改为「同 pod 才滤」，并新增「跨副本保留」用例：
 
@@ -610,12 +612,12 @@ func TestProcessSpan_CrossReplicaSameWorkloadKept(t *testing.T) {
 }
 ```
 
-- [ ] **Step 6: 全量测试 + race**
+- [x] **Step 6: 全量测试 + race**（2026-11 复核：`go test -race -count=1 ./services/ ./services/auth/... ./config/...` 三个包全 ok）
 
 Run: `go test -race -count=1 ./services/ ./services/auth/... ./config/... 2>&1 | tail -20`
 Expected: 全 PASS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**（已提交：`13a6c76`）
 
 ```bash
 git add services/trace_topology_syncer.go services/trace_topology_syncer_test.go
@@ -631,7 +633,7 @@ git commit -m "fix(topology): self-call 过滤收紧为同 pod 才丢，保留�
 
 合并策略：找出 `app_name` 等于另一顶点 `owner_name`（且 namespace 相同）的重复对，把「无业务属性的 trace 自动建顶点」上的 CallsApp/BelongsToApp 边迁到「BLS 建的 canonical 顶点」上，再删除重复顶点。幂等，可反复跑。
 
-- [ ] **Step 1: 写维护命令骨架**
+- [x] **Step 1: 写维护命令骨架**（已落地：`cmd/mergebizapp/main.go`，含 `-addr`/`-user`/`-pass`/`-space`/`-dry-run` flag）
 
 `cmd/mergebizapp/main.go`（复用 resetadmin 的单文件 cmd 模式，用 nebula-go 直连，读 `--addr`/`--user`/`--pass`）：
 
@@ -673,7 +675,7 @@ func main() {
 
 （`hostOf`/`portOf` 用 `strings.Split` 解析 addr，`net.ParseIP` 兜底——具体实现照 resetadmin 的既有写法。）
 
-- [ ] **Step 2: 合并核心逻辑**
+- [x] **Step 2: 合并核心逻辑**（已落地：查边→删边→插边→DELETE VERTEX；dry-run 计数缺陷已由 `de4e47d` 修复）
 
 在骨架里补：先查所有「owner_name 非空且 app_name != owner_name」的 canonical 顶点；再对每个 canonical 顶点查同 namespace 下 `app_name == owner_name` 的重复顶点；把重复顶点上的入/出 CallsApp、BelongsToApp 边迁到 canonical（DELETE EDGE + INSERT EDGE），最后 DELETE VERTEX 重复顶点。
 
@@ -688,14 +690,14 @@ func main() {
 
 > 注：Nebula 无「改边端点」语句，迁移需「查出边 → DELETE EDGE → INSERT EDGE 到 canonical」。本步给出 SQL 骨架与执行顺序，落地时用 nebula-go 的 Execute 逐条执行并打日志（每迁移一个重复点打 Info）。合并只处理「app_name == 另一顶点 owner_name」的明确重复，不碰未知语义的顶点。
 
-- [ ] **Step 3: 编译 + 干跑**
+- [x] **Step 3: 编译 + 干跑**（已干跑：tf001 生产图库识别出 **4 个身份明确、可安全合并**的重复对，详见文末「增量」章节。**真正执行仍待人工确认**——合并是破坏性操作（迁边 + DELETE VERTEX），需先备份）
 
 Run: `go build ./cmd/mergebizapp && go run ./cmd/mergebizapp -addr 10.220.71.198:9669 -pass <nebula-pass> -dry-run`
 Expected: 打印待合并的重复对列表，不写库。
 
 > 建议先加 `-dry-run` 只打印不动库，人工核对后再真正执行（生产图库，务必先备份/确认）。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**（已提交：`65edd33`，计数修复 `de4e47d`）
 
 ```bash
 git add cmd/mergebizapp/main.go

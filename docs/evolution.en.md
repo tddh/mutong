@@ -6,7 +6,7 @@
 
 In this project, I made a very conscious trade-off: **There are almost no complex operation buttons on the Web.**
 
-Although Mutong supports 12 complex remediation operations (scaling, hot updates, HPA, version rollback, etc.), I chose not to build traditional form-based UIs. There are two reasons for this:
+Although Mutong supports 13 complex remediation operations (scaling, hot updates, HPA, version rollback, etc.), I chose not to build traditional form-based UIs. There are two reasons for this:
 
 1. **The Professional Reason**: I believe "API-First" and "Conversational UI" are the future. Instead of forcing users to navigate complex forms and modals, the AI can simply understand intent and execute via API.
 2. **The Brutally Honest Reason**: **My frontend skills are terrible.** As an SRE, I can write Go and nGQL all day, but asking me to build dozens of validated Vue forms and tweak CSS... that's just torture.
@@ -15,6 +15,8 @@ Although Mutong supports 12 complex remediation operations (scaling, hot updates
 I encapsulated all these capabilities as APIs and handed them over to the **CLI (mutongctl)** and **AI Agents**.
 * **Web UI stays minimal**: "minimal" here means **no write-operation forms**, not few pages. The UI does **observation** (Dashboard, Topology, Alerts, Inspection, Retrospective, Resource Table, Status, Clusters), **conversation** (AI Diagnosis chat), and **terminal** as a fallback; every mutation goes through APIs, driven by the CLI or AI Agents.
   > **Correction (2026-09-04)**: the navigation currently exposes 12 entries. **Monitoring, Logs and Tracing** were temporarily hidden on 2026-09-04 (page code kept, only the menu entries collapsed): the monitoring page was too crude and will be rebuilt as an embedded Grafana view; the logs page depends on an Elasticsearch backend and the tracing page on OpenTelemetry, neither of which is wired up. Evidence and follow-ups: `docs/TODO.md`, "前端菜单收敛与监控重建".
+  >
+  > **Implementation update**: hidden entries are no longer wrapped in comment blocks inside the NavBar template (comments survive in dev mode but are dropped by production builds, so behavior was inconsistent). Navigation is now data-driven: the single source of truth is `view/src/components/nav.config.js`, with `NAV_ITEMS` (12 entries: 8 primary + 4 collapsed into "More") and `NAV_HIDDEN` (3 entries, each recording why it was hidden and where the code lives). Restoring an entry only requires moving it back into `NAV_ITEMS` with a `group` — no template changes.
 * **CLI handles the heavy lifting**: Scripts are faster than mouse clicks for senior engineers anyway.
 * **AI as the UX layer**: Users speak natural language, and the AI invokes those backend APIs that I "forgot" to build buttons for.
 
@@ -38,7 +40,7 @@ It turns a frontend weakness into a modern, "AI-Native" architectural advantage.
 **Core Problem**: Automation handled "what to do", but "why it broke" (root cause analysis) still relied heavily on individual tribal knowledge, making MTTR hard to reduce further.
 **Solution**: Implement an AI-driven diagnosis loop.
 * **Hybrid Architecture**: Designed a "Rule-based Fast Path" (low cost, deterministic) + "LLM Deep Analysis" (high flexibility) dual-path system.
-* **MCP Tooling**: Encapsulated 20 operational actions (Topology search, log analysis, metrics check) as tools for LLM autonomous troubleshooting.
+* **MCP Tooling**: Encapsulated operational actions (topology search, log analysis, metrics check) as tools for LLM autonomous troubleshooting. There are now 29 tools in total — 22 diagnosis tools plus 7 execution-class proposal tools (see `services/mcp/server.go` and `services/mcp/exec_tools.go`).
 * **Knowledge Retention**: Introduced pgvector + NebulaGraph hybrid retrieval to vectorize incident retrospectives for future search.
 * **Outcome**: Enhanced troubleshooting efficiency using AI while keeping rule-based fallbacks.
 

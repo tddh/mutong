@@ -20,6 +20,7 @@
 ### ✅ 必须更新文档
 
 - **README.md (核心)**：任何核心功能变动、API 路径变化、技术栈调整，必须优先同步 `README.md` 和 `README.en.md`。
+- **docs/PROJECT_ARCHITECTURE.md (架构)**：架构调整（新增/删除服务、数据流变更）更新分层与关键流程章节；API 路由增删改更新「主要 API 路由组」表。与 `.agents/AGENTS.md` 的要求保持一致。
 - **docs/TODO.md (路线图)**：完成某项 TODO 后，必须将该条目标记为完成，或添加新的 TODO。
 - **CLI 工具**：如果 `mutongctl` 命令参数变更，同步更新 `docs/mutongctl-usage.md`。
 - **图数据库**：NebulaGraph Schema 变更，同步更新 `scripts/schema.ngql` 和 `docs/ngql.md`。

@@ -28,11 +28,6 @@ diagnosis:
     db: 9
     ttl: 1800  # Redis 会话 TTL（秒）；PG 会话定时清理（每小时），保留 720h（30 天）后自动标记过期
 
-# 巡检配置
-inspection:
-  enabled: true
-  cronSpec: "0 */6 * * *"
-
 # Prometheus 指标查询配置
 prometheus:
   enabled: true

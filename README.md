@@ -96,10 +96,11 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 
 ### 5. 自愈执行器
 
-- **支持操作**（12 类，API 参数使用 snake_case）:
+- **支持操作**（13 类，API 参数使用 snake_case，枚举定义见 `models/executor/executor.go`）:
   - `restart_pod`: Pod 优雅重启（先尝试 Eviction API，失败后 fallback 到 Delete）
   - `delete_pod`: 删除 Pod（由 Deployment/StatefulSet/DaemonSet 控制器自动重建）
   - `scale_deployment`: Deployment 副本扩缩容（有 maxReplicas 上限保护）
+  - `rollout_restart`: 滚动重启 Deployment（改写 pod template 注解触发，等价 `kubectl rollout restart`）
   - `create_hpa`: 创建 HPA（Horizontal Pod Autoscaler）
   - `update_hpa`: 更新已有 HPA 配置
   - `update_configmap`: 更新 ConfigMap 数据
@@ -140,8 +141,10 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 
 - **WebSocket K8s 终端**: 基于 WebSocket 的 Kubernetes 容器终端会话
 - **多容器切换**: Pod 内多容器自由切换
-- **会话管理**: 独立会话生命周期管理
+- **会话管理**: 独立会话生命周期管理，连接关闭时回收 K8s exec 流与 goroutine
 - **自适应大小**: 终端 resize 事件自动同步
+- **命名空间准入**: 默认拒绝系统命名空间（`kube-system` / `kube-public` / `kube-node-lease`），其余允许；`terminal.allowedNamespaces` 配置项与 `SetAllowedNamespaces` 注入接口已就绪，但 `cmd/main.go` 尚未接线，配置该项当前不改变行为（见 [架构文档「已知实现缺口」](docs/PROJECT_ARCHITECTURE.md)）。会话建立 / 拒绝与 exec 起止产生审计事件，当前写服务端日志（审计表注入同样待接线）
+- **前端本地打包**: xterm.js 及其 addon 由 Vite 本地打包，不再依赖 CDN
 
 ### 9. 链路追踪
 
@@ -246,7 +249,7 @@ mutongctl config set server https://mutong.example.com  # 配置服务地址
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| 后端语言 | Go | 1.25 |
+| 后端语言 | Go | 1.27 |
 | Web 框架 | Gin | v1.10，路由聚合注册 |
 | 图数据库 | NebulaGraph | v3 客户端，存储资源拓扑 |
 | 关系数据库 | PostgreSQL + pgvector | GORM 驱动，向量语义 + 结构化混合检索 |
@@ -270,8 +273,10 @@ mutongctl config set server https://mutong.example.com  # 配置服务地址
 ```
 mutong/
 ├── cmd/                         # 应用入口
-│   ├── main.go                  #   Web 服务入口
-│   └── mutongctl/               #   CLI 工具 (20 个命令模块)
+│   ├── main.go                  #   Web 服务入口（装配 + 路由 + 中间件）
+│   ├── mutongctl/               #   CLI 工具 (20 个命令模块)
+│   ├── mergebizapp/             #   一次性维护命令：合并重复 BusinessApp 顶点（支持 -dry-run）
+│   └── resetadmin/              #   管理员账号重置工具
 ├── config/                      # 配置加载（viper + 结构体定义）
 ├── configs/                     # 拆分配置（含 .example 模板）
 │   ├── config.core.yaml.example  #   核心配置（数据库、缓存、日志）
@@ -291,7 +296,7 @@ mutong/
 │   │   ├── cmdb_data_silo.yml monitoring_blindspot.yml
 │   │   ├── resource_quota.yml image_audit.yml
 │   └── prompts/                 #   LLM Prompt 模板
-├── controllers/                 # 控制器层（33 个文件，含 oauth2/ 子包）
+├── controllers/                 # 控制器层（34 个 Go 文件：31 实现 + 3 测试，含 oauth2/ 子包）
 ├── services/                    # 服务层
 │   ├── alert/                   #   告警管道: enricher → suppressor → router → notifier
 │   ├── diagnosis/               #   AI 诊断引擎（含混合检索模块）
@@ -317,15 +322,20 @@ mutong/
 │   ├── namespace_mapper.go       #   命名空间-业务映射
 │   ├── user_service.go           #   用户服务
 │   └── role_service.go           #   角色服务
-├── models/                      # 数据模型（按模块分包）
+├── models/                      # 数据模型（按模块分包：alert/audit/diagnosis/executor/inspection/oauth2/retrospective）
 ├── interfaces/                  # 接口定义（依赖反转）
+├── pkg/                         # 可复用基础库
+│   ├── ngql/                    #   nGQL 字符串字面量 sanitizer（注入防护）
+│   └── safe/                    #   goroutine 安全封装（recover + 堆栈）
 ├── view/                        # 前端代码 (Vue 3 + Vite)
-│   └── src/                     #   15 个页面 + 共享组件
+│   └── src/                     #   15 个功能页面 + 2 个认证页面 + 共享组件
 ├── docs/                        # 项目文档
-│   ├── evolution.md              # 项目演进手记与设计思考
+│   ├── PROJECT_ARCHITECTURE.md   # 分层架构、目录职责与关键流程
+│   ├── evolution.md              # 项目演进手记与设计思考（英文版 evolution.en.md）
 │   ├── mutongctl-usage.md        # CLI 工具速查与使用手册
 │   ├── ngql.md                   # NebulaGraph Schema 参考与查询示例
-│   ├── TODO.md                   # 开发路线图与贡献指南
+│   ├── TODO.md                   # 待办事项与竞品差距分析
+│   ├── remediation-plan.md       # 安全与发布工程修复规划
 │   └── images/                   # 界面预览截图
 ├── scripts/                     # 脚本工具
 │   ├── schema.ngql               #   NebulaGraph DDL（just init-nebula 执行）
@@ -333,13 +343,20 @@ mutong/
 │   ├── update_nebula.sh          #   NebulaGraph 更新脚本
 │   ├── init_es_template.sh       #   Elasticsearch 索引模板初始化
 │   └── smoke_test.sh             #   冒烟测试
-├── deploy/                      # 部署配置 (Beyla + OTel Collector Helm charts 及 values)
+├── deploy/                      # 部署配置 (Beyla + OTel Collector Helm charts 及 values、entrypoint.sh)
 ├── artifacts/                   # 构建产物输出目录
 ├── agent.yaml.example           # SkyWalking 代理配置模板
 ├── Justfile                     # 构建命令
-├── go.mod                       # Go 模块定义
+├── Dockerfile                   # 多阶段构建（非 root 运行，HEALTHCHECK /healthz）
+├── docker-compose.yml           # 本地一键起依赖 + 应用
+├── ROADMAP.md                   # 版本路线图
+├── CONTRIBUTING.md              # 贡献指南
+├── SECURITY.md                  # 安全政策与漏洞报告流程
+├── go.mod                       # Go 模块定义（go 1.27.0）
 └── LICENSE                      # MIT 许可证
 ```
+
+分层职责与关键流程详见 [项目架构文档](docs/PROJECT_ARCHITECTURE.md)。
 
 ## 配置说明
 
@@ -483,6 +500,9 @@ executor:
     delete_pod:
       risk: high
       autoThreshold: 1.0
+    rollout_restart:
+      risk: low
+      autoThreshold: 0.7
     rollout_undo:
       risk: high
       autoThreshold: 1.0
@@ -514,22 +534,29 @@ executor:
 
 ### 环境变量
 
-以下环境变量可覆盖配置文件对应字段：
+以下环境变量可覆盖配置文件对应字段（读取位置见 `cmd/main.go`、`config/config.go`）：
 
 | 环境变量 | 说明 | 默认值 |
 |----------|------|--------|
-| `MUTONG_ADDR` | HTTP 服务监听地址 | 0.0.0.0 |
-| `MUTONG_PORT` | HTTP 服务端口 | 8888 |
+| `MUTONG_ADDR` | HTTP 服务监听地址，覆盖 `server.address` | 取配置文件（0.0.0.0） |
+| `MUTONG_PORT` | HTTP 服务端口，覆盖 `server.port` | 取配置文件（8888） |
 | `MUTONG_MAX_PROCS` | GOMAXPROCS | CPU 核数 |
-| `MUTONG_ALLOWED_ORIGINS` | CORS 允许域名 | - |
+| `MUTONG_ALLOWED_ORIGINS` | CORS 允许域名，逗号分隔；`*` 被忽略 | 空（拒绝跨域） |
 | `MUTONG_DB_USER` | PostgreSQL 用户名 | - |
 | `MUTONG_DB_PASSWORD` | PostgreSQL 密码 | - |
 | `MUTONG_NEBULA_USER` | Nebula 用户名 | - |
 | `MUTONG_NEBULA_PASS` | Nebula 密码 | - |
 | `MUTONG_LLM_API_KEY` | LLM API Key | - |
+| `MUTONG_EMBEDDING_API_KEY` | Embedding API Key（不设置时复用 LLM Key） | - |
 | `MUTONG_REDIS_ADDR` | Redis 地址 | - |
 | `MUTONG_REDIS_PASSWORD` | Redis 密码 | - |
 | `MUTONG_REDIS_DB` | Redis 数据库编号 | - |
+| `MUTONG_TAVILY_KEY` | Tavily 外部搜索 API Key | - |
+| `MUTONG_GITHUB_TOKEN` | GitHub Issues 搜索 Token（可选） | - |
+| `MUTONG_INIT_ADMIN_PASSWORD` | 首次启动创建 `admin` 账号的密码；账号已存在时不重置 | 不设置则不创建管理员 |
+| `MUTONG_ISSUER_URL` | OAuth2 / OIDC 发行者 URL | - |
+
+安全相关环境变量（`MUTONG_SESSION_SECRET`、`MUTONG_ADMIN_KEY`、`MUTONG_WEBHOOK_SECRET`、`MUTONG_TRUSTED_PROXIES` 等）见下方 [安全配置](#安全配置)。
 
 ## 安装与运行
 
@@ -539,7 +566,7 @@ executor:
 
 | 组件 | 版本 | 用途 | 安装 |
 |------|------|------|------|
-| Go | 1.25+ | 后端编译运行 | [go.dev/dl](https://go.dev/dl/) |
+| Go | 1.27 | 后端编译运行（`go.mod` 声明 `go 1.27.0`） | [go.dev/dl](https://go.dev/dl/) |
 | Bun | 1.x+ | 前端包管理 | [bun.sh](https://bun.sh/) |
 | NebulaGraph | 3.8+ | 图数据库 — 存储 K8s 资源拓扑关系 | [nebula-graph.io](https://www.nebula-graph.io/download) |
 | Kafka（或 Redpanda） | Kafka 2.x+ / Redpanda v24+ | 消息队列 — K8s 资源变更事件异步传输 | [kafka.apache.org](https://kafka.apache.org/downloads) |
@@ -575,23 +602,39 @@ for f in configs/*.yaml.example; do cp "$f" "${f%.example}"; done
 cp agent.yaml.example agent.yaml
 # 编辑 configs/*.yaml 中的数据库连接、K8s 集群等配置
 
-# 3. 初始化数据库
+# 3. 注入密钥（生产必做，详见「安全配置」章节）
+export MUTONG_SESSION_SECRET="$(openssl rand -hex 32)"
+export MUTONG_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+export MUTONG_INIT_ADMIN_PASSWORD='<强密码>'
+
+# 4. 初始化数据库
 just init-nebula
 # 执行 scripts/init_postgres.sh 初始化 PostgreSQL 表结构
 
-# 4. 编译运行
-just build-mac       # macOS 本地开发
-just run
+# 5. 编译运行
+just build-mac       # 产出 darwin 二进制（macOS 本地开发）
+just run             # 按当前平台自动选择 artifacts/ 下的二进制，以 -c configs/ 启动
 
 # 调试模式
 just run-debug
 ```
 
+> `just run` / `just run-debug` / `just run-config` 按宿主机平台自动选择 `artifacts/mutong-<os>-<arch>`。macOS (Apple Silicon) 用 `just build-mac`，Linux x86_64 用 `just build`，其他平台用 `just build-host` 产出对应二进制。`just build` 只做编译与配置同步，不再内嵌 `go mod tidy` / `gofmt`；依赖整理与格式化请显式执行 `just tidy` 与 `just fmt`。
+
 ### Docker 部署
 
 > **前置条件**：Docker Engine 20.10+ 和 Docker Compose v2+
 
+根目录 `docker-compose.yml` 的数据库口令全部改为必填变量，未设置时 `docker compose` 直接报错而不是使用弱口令：
+
 ```bash
+export POSTGRES_PASSWORD='<数据库密码>'
+export NEBULA_PASSWORD='<Nebula 密码>'
+export MUTONG_REDIS_PASSWORD='<Redis 密码>'
+# 应用侧安全密钥（见「安全配置」章节）
+export MUTONG_SESSION_SECRET="$(openssl rand -hex 32)"
+export MUTONG_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+
 docker compose up -d
 ```
 
@@ -600,12 +643,16 @@ docker compose up -d
 | 服务 | 镜像 | 用途 |
 |------|------|------|
 | PostgreSQL 16 + pgvector | `pgvector/pgvector:pg16` | 关系数据 & 向量检索 |
-| NebulaGraph | `vesoft/nebula-graphd:v3.8.0` | 图数据库拓扑存储 |
-| Redpanda (Kafka 兼容) | `vectorized/redpanda:v24.2.5` | 消息队列 |
-| Redis | `redis:7-alpine` | 会话缓存 |
-| Mutong | 本地构建 | 主应用 |
+| NebulaGraph metad | `vesoft/nebula-metad:v3.8.0` | 图数据库元数据服务 |
+| NebulaGraph storaged | `vesoft/nebula-storaged:v3.8.0` | 图数据库存储服务 |
+| NebulaGraph graphd | `vesoft/nebula-graphd:v3.8.0` | 图数据库查询服务（9669） |
+| Redpanda (Kafka 兼容) | `vectorized/redpanda:v24.2.5` | 消息队列（9092） |
+| Redis | `redis:7-alpine` | 会话缓存（6379） |
+| Mutong | 本地构建 | 主应用（8888） |
 
-详见 `docker-compose.yml`。注意：部署到生产环境前请修改各服务默认密码。
+NebulaGraph 三个组件缺一不可：只起 graphd 而没有 metad/storaged 时无法创建 space，`just init-nebula` 会失败。各服务端口映射到宿主机，便于本地调试；生产环境请按需收敛暴露面。
+
+详见 `docker-compose.yml`。注意：部署到生产环境前请修改各服务默认密码，并确认镜像内只包含 `*.example` 配置模板（见 `.dockerignore`）。
 
 ### 部署业务拓扑组件
 
@@ -714,6 +761,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | POST | `/api/v1/executor/execute` | 执行自愈操作 |
 | POST | `/api/v1/executor/toggle` | 切换自动 / 手动模式 |
 | POST | `/api/v1/executor/diagnose-and-execute` | 诊断并自动执行 |
+| POST | `/api/v1/executor/audit/{id}/approve` | 批准待审批的执行计划并立即执行（需 admin 门禁） |
 
 ### 日志查询 API
 
@@ -777,12 +825,14 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | GET/POST | `/oauth2/authorize` | OAuth2 授权端点 |
-| POST | `/oauth2/token` | OAuth2 Token 端点（Authorization Code + Refresh Token + Client Credentials） |
+| POST | `/oauth2/token` | OAuth2 Token 端点（Authorization Code + PKCE、Refresh Token、Client Credentials、Device Code；别名 `POST /oauth/v2/token`） |
 | POST | `/oauth2/introspect` | Token 内省端点 |
 | POST | `/oauth2/revoke` | Token 撤销端点 |
-| POST | `/oauth2/device/auth` | 设备授权请求 |
-| GET/POST | `/device` | 设备授权确认页面 |
+| POST | `/oauth2/device/auth` | 设备授权请求（RFC 8628；别名 `POST /oauth/v2/device_authorization`），返回 `device_code` / 8 位 `user_code` / `verification_uri`，有效期 600s、轮询间隔 5s |
+| GET/POST | `/device` | 设备授权确认页面（需先登录；批准把授权绑定到批准用户） |
 | GET | `/.well-known/openid-configuration` | OIDC Discovery 元数据 |
+
+> **设备流换 token 的当前行为**：客户端以 `grant_type=urn:ietf:params:oauth:grant-type:device_code` 轮询 `/oauth2/token`，`client_id` 必须与发起授权时一致，device code 单次原子消费（`authorized → completed`）。成功后**签发真实持久化 PAT**（`mtp_` 前缀，绑定批准用户与授权 scope，有效期 1 天 / `expires_in=86400`），走与其他 token 完全相同的校验与撤销路径，**不返回 `refresh_token`**。`verification_uri` 取自 `MUTONG_ISSUER_URL`，不取请求 Origin 头。
 
 ### 其他 API
 
@@ -805,31 +855,44 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | GET | `/api/v1/business-topology/graph` | 业务拓扑图数据 |
 | GET | `/api/v1/business-topology/calls` | 获取应用间调用关系 |
 | GET | `/api/v1/system/status` | 系统整体状态 |
-| GET | `/metrics` | Prometheus 指标端点 |
+| GET | `/healthz` | 无鉴权存活探针，返回 `200 ok`（K8s / Docker 健康检查用） |
+| GET | `/metrics` | Prometheus 指标端点（默认需鉴权，`MUTONG_METRICS_PUBLIC=true` 放行） |
 
 ## 前端页面
 
-共 15 个独立页面，均支持响应式布局。所有页面顶部配备统一的粘性 **NavBar 导航栏**：
+共 15 个功能页面，均支持响应式布局，顶部配备统一的粘性 **NavBar 导航栏**。导航为**数据驱动**，单一真源是 `view/src/components/nav.config.js`：
 
-> 仪表盘 | 拓扑 | 告警 | AI 诊断 | 巡检 | 巡检历史 | 复盘分析 | 历史复盘 | 资源列表 | 状态 | 日志 | 监控 | 终端 | 追踪 | 集群
->
-> 除上述 15 个功能页面外，项目还包含 2 个认证相关页面：`login.html`（平台登录）和 `consent.html`（OAuth 授权确认），它们不使用全局 NavBar 导航栏。
+- **`NAV_ITEMS`（12 个可见入口）**：8 个主入口 + 4 个收进「更多」菜单的次级入口（1280px 宽度下全平铺会溢出）
+  > 主入口：仪表盘 | 拓扑 | 告警 | AI 诊断 | 巡检 | 状态 | 终端 | 集群
+  > 更多：巡检历史 | 复盘分析 | 历史复盘 | 资源表格
+- **`NAV_HIDDEN`（3 个已收起入口）**：日志 / 监控 / 追踪。**页面代码完整保留**，每项带收起原因与代码位置；恢复只需把该项移回 `NAV_ITEMS` 并指定 `group`，无需改模板。
+  | 入口 | 收起原因 |
+  |------|----------|
+  | 日志 | 依赖 Elasticsearch，测试环境 `localhost:9200` 无监听；客户端不探测连通性，路由仍在但查询必失败 |
+  | 监控 | 页面过于粗糙，待重建为 Grafana 内嵌（方案见 `docs/TODO.md`） |
+  | 追踪 | `config.infra.yaml` 中 `opentelemetry.enabled=false`，TraceController 未挂载 |
+
+> 早期版本靠在 NavBar 模板里包注释块来隐藏入口，注释在开发模式保留、生产构建被丢弃，行为不一致；改为数据驱动后隐藏项显式落在 `NAV_HIDDEN`，不再依赖注释语义。
+
+除上述 15 个功能页面外，项目还包含 2 个认证相关页面：`login.html`（平台登录）和 `consent.html`（OAuth 授权确认），它们不使用全局 NavBar 导航栏。
+
+下表列出全部 15 个功能页面（含 3 个当前无菜单入口的页面）：
 
 | 页面 | 入口文件 | 功能 |
 |------|----------|------|
-| 仪表盘 | `view/src/index.html` | StatCards 6 项核心指标（资源总数/节点数/Pod数/活跃告警/被抑制告警/巡检异常）+ 快速链接 |
+| 仪表盘 | `view/src/index.html` | StatCards 6 项核心指标（资源总数/节点数/Pod数/活跃告警/被抑制告警/巡检异常）+ 快速链接；接口失败显示错误态，不再回落假数据 |
 | 拓扑图 | `view/src/topology/index.html` | force-graph 力导向图，物理/业务双视图，左侧边栏筛选，右侧详情面板（指标徽章/关联资源） |
 | 资源列表 | `view/src/resource-table.html` | 表格分页（500条/页），按 Kind 着色，支持关键词搜索（300ms 防抖）+ Terminal 跳转 |
 | 告警管理 | `view/src/alerts/index.html` | 聚合告警展开/折叠，按业务应用/团队/关键度筛选，右侧抽屉双选项卡（基本信息 + AI 诊断） |
 | AI 诊断 | `view/src/diagnosis/index.html` | 对话式 Markdown 流式渲染（30ms 增量缓冲），工具调用浮动面板（pulse 动画 + 自动消失），侧栏会话历史管理 + LLM 摘要标题，新建/续接/删除会话，分层超时（总 300s / 首 token 15s / 空闲 60s），流中断可重试 |
-| 巡检报告 | `view/src/inspection/index.html` | 手动触发巡检，表格展示各规则检查结果（级别/规则/资源/建议），5 类内置规则 |
+| 巡检报告 | `view/src/inspection/index.html` | 手动触发巡检，表格展示各规则检查结果（级别/规则/资源/建议），6 类内置规则 |
 | 巡检历史 | `view/src/inspection-history/index.html` | 历史报告筛选、详情查看、报告对比、趋势分析（7/14/30/60/90 天） |
 | 复盘分析 | `view/src/retrospective/index.html` | 输入指纹生成复盘：事件时间线 + 因果 DAG + 业务拓扑 + 影响评估 + 指标快照 + 关键日志 + 改进项看板 |
 | 复盘历史 | `view/src/retrospective-history/index.html` | 历史报告筛选、详情查看、人工编辑修正（UPSERT）、Markdown 导出 |
-| 日志查询 | `view/src/logs/index.html` | ES 日志检索，7 个筛选器（namespace/pod/container/level/keyword/since/tail），按级别着色 |
-| 监控面板 | `view/src/monitoring/index.html` | 左侧资源选择器 → 右侧指标卡片网格（CPU/内存/网络/重启），8 类 Prometheus 指标 |
+| 日志查询 | `view/src/logs/index.html` | ES 日志检索，7 个筛选器（namespace/pod/container/level/keyword/since/tail），按级别着色（菜单已收起） |
+| 监控面板 | `view/src/monitoring/index.html` | 左侧资源选择器 → 右侧指标卡片网格（CPU/内存/网络/重启），8 类 Prometheus 指标（菜单已收起） |
 | Web 终端 | `view/src/terminal/index.html` | xterm.js 5.5，5 步连接流程，自适应 resize，URL 参数预填充 |
-| 链路追踪 | `view/src/trace/index.html` | SkyWalking，按服务/操作/TraceID 查询，Span 瀑布图展示 |
+| 链路追踪 | `view/src/trace/index.html` | SkyWalking，按服务/操作/TraceID 查询，Span 瀑布图展示（菜单已收起） |
 | 集群管理 | `view/src/clusters/index.html` | 集群列表 + 健康检查 + 统计弹窗，30s 自动刷新 |
 | 系统状态 | `view/src/status/index.html` | 5 张状态卡片（LLM/抑制/处理指标/诊断统计/自愈执行器），30s 自动刷新 |
 
@@ -839,10 +902,11 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 
 | 命令 | 说明 |
 |------|------|
-| `just build` | 编译 Linux amd64 + macOS arm64 二进制 |
+| `just build` | 编译 Linux amd64 + macOS arm64 二进制（不改写 go.mod / 不做格式化） |
+| `just build-host` | 仅编译宿主机平台二进制（`just run` 使用的产物） |
 | `just build-mac` | 仅编译 macOS arm64（本地开发） |
-| `just build-skywalking` | 带 SkyWalking 代理编译 |
-| `just run` | 运行项目（artifacts 目录下） |
+| `just build-skywalking` | 带 SkyWalking 代理编译（Linux amd64 + arm64） |
+| `just run` | 运行宿主机平台产物（`-c configs/` 目录模式） |
 | `just run-debug` | 调试模式运行（log-level=debug） |
 | `just run-config <file>` | 指定配置文件运行 |
 | `just dev-ui` | 前端开发模式（热重载） |
@@ -852,7 +916,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | `just test-cover` | 运行测试并生成覆盖率报告 |
 | `just test-module <module>` | 运行指定模块测试 |
 | `just test-alert` | 运行告警系统 API 测试 |
-| `just test-ui` | 前端测试 |
+| `just test-ui` | 前端测试（vitest） |
 | `just bench` | 基准测试 |
 | `just smoke-test` | 运行动态冒烟测试 |
 | `just init-nebula` | 初始化 Nebula Graph 空间与 Schema |
@@ -860,11 +924,12 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | `just init-es-template` | 初始化 Elasticsearch 索引模板 |
 | `just clean` | 清理构建产物 |
 | `just fmt` | 格式化 Go 代码（gofmt） |
+| `just tidy` | 整理依赖（go mod tidy，独立于 build） |
 | `just lint` | 静态代码检查（go vet） |
 | `just swagger` | 生成 Swagger API 文档 |
 | `just all` | 一键流程：fmt + test + build |
 | `just full-build` | 后端 + 前端完整构建 |
-| `just build-cli` | 编译 mutongctl（linux + darwin 双平台） |
+| `just build-cli` | 编译 mutongctl（linux amd64 + darwin arm64）并同步 OpenCode Skill |
 | `just build-cli-mac` | 仅编译 macOS arm64 版 mutongctl |
 | `just test-cli` | 运行 CLI 单元测试 |
 | `just all-cli` | CLI 测试 + 构建 |
@@ -950,57 +1015,181 @@ suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
 **Q: 系统响应缓慢**  
 调整 `configs/config.core.yaml` 中 BigCache 的 `hardMaxCacheSize`（建议 4096 MB）和 `shards`（建议 256）。定期执行 Nebula 清理（`nebulaCleanup.enabled: true`，`retentionDays: 7`）。PostgreSQL 连接池建议保持 `pool: 100`。
 
-## 🔒 安全与合规 / Security
+## 安全
 
-平台在设计时充分考虑了运维场景的安全需求：
+平台按「默认拒绝 + 服务端权威 + 全程审计」三条原则设计，主要控制如下（均可在代码中核对）：
 
-- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
-- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+### 认证与授权
 
-## 🔒 安全 / Security
+- **默认拒绝鉴权**：`RequireAuthMiddleware` 不再按 `/api/` 前缀推断，除精确白名单（登录、验证码、OIDC 回调、告警入口、OAuth2 协议端点、`/view/` 静态资源、`/healthz`）外一律要求已验证身份（`controllers/auth_middleware.go`）。
+- **四种身份来源**：PAT/SAT（`mtp_`/`mts_` 前缀，SHA-256 哈希查库）、OIDC access token、本地 OAuth2 access token（fosite 内省）、会话 Cookie。Cookie 只接受 HMAC 验签通过的 token，**不存在「cookie 值即 UUID」的回退分支**。
+- **密码与会话**：Argon2id 密码哈希；OAuth2 / OIDC 授权码流程带 PKCE；会话 Cookie 显式 `SameSite=Lax` + `HttpOnly`，`Secure` 依据 TLS / `X-Forwarded-Proto` / `MUTONG_COOKIE_SECURE`；登录接口带 IP 限流与验证码。
+- **Casbin RBAC**：`admin` / `operator` / `viewer` 三角色，策略按用户 UUID 绑定，登录时同步角色。终端 WebSocket、执行器、MCP 工具调用即使使用 GET 也按 `execute` 动作鉴权（`controllers/casbin_middleware.go`）。支持 `enforce` / `shadow` / `off` 三种模式。
+- **危险操作二次门禁**：执行器写操作与审批额外校验 `X-Admin-Key`；未配置 `MUTONG_ADMIN_KEY` 时回退为要求 `admin` 角色，密钥比较使用常量时间算法。
 
-平台在设计时充分考虑了运维场景的安全需求：
+### 数据与输入
 
-- **认证**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名。登录自带防爆破与限流。
-- **数据**: PAT/SAT Token 经 SHA-256 哈希存储；所有 nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作**: 全量自愈操作带风险分级与审计日志，高危操作强制拦截或需审批。
+- **凭据存储**：PAT/SAT 只存 SHA-256 哈希，不可逆；敏感配置一律支持环境变量覆盖。
+- **注入防护**：nGQL 字符串字面量统一经 `pkg/ngql` sanitizer 处理；PromQL 标签值转义后再拼接。
+- **敏感数据脱敏**：Secret 的 `data` / `stringData` 在资源详情与图谱接口返回前删除（`services/getResource.go`）。
+- **XSS 防护**：`/device` 页面 `html.EscapeString`；诊断 Markdown 经 `marked.parse` 后由 DOMPurify 清洗。
+- **外部搜索脱敏**：出站查询先经 PII 脱敏 + 搜索词提取 + 高 PII 阻断，入站结果做 prompt injection 过滤，调用元数据写审计（`services/diagnosis/sanitizer.go`、`services/mcp/search_tools.go`）。
 
-## 🔒 安全与安全 / Security
+### 告警入口
 
-平台在设计时充分考虑了运维场景的安全需求：
+- **Webhook 签名**：`/api/v1/alerts/webhook` 强制 HMAC-SHA256 签名 + 时间戳窗口（±300s）+ 重放拒绝，body 上限 1MB。详见 [安全配置](#安全配置)。
+- **外部告警源**：`/api/v1/alerts/external/:source` 需要 `X-Alert-Token`，或来源 IP 命中 `MUTONG_WEBHOOK_TRUSTED_IPS`；两者都未配置时直接拒绝。
+- **可信代理**：默认只信任本机回环，避免 `X-Forwarded-For` 伪造。
 
-- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
-- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+### 操作与执行
 
-## 🔒 安全与安全 / Security
+- **风险分级**：13 类自愈操作均带 Low / Medium / High 风险等级与阈值，全量写审计日志。
+- **LLM 不可越权**：模型输出的 `risk` / `confidence` 不作为执行依据，`auto_fixable` 恒为 false；MCP 提案组工具只生成待审批记录，**任何情况下都不自动执行**。
+- **执行后验证与回滚**：可回滚动作验证失败时自动恢复「最近已知健康版本」，其余标记待人工介入。
+- **终端隔离**：namespace 准入默认拒绝系统命名空间（`terminal.allowedNamespaces` 尚未在启动时注入，见上文「Web 终端」）+ 会话审计事件；会话关闭时回收 K8s exec 流与 goroutine。
 
-平台充分考虑了运维场景的安全需求：
-- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
-- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+### 暴露面收敛
 
-## 🔒 安全 / Security
+- Swagger UI 默认关闭（`server.enableSwagger`）；`/metrics` 默认需要鉴权（`MUTONG_METRICS_PUBLIC=true` 才放行）。
+- CORS 默认拒绝跨域，`MUTONG_ALLOWED_ORIGINS` 中的 `*` 被忽略。
+- 静态资源只服务构建产物目录（`artifacts/view` 或 `view/dist`），不暴露 `view/` 源码树。
+- 容器以非 root 用户 `mutong` 运行，镜像只包含 `*.example` 配置模板。
 
-平台充分考虑了运维场景的安全需求：
-- **认证**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与防爆破。
-- **数据**: PAT/SAT Token 经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+完整安全政策与漏洞报告流程见 [SECURITY.md](SECURITY.md)。
 
-## 🔒 安全 / Security
+## 安全配置
 
-平台充分考虑了运维场景的安全需求：
-- **认证安全**: Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名。登录自带限流与防爆破。
-- **数据安全**: PAT/SAT Token 经 SHA-256 哈希存储；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需审批。
+生产部署前必须确认下列配置项。变量名与默认值以 `cmd/main.go`、`config/config_base.go`、`controllers/` 现行代码为准。
 
-## 🔒 安全与安全 / Security
+### 安全相关环境变量
 
-平台充分考虑了运维场景的安全需求：
-- **认证安全**: 支持 Argon2id 密码哈希、OAuth2/OIDC (PKCE)、Session Cookie HMAC 签名验证。登录接口自带 IP 限流与验证码防爆破。
-- **数据安全**: PAT/SAT Token 均经 SHA-256 哈希后存储，不可逆；nGQL 查询自动注入防护；敏感配置支持环境变量覆盖。
-- **操作安全**: 自愈执行全量操作均带有风险分级（Low/Medium/High）与审计日志，高危操作强制拦截或需二次确认。
+| 环境变量 | 语义 | 未设置时的行为 |
+|----------|------|----------------|
+| `MUTONG_SESSION_SECRET` | 会话 Cookie 的 HMAC 签名密钥 | 依次回退到 `auth.global_secret` → `MUTONG_SESSION_SECRET_FILE`（默认 `data/session_secret`）中已有的 ≥32 字节密钥 → 自动生成 32 字节密钥并以 0600 持久化。**多副本部署必须显式共享同一密钥**，否则会话只在签发它的副本上有效 |
+| `MUTONG_SESSION_SECRET_FILE` | 会话密钥持久化路径 | `data/session_secret` |
+| `MUTONG_AUTH_SECRET` | OAuth2 Provider 的签名密钥，**按 base64 标准解码后使用**，解码结果需 ≥32 字节（不足则视为未设置） | 使用随机密钥，**重启后所有已签发 token 失效** |
+| `MUTONG_ADMIN_KEY` | 执行器危险操作的 `X-Admin-Key` 共享密钥 | 回退为要求 `admin` 角色（不再无条件放行） |
+| `MUTONG_WEBHOOK_SECRET` | 告警 webhook 的 HMAC-SHA256 密钥 | **拒绝所有 webhook**，除非显式设置 `MUTONG_WEBHOOK_ALLOW_UNSIGNED=true` |
+| `MUTONG_WEBHOOK_ALLOW_UNSIGNED` | 设为 `true` 时允许未签名 webhook（仅限隔离的测试环境） | 空（不允许） |
+| `MUTONG_EXTERNAL_ALERT_TOKEN` | 外部告警源的 `X-Alert-Token` | 回退到 `MUTONG_WEBHOOK_TRUSTED_IPS`；两者都空则拒绝外部告警 |
+| `MUTONG_WEBHOOK_TRUSTED_IPS` | 告警入口的来源 IP/CIDR 白名单，逗号分隔 | 空（不做 IP 限制） |
+| `MUTONG_TRUSTED_PROXIES` | 可信反向代理 CIDR，决定何时采信 `X-Forwarded-*` | `127.0.0.1/32,::1/128`（只信任本机回环） |
+| `MUTONG_ALLOWED_ORIGINS` | CORS 允许域名，逗号分隔 | 空（拒绝跨域）；`*` 被忽略 |
+| `MUTONG_COOKIE_SECURE` | 强制会话 Cookie 带 `Secure` | 依据请求 TLS 或 `X-Forwarded-Proto: https` 自动判定 |
+| `MUTONG_METRICS_PUBLIC` | 设为 `true` 时 `/metrics` 免鉴权（供 Prometheus 抓取） | 空（`/metrics` 需要鉴权） |
+| `MUTONG_RBAC_MODE` | `enforce` / `shadow` / `off`，优先级低于 `auth.rbac_mode` | `enforce` |
+| `MUTONG_INIT_ADMIN_PASSWORD` | 首次启动创建 `admin` 的密码 | 不创建管理员账号（启动日志告警） |
+
+> 生成密钥：`openssl rand -hex 32`。所有密钥都应通过环境变量或密钥管理系统注入，不要写进提交到 Git 的 `configs/*.yaml`。
+
+### 安全相关配置项
+
+| 配置键 | 文件 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `server.enableSwagger` | `config.core.yaml` | `false` | 开启后暴露 `/swagger/*any`，会公开完整 API 面，生产环境建议保持关闭 |
+| `server.rateLimitPerSec` | `config.core.yaml` | `100` | 全局限流（每秒请求数） |
+| `auth.mode` | `config.auth.yaml` | `local` | `local` / `hybrid` / `zitadel` |
+| `auth.global_secret` | `config.auth.yaml` | 空 | 会话密钥的配置来源，优先级低于 `MUTONG_SESSION_SECRET` |
+| `auth.rbac_mode` | `config.auth.yaml` | `enforce` | `enforce` 拦截并返回 403；`shadow` 只记录拒绝日志不拦截（灰度用）；`off` 完全跳过 RBAC（应急开关） |
+| `executor.enabled` | `config.infra.yaml` | `false` | 自愈执行器总开关 |
+| `executor.autoMode` | `config.infra.yaml` | `false` | 自动执行模式；关闭时所有计划进入待审批 |
+| `terminal.allowedNamespaces` | `configs/config.*.yaml` 的 `terminal` 段 | 空（拒绝系统命名空间） | Web 终端可访问的 namespace 白名单。**字段与注入接口已实现，但 `cmd/main.go` 未调用注入，当前生效的始终是默认策略** |
+
+### 最小可用部署示例
+
+```bash
+# 1. 密钥（写入 .envrc.local 或密钥管理系统，不要提交到 Git）
+export MUTONG_SESSION_SECRET="$(openssl rand -hex 32)"
+export MUTONG_AUTH_SECRET="$(openssl rand -hex 32)"
+export MUTONG_ADMIN_KEY="$(openssl rand -hex 32)"
+export MUTONG_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+export MUTONG_INIT_ADMIN_PASSWORD='<强密码>'
+
+# 2. 数据面凭据
+export MUTONG_DB_USER=mutong
+export MUTONG_DB_PASSWORD='<数据库密码>'
+export MUTONG_NEBULA_USER=root
+export MUTONG_NEBULA_PASS='<Nebula 密码>'
+
+# 3. 跨机反向代理时显式声明可信代理网段（否则只信任本机回环）
+export MUTONG_TRUSTED_PROXIES="10.0.0.0/8"
+# 前后端分离部署时才需要 CORS
+export MUTONG_ALLOWED_ORIGINS="https://mutong.example.com"
+
+# 4. 配置与启动
+for f in configs/*.yaml.example; do cp "$f" "${f%.example}"; done
+just init-nebula
+just build-mac && just run
+```
+
+对应的最小配置片段：
+
+```yaml
+# configs/config.core.yaml
+server:
+  address: "0.0.0.0"
+  port: 8888
+  enableSwagger: false      # 生产保持关闭
+  rateLimitPerSec: 100
+
+# configs/config.auth.yaml
+auth:
+  mode: local
+  rbac_mode: enforce        # 灰度期可临时设为 shadow
+  global_secret: ""         # 由 MUTONG_SESSION_SECRET 提供
+
+# configs/config.infra.yaml
+executor:
+  enabled: false            # 确认审批流程后再开启
+  autoMode: false           # 保持人工审批
+```
+
+### 告警 Webhook 签名方案
+
+`POST /api/v1/alerts/webhook` 由 `WebhookSignatureMiddleware` 保护（`controllers/webhook_verifier.go`）：
+
+| 请求头 | 说明 |
+|--------|------|
+| `X-Alertmanager-Signature` | 签名值，小写 hex 编码的 HMAC-SHA256 |
+| `X-Alertmanager-Timestamp` | Unix 秒级时间戳，与服务端时钟偏差不得超过 **300 秒** |
+
+**签名算法**：`HMAC-SHA256(secret, 时间戳头值 + "\n" + 原始请求 body)`，取 hex 小写。时间戳参与签名，因此抓到的签名无法配一个新时间戳重放。
+
+校验顺序：签名头存在 → 时间戳可解析且在窗口内 → body 不超过 **1MB**（超限返回 413）→ HMAC 常量时间比较 → 签名重放检查（同一签名在窗口内只接受一次）。任一环节失败返回 401。
+
+发送端示例：
+
+```bash
+SECRET="$MUTONG_WEBHOOK_SECRET"
+BODY='{"alerts":[{"status":"firing","labels":{"alertname":"Test"}}]}'
+TS=$(date +%s)
+SIG=$(printf '%s\n%s' "$TS" "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+
+curl -X POST http://localhost:8888/api/v1/alerts/webhook \
+  -H "Content-Type: application/json" \
+  -H "X-Alertmanager-Timestamp: $TS" \
+  -H "X-Alertmanager-Signature: $SIG" \
+  -d "$BODY"
+```
+
+> Alertmanager 原生 webhook 不支持自定义签名头，需要在中间加一层签名代理（或在 Alertmanager 与本服务之间部署一个计算签名的转发器）。隔离测试环境可临时设置 `MUTONG_WEBHOOK_ALLOW_UNSIGNED=true`，生产环境不要这样做。
+
+外部告警源 `POST /api/v1/alerts/external/:source` 走另一条路径：携带 `X-Alert-Token: <MUTONG_EXTERNAL_ALERT_TOKEN>`，或让来源 IP 命中 `MUTONG_WEBHOOK_TRUSTED_IPS`。
+
+### 健康检查端点
+
+`GET /healthz` 是**无鉴权**的存活探针，返回 `200` 与纯文本 `ok`。它在鉴权中间件链之前注册（`cmd/main.go` 的 `registerHealthz`），因此不受默认拒绝策略影响，可直接用于 Kubernetes liveness/readiness 探针与 Docker `HEALTHCHECK`。
+
+该端点只表示进程存活，不探测下游依赖。需要组件级健康状态时使用 `GET /api/v1/monitoring/health`（需鉴权）。
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8888
+  initialDelaySeconds: 20
+  periodSeconds: 30
+```
 
 ## 许可证
 

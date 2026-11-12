@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gitee.com/tddh/mutong/interfaces"
@@ -20,31 +21,28 @@ func NewRemediationBridge() *RemediationBridge {
 	return &RemediationBridge{}
 }
 
+// autoExecutableRemediationActions 允许自动执行的动作白名单（含 LLM 旧命名别名）。
+// 仅 Pod 级安全重启；滚动重启、扩缩容、删除、改镜像/配置/资源等一律转人工提案。
+var autoExecutableRemediationActions = map[string]bool{
+	string(exModel.ActionRestartPod): true,
+	"Restart":                        true,
+}
+
 // ShouldExecute decides whether to auto-execute a remediation based on
 // remediation risk and autoMode. This implementation follows a conservative rule:
-// - AutoFixable must be true
-// - 危险动作（改镜像、删除、改配置/Secret、改资源限制）永远不可自动执行，无论风险标注如何
-// - If RiskLevel == "low" or "medium" and autoMode is ON, allow auto-execution
-// - If RiskLevel == "high" or unknown, do not auto-execute
+//   - AutoFixable must be true
+//   - 动作必须在自动执行白名单内（危险动作与滚动重启永远不可自动执行）
+//   - 仅 RiskLevel == "low" 且 autoMode 显式开启时允许自动执行
+//   - medium/high/未知风险一律人工审批；执行器侧还会按配置再次校验风险与阈值，
+//     LLM 自报的风险/置信度不能作为唯一依据
 func (b *RemediationBridge) ShouldExecute(remediation diagModel.RemediationSuggestion, autoMode bool) bool {
-	if !remediation.AutoFixable {
+	if !remediation.AutoFixable || !autoMode {
 		return false
 	}
-	switch remediation.Action {
-	case "update_deployment_image", "delete_pod", "update_configmap", "update_secret",
-		"update_resource_limits", "rollout_undo", "Rollback", "Delete", "UpdateConfig", "UpdateSecret", "AdjustLimits":
-		// 危险动作：只能走人工审批
+	if !autoExecutableRemediationActions[remediation.Action] {
 		return false
 	}
-	switch remediation.RiskLevel {
-	case "low":
-		return autoMode
-	case "medium":
-		return autoMode
-	default:
-		// high or unknown, require manual approval
-		return false
-	}
+	return strings.EqualFold(strings.TrimSpace(remediation.RiskLevel), "low")
 }
 
 // CreatePlanFromDiagnosis converts the diagnosis result into an ExecutionPlan.

@@ -39,11 +39,23 @@ func CasbinMiddleware(logger *zap.Logger) gin.HandlerFunc {
 			return
 		}
 
+		// Public routes carry no identity by design (RequireAuthMiddleware lets
+		// them through); RBAC does not apply to them.
+		if isPublicPath(ctx.Request.URL.Path) {
+			ctx.Next()
+			return
+		}
+
 		uid := GetUserUUID(ctx)
 		if uid == "" {
-			// RequireAuthMiddleware guarantees an identity for non-public paths;
-			// if we get here on a public path there is nothing to enforce.
-			ctx.Next()
+			// A non-public route without a verified user_uuid must never be
+			// allowed through, regardless of shadow/enforce mode: this is a
+			// missing identity, not a policy decision.
+			if logger != nil {
+				logger.Warn("RBAC denied: missing user identity",
+					zap.String("path", ctx.Request.URL.Path))
+			}
+			ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "permission denied"})
 			return
 		}
 

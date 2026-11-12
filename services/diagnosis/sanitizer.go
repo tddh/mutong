@@ -15,10 +15,10 @@ type SanitizerRule struct {
 
 type SanitizerConfig struct {
 	Enabled                 bool            `yaml:"enabled"`
-	HighPIIBlockThreshold   float64         `yaml:"highPIIBlockThreshold"`
-	BannedTerms             []string        `yaml:"bannedTerms"`
-	MaxQueryLength          int             `yaml:"maxQueryLength"`
-	PromptInjectionPatterns []string        `yaml:"promptInjectionPatterns"`
+	HighPIIBlockThreshold   float64         `yaml:"high_pii_block_threshold"`
+	BannedTerms             []string        `yaml:"banned_terms"`
+	MaxQueryLength          int             `yaml:"max_query_length"`
+	PromptInjectionPatterns []string        `yaml:"prompt_injection_patterns"`
 	Rules                   []SanitizerRule `yaml:"rules"`
 }
 

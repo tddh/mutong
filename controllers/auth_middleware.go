@@ -3,6 +3,7 @@ package controllers
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net"
 	"net/http"
 	"os"
@@ -89,6 +90,7 @@ func isTrustedIP(ip string, networks []*net.IPNet) bool {
 // A cookie value is never trusted as a user identifier: only HMAC-verified
 // session tokens are accepted.
 func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator auth.AccessTokenValidator, oauth2Provider fosite.OAuth2Provider) gin.HandlerFunc {
+	guard := auth.NewSessionGuard(db, auth.DefaultSessionGuardTTL)
 	return func(ctx *gin.Context) {
 		authHeader := ctx.GetHeader("Authorization")
 		if strings.HasPrefix(authHeader, "Bearer ") {
@@ -107,18 +109,34 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 				}
 				db.Model(&t).Update("last_used_at", time.Now())
 
+				// Enforce the owning identity's lifecycle: a token whose user or
+				// service account is missing, disabled or soft-deleted must not
+				// authenticate. Never continue with an empty user_uuid.
 				if t.UserID != nil {
 					var user models.User
-					if err := db.First(&user, *t.UserID).Error; err == nil {
-						ctx.Set("user_uuid", user.UUID)
-						ctx.Set("role", user.Role)
-						ctx.Set("username", user.Username)
+					if err := db.First(&user, *t.UserID).Error; err != nil || user.Status != "active" {
+						ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+						return
+					}
+					ctx.Set("user_uuid", user.UUID)
+					ctx.Set("role", user.Role)
+					ctx.Set("username", user.Username)
+				}
+				if t.ServiceAccountID != nil {
+					var sa models.ServiceAccount
+					if err := db.First(&sa, *t.ServiceAccountID).Error; err != nil || sa.Status != "active" {
+						ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+						return
 					}
 				}
 
 				ctx.Set("user_id", t.UserID)
 				ctx.Set("token_type", t.TokenType)
 				ctx.Set("scopes", t.Scopes)
+				if !tokenScopesAllowMethod(t.Scopes, ctx.Request.Method) {
+					ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "token scope is read-only"})
+					return
+				}
 				ctx.Next()
 				return
 			}
@@ -128,7 +146,7 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 				claims, err := validator.ValidateAccessToken(ctx.Request.Context(), token)
 				if err == nil {
 					var user models.User
-					if err := db.Where("zitadel_user_id = ?", claims.Subject).First(&user).Error; err == nil {
+					if err := db.Where("zitadel_user_id = ?", claims.Subject).First(&user).Error; err == nil && user.Status == "active" {
 						ctx.Set("user_id", user.ID)
 						ctx.Set("user_uuid", user.UUID)
 						ctx.Set("role", user.Role)
@@ -151,7 +169,7 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 				if err == nil && ar != nil {
 					subject := ar.GetSession().GetSubject()
 					var user models.User
-					if err := db.Where("uuid = ? OR zitadel_user_id = ?", subject, subject).First(&user).Error; err == nil {
+					if err := db.Where("uuid = ? OR zitadel_user_id = ?", subject, subject).First(&user).Error; err == nil && user.Status == "active" {
 						ctx.Set("user_id", user.ID)
 						ctx.Set("user_uuid", user.UUID)
 						ctx.Set("role", user.Role)
@@ -169,11 +187,13 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 
 		// Path 4: Session cookie (mutong_session). Signature verification is
 		// mandatory; the legacy "cookie is a UUID" fallback was removed because
-		// it allowed session forgery with a publicly readable UUID.
+		// it allowed session forgery with a publicly readable UUID. The guard
+		// additionally revokes sessions whose user was disabled/deleted or whose
+		// role/password changed since issue.
 		if sessions != nil {
 			if cookie, err := ctx.Cookie("mutong_session"); err == nil && cookie != "" {
 				claims, err := sessions.Verify(cookie)
-				if err == nil {
+				if err == nil && guard.Validate(claims) == nil {
 					ctx.Set("user_id", claims.UserID)
 					ctx.Set("user_uuid", claims.UUID)
 					ctx.Set("role", claims.Role)
@@ -183,6 +203,27 @@ func BearerTokenMiddleware(db *gorm.DB, sessions *auth.SessionManager, validator
 		}
 		ctx.Next()
 	}
+}
+
+// tokenScopesAllowMethod applies the minimal PAT/SAT scope semantics: a token
+// whose scopes are all read-only ("read" or "read:*") may not perform write
+// methods. Empty or unparseable scopes grant full access for backward
+// compatibility. Read methods are always allowed.
+func tokenScopesAllowMethod(scopesJSON, method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	var scopes []string
+	if err := json.Unmarshal([]byte(scopesJSON), &scopes); err != nil || len(scopes) == 0 {
+		return true
+	}
+	for _, s := range scopes {
+		if s != "read" && !strings.HasPrefix(s, "read:") {
+			return true // a non-read scope grants write access
+		}
+	}
+	return false // every scope is read-only
 }
 
 // RequireAuthMiddleware applies deny-by-default authentication to every route
@@ -210,7 +251,7 @@ func RequireAuthMiddleware() gin.HandlerFunc {
 func isPublicPath(path string) bool {
 	// Exact public paths.
 	switch path {
-	case "/", "/login", "/oidc/login", "/device", "/api/auth/login", "/api/auth/login-status":
+	case "/", "/login", "/oidc/login", "/device", "/healthz", "/api/auth/login", "/api/auth/login-status":
 		return true
 	}
 

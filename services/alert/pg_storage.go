@@ -263,6 +263,8 @@ func (s *PostgresAlertStorage) modelToProcessedAlert(m AlertModel) (*alert_model
 	}
 	if m.EnrichTags != "" {
 		if err := json.Unmarshal([]byte(m.EnrichTags), &alert.EnrichTags); err != nil {
+			s.logger.Warn("Failed to unmarshal enrich_tags, falling back to empty tags",
+				zap.String("fingerprint", m.Fingerprint), zap.Error(err))
 			alert.EnrichTags = make(map[string]string)
 		}
 	}
@@ -271,13 +273,22 @@ func (s *PostgresAlertStorage) modelToProcessedAlert(m AlertModel) (*alert_model
 	}
 
 	if m.BusinessCtx != "" {
-		_ = json.Unmarshal([]byte(m.BusinessCtx), &alert.BusinessContext)
+		if err := json.Unmarshal([]byte(m.BusinessCtx), &alert.BusinessContext); err != nil {
+			s.logger.Warn("Failed to unmarshal business_ctx",
+				zap.String("fingerprint", m.Fingerprint), zap.Error(err))
+		}
 	}
 	if m.BusinessCalls != "" {
-		_ = json.Unmarshal([]byte(m.BusinessCalls), &alert.BusinessCalls)
+		if err := json.Unmarshal([]byte(m.BusinessCalls), &alert.BusinessCalls); err != nil {
+			s.logger.Warn("Failed to unmarshal business_calls",
+				zap.String("fingerprint", m.Fingerprint), zap.Error(err))
+		}
 	}
 	if m.BusinessImpact != "" {
-		_ = json.Unmarshal([]byte(m.BusinessImpact), &alert.BusinessImpact)
+		if err := json.Unmarshal([]byte(m.BusinessImpact), &alert.BusinessImpact); err != nil {
+			s.logger.Warn("Failed to unmarshal business_impact",
+				zap.String("fingerprint", m.Fingerprint), zap.Error(err))
+		}
 	}
 
 	return alert, nil

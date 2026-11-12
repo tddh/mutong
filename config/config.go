@@ -46,6 +46,21 @@ import (
 	insp_rules "gitee.com/tddh/mutong/services/inspection/rules"
 )
 
+// DefaultOperationAuditTable 操作审计（执行器/终端等危险操作）默认表名
+const DefaultOperationAuditTable = "operation_audit_logs"
+
+// TerminalConf Web 终端访问控制配置
+type TerminalConf struct {
+	// AllowedNamespaces 为空时默认拒绝系统命名空间（kube-system/kube-public/kube-node-lease），
+	// 其余允许；配置后仅允许列表内的命名空间。
+	AllowedNamespaces []string `yaml:"allowedNamespaces" json:"allowedNamespaces,omitempty"`
+}
+
+// GetTerminalConf 返回 Web 终端配置
+func (c *Config) GetTerminalConf() TerminalConf {
+	return c.Terminal
+}
+
 // NewConfig loads configuration from the given path (file or directory),
 // initialises the logger, database, BigCache, Nebula session pool, Kafka
 // clients, and Kubernetes cluster connections, and then validates required
@@ -1481,6 +1496,9 @@ func (c *Config) setKafkaInternalDefaults() {
 
 func (c *Config) setExecutorInternalDefaults() {
 	exec := &c.Executor
+	if exec.AuditLog.OperationTable == "" {
+		exec.AuditLog.OperationTable = DefaultOperationAuditTable
+	}
 	if exec.DefaultNamespace == "" {
 		exec.DefaultNamespace = "default"
 	}

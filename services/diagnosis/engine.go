@@ -106,6 +106,7 @@ func NewEngine(logger interfaces.Logger, graphDB interfaces.GraphDB, alertStorag
 		confidenceThreshold: 0.8,
 		querier:             querier,
 		assessor:            assessor,
+		stopCh:              make(chan struct{}),
 	}
 }
 

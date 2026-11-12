@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 
 	"golang.org/x/oauth2"
@@ -10,6 +11,10 @@ import (
 	"gitee.com/tddh/mutong/services/auth"
 	"github.com/gin-gonic/gin"
 )
+
+// oidcCookiePath is the single path used to both set and clear the one-time
+// OIDC state/verifier cookies, so the browser actually removes them.
+const oidcCookiePath = "/api/auth/oidc"
 
 // oidcService defines the OIDC operations needed by the controller.
 type oidcService interface {
@@ -43,21 +48,36 @@ func (oc *OIDCController) Login(c *gin.Context) {
 		return
 	}
 	authURL, state, verifier := oc.OIDCSvc.BuildAuthURL()
-	secure := c.Request.TLS != nil
-	c.SetCookie("mutong_oidc_state", state, 300, "/api/auth/oidc", "", secure, true)
-	c.SetCookie("mutong_oidc_verifier", verifier, 300, "/api/auth/oidc", "", secure, true)
+	secure := cookieSecure(c)
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie("mutong_oidc_state", state, 300, oidcCookiePath, "", secure, true)
+	c.SetCookie("mutong_oidc_verifier", verifier, 300, oidcCookiePath, "", secure, true)
 	c.Redirect(http.StatusFound, authURL)
+}
+
+// clearOIDCCookies removes the one-time state/verifier cookies using the same
+// path they were set with. It must run before any response body is written.
+func (oc *OIDCController) clearOIDCCookies(c *gin.Context) {
+	secure := cookieSecure(c)
+	c.SetCookie("mutong_oidc_state", "", -1, oidcCookiePath, "", secure, true)
+	c.SetCookie("mutong_oidc_verifier", "", -1, oidcCookiePath, "", secure, true)
 }
 
 // Callback handles the OIDC authorization code callback.
 func (oc *OIDCController) Callback(c *gin.Context) {
-	stateCookie, err := c.Cookie("mutong_oidc_state")
-	if err != nil || c.Query("state") != stateCookie {
+	stateCookie, stateErr := c.Cookie("mutong_oidc_state")
+	verifier, verifierErr := c.Cookie("mutong_oidc_verifier")
+	// Single-use: clear the OIDC cookies before writing any response so they are
+	// removed on every exit path (success, invalid state, exchange failure).
+	oc.clearOIDCCookies(c)
+
+	// Constant-time comparison avoids leaking the expected state via timing.
+	if stateErr != nil || stateCookie == "" ||
+		subtle.ConstantTimeCompare([]byte(c.Query("state")), []byte(stateCookie)) != 1 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid state"})
 		return
 	}
-	verifier, err := c.Cookie("mutong_oidc_verifier")
-	if err != nil {
+	if verifierErr != nil || verifier == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing verifier"})
 		return
 	}
@@ -95,23 +115,19 @@ func (oc *OIDCController) Callback(c *gin.Context) {
 	}
 
 	token, err := oc.Sessions.Issue(auth.SessionClaims{
-		UserID:       user.ID,
-		UUID:         user.UUID,
-		Role:         user.Role,
-		AuthProvider: "zitadel",
+		UserID:              user.ID,
+		UUID:                user.UUID,
+		Role:                user.Role,
+		AuthProvider:        "zitadel",
+		PasswordFingerprint: auth.PasswordFingerprint(user.PasswordHash),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "session creation failed"})
 		return
 	}
 
-	secure := cookieSecure(c)
 	maxAge := int(oc.Sessions.TTL().Seconds())
 	setSessionCookie(c, token, maxAge)
-
-	// Clear OIDC-specific cookies
-	c.SetCookie("mutong_oidc_state", "", -1, "/", "", secure, true)
-	c.SetCookie("mutong_oidc_verifier", "", -1, "/", "", secure, true)
 
 	c.Redirect(http.StatusFound, "/view/index.html")
 }

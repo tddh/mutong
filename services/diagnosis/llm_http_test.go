@@ -133,3 +133,116 @@ func TestHTTPLLMProvider_InvalidJSON(t *testing.T) {
 		t.Fatal("expected error for invalid JSON")
 	}
 }
+
+// CODE-03：工具调用参数解析失败必须报错，不能静默当成空参数
+func TestParseToolCallArgs(t *testing.T) {
+	cases := []struct {
+		name    string
+		raw     string
+		want    map[string]string
+		wantErr bool
+	}{
+		{"empty args", "", map[string]string{}, false},
+		{"blank args", "   ", map[string]string{}, false},
+		{"empty object", "{}", map[string]string{}, false},
+		{"null", "null", map[string]string{}, false},
+		{"string args", `{"namespace":"default","pod":"p1"}`, map[string]string{"namespace": "default", "pod": "p1"}, false},
+		{"malformed", `{"namespace":`, nil, true},
+		{"not an object", `["a"]`, nil, true},
+		{"non string value", `{"replicas":3}`, nil, true},
+	}
+	for _, tc := range cases {
+		got, err := parseToolCallArgs(tc.raw)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("%s: expected error, got %v", tc.name, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+			continue
+		}
+		if len(got) != len(tc.want) {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+			continue
+		}
+		for k, v := range tc.want {
+			if got[k] != v {
+				t.Errorf("%s: arg %q = %q, want %q", tc.name, k, got[k], v)
+			}
+		}
+	}
+}
+
+func newToolCallServer(t *testing.T, arguments string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{
+					"message": map[string]interface{}{
+						"content": "",
+						"tool_calls": []map[string]interface{}{
+							{
+								"id": "call-1",
+								"function": map[string]string{
+									"name":      "get_pod_metrics",
+									"arguments": arguments,
+								},
+							},
+						},
+					},
+					"finish_reason": "tool_calls",
+				},
+			},
+		})
+	}))
+}
+
+func TestDiagnoseChatWithToolsRejectsMalformedArgs(t *testing.T) {
+	server := newToolCallServer(t, `{"namespace":`)
+	defer server.Close()
+
+	provider := NewHTTPLLMProvider("openai", "gpt-4", "test-key", server.URL, 30)
+	resp, err := provider.DiagnoseChatWithTools(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	if err == nil {
+		t.Fatalf("expected error for malformed tool arguments, got %+v", resp)
+	}
+	if resp != nil {
+		t.Errorf("no response should be returned on parse failure, got %+v", resp)
+	}
+}
+
+func TestDiagnoseChatWithToolsParsesArgs(t *testing.T) {
+	server := newToolCallServer(t, `{"namespace":"default","pod":"p1"}`)
+	defer server.Close()
+
+	provider := NewHTTPLLMProvider("openai", "gpt-4", "test-key", server.URL, 30)
+	resp, err := provider.DiagnoseChatWithTools(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool call, got %d", len(resp.ToolCalls))
+	}
+	if resp.ToolCalls[0].Arguments["namespace"] != "default" || resp.ToolCalls[0].Arguments["pod"] != "p1" {
+		t.Errorf("unexpected arguments: %v", resp.ToolCalls[0].Arguments)
+	}
+}
+
+// 无参工具调用（arguments 为空串）仍然合法
+func TestDiagnoseChatWithToolsEmptyArgs(t *testing.T) {
+	server := newToolCallServer(t, "")
+	defer server.Close()
+
+	provider := NewHTTPLLMProvider("openai", "gpt-4", "test-key", server.URL, 30)
+	resp, err := provider.DiagnoseChatWithTools(context.Background(), []ChatMessage{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("no-arg tool call must stay valid: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 || len(resp.ToolCalls[0].Arguments) != 0 {
+		t.Errorf("expected a single no-arg tool call, got %+v", resp.ToolCalls)
+	}
+}

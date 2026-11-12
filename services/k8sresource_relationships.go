@@ -56,6 +56,7 @@ func (d *K8sResoureService) processLabelsRelationship(unstructuredObj *unstructu
 	}
 
 	k8sResourceUID := string(unstructuredObj.GetUID())
+	sanitizer := NewNGQLSanitizer()
 
 	for key, labelValue := range labels {
 		labelUID := generateLabelUID(key, labelValue)
@@ -70,11 +71,11 @@ func (d *K8sResoureService) processLabelsRelationship(unstructuredObj *unstructu
 			continue
 		}
 
-		labelQuery := fmt.Sprintf(`INSERT VERTEX IF NOT EXISTS Label(uid, key, value) VALUES "%s":("%s", "%s", "%s");`,
-			labelUID,
-			labelUID,
-			key,
-			labelValue)
+		labelQuery := fmt.Sprintf(`INSERT VERTEX IF NOT EXISTS Label(uid, key, value) VALUES %s:(%s, %s, %s);`,
+			sanitizer.QuoteString(labelUID),
+			sanitizer.QuoteString(labelUID),
+			sanitizer.QuoteString(key),
+			sanitizer.QuoteString(labelValue))
 		d.logger.Debug("processLabelsRelationship", zap.String("nGQL", labelQuery))
 		_, err = d.graphDB.Execute(labelQuery)
 		if err != nil {

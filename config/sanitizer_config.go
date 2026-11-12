@@ -10,11 +10,29 @@ type SanitizerRule struct {
 
 type SanitizerConfig struct {
 	Enabled                 bool            `yaml:"enabled"`
-	HighPIIBlockThreshold   float64         `yaml:"highPIIBlockThreshold"`
-	BannedTerms             []string        `yaml:"bannedTerms"`
-	MaxQueryLength          int             `yaml:"maxQueryLength"`
-	PromptInjectionPatterns []string        `yaml:"promptInjectionPatterns"`
+	HighPIIBlockThreshold   float64         `yaml:"high_pii_block_threshold"`
+	BannedTerms             []string        `yaml:"banned_terms"`
+	MaxQueryLength          int             `yaml:"max_query_length"`
+	PromptInjectionPatterns []string        `yaml:"prompt_injection_patterns"`
 	Rules                   []SanitizerRule `yaml:"rules"`
+}
+
+// ApplyDefaults 用默认值填补零值字段。YAML 缺省字段时若不回落，
+// sanitizer 会以空注入模式/零长度上限运行。
+func (c *SanitizerConfig) ApplyDefaults() {
+	d := DefaultSanitizerConfig()
+	if c.HighPIIBlockThreshold == 0 {
+		c.HighPIIBlockThreshold = d.HighPIIBlockThreshold
+	}
+	if c.MaxQueryLength == 0 {
+		c.MaxQueryLength = d.MaxQueryLength
+	}
+	if len(c.PromptInjectionPatterns) == 0 {
+		c.PromptInjectionPatterns = d.PromptInjectionPatterns
+	}
+	if len(c.Rules) == 0 {
+		c.Rules = d.Rules
+	}
 }
 
 func DefaultSanitizerConfig() SanitizerConfig {

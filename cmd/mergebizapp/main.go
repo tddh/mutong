@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	nebula "github.com/vesoft-inc/nebula-go/v3"
+
+	"gitee.com/tddh/mutong/pkg/ngql"
 )
 
 func main() {
@@ -36,6 +38,7 @@ func main() {
 	}
 
 	merged := 0
+	sanitizer := ngql.NewSanitizer()
 	query := `MATCH (v:BusinessApp) WHERE v.BusinessApp.owner_name != "" AND v.BusinessApp.app_name != v.BusinessApp.owner_name RETURN v.BusinessApp.uid AS uid, v.BusinessApp.owner_name AS owner, v.BusinessApp.namespace AS ns`
 	rs, err := sess.Execute(query)
 	if err != nil {
@@ -52,7 +55,7 @@ func main() {
 		}
 
 		dupQuery := fmt.Sprintf(`MATCH (v:BusinessApp) WHERE v.BusinessApp.app_name == %s AND v.BusinessApp.namespace == %s AND v.BusinessApp.uid != %s RETURN v.BusinessApp.uid AS uid LIMIT 1`,
-			strconv.Quote(owner), strconv.Quote(ns), strconv.Quote(uid))
+			sanitizer.QuoteString(owner), sanitizer.QuoteString(ns), sanitizer.QuoteString(uid))
 		dupRs, err := sess.Execute(dupQuery)
 		if err != nil || dupRs.GetRowSize() == 0 {
 			continue
@@ -69,10 +72,10 @@ func main() {
 			continue
 		}
 
-		migrateEdge(sess, dupUID, uid, "CallsApp")
-		migrateEdge(sess, dupUID, uid, "BelongsToApp")
+		migrateEdge(sess, sanitizer, dupUID, uid, "CallsApp")
+		migrateEdge(sess, sanitizer, dupUID, uid, "BelongsToApp")
 
-		delQuery := fmt.Sprintf("DELETE VERTEX %s", strconv.Quote(dupUID))
+		delQuery := fmt.Sprintf("DELETE VERTEX %s", sanitizer.QuoteString(dupUID))
 		if _, err := sess.Execute(delQuery); err != nil {
 			log.Printf("delete vertex %s: %v", dupUID, err)
 			continue
@@ -88,8 +91,8 @@ func main() {
 	}
 }
 
-func migrateEdge(sess *nebula.Session, fromUID, toUID, edgeType string) {
-	query := fmt.Sprintf("GO FROM %s OVER %s YIELD edge AS e", strconv.Quote(fromUID), edgeType)
+func migrateEdge(sess *nebula.Session, sanitizer *ngql.Sanitizer, fromUID, toUID, edgeType string) {
+	query := fmt.Sprintf("GO FROM %s OVER %s YIELD edge AS e", sanitizer.QuoteString(fromUID), edgeType)
 	rs, err := sess.Execute(query)
 	if err != nil {
 		log.Printf("query %s edges from %s: %v", edgeType, fromUID, err)
@@ -107,17 +110,17 @@ func migrateEdge(sess *nebula.Session, fromUID, toUID, edgeType string) {
 			continue
 		}
 		parts[1] = strings.TrimSuffix(parts[1], "@0")
-		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, strconv.Quote(fromUID), strconv.Quote(parts[1]))
+		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, sanitizer.QuoteString(fromUID), sanitizer.QuoteString(parts[1]))
 		if _, err := sess.Execute(delQuery); err != nil {
 			log.Printf("delete edge %s failed: %v", edgeType, err)
 		}
 
-		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, strconv.Quote(toUID), strconv.Quote(parts[1]))
+		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, sanitizer.QuoteString(toUID), sanitizer.QuoteString(parts[1]))
 		if _, err := sess.Execute(insQuery); err != nil {
 			log.Printf("migrate edge %s %s->%s: %v", edgeType, fromUID, parts[1], err)
 		}
 	}
-	queryIn := fmt.Sprintf("GO FROM %s OVER %s REVERSELY YIELD edge AS e", strconv.Quote(fromUID), edgeType)
+	queryIn := fmt.Sprintf("GO FROM %s OVER %s REVERSELY YIELD edge AS e", sanitizer.QuoteString(fromUID), edgeType)
 	rsIn, err := sess.Execute(queryIn)
 	if err != nil {
 		return
@@ -133,12 +136,12 @@ func migrateEdge(sess *nebula.Session, fromUID, toUID, edgeType string) {
 		if len(parts) != 2 {
 			continue
 		}
-		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, strconv.Quote(parts[0]), strconv.Quote(fromUID))
+		delQuery := fmt.Sprintf("DELETE EDGE %s %s->%s", edgeType, sanitizer.QuoteString(parts[0]), sanitizer.QuoteString(fromUID))
 		if _, err := sess.Execute(delQuery); err != nil {
 			log.Printf("delete edge %s failed: %v", edgeType, err)
 		}
 
-		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, strconv.Quote(parts[0]), strconv.Quote(toUID))
+		insQuery := fmt.Sprintf("INSERT EDGE %s () VALUES %s->%s:()", edgeType, sanitizer.QuoteString(parts[0]), sanitizer.QuoteString(toUID))
 		if _, err := sess.Execute(insQuery); err != nil {
 			log.Printf("migrate edge %s %s->%s: %v", edgeType, parts[0], fromUID, err)
 		}

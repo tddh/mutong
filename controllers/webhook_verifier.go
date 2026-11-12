@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -23,6 +24,10 @@ const (
 	TimestampHeader  = "X-Alertmanager-Timestamp"
 	ExternalToken    = "X-Alert-Token"
 	MaxTimestampSkew = 300
+
+	// MaxWebhookBodyBytes caps the alert intake body so an unauthenticated
+	// sender cannot exhaust memory before the signature is checked.
+	MaxWebhookBodyBytes = 1 << 20
 )
 
 type WebhookVerifier struct {
@@ -104,15 +109,23 @@ func (v *WebhookVerifier) VerifySignature(ctx *gin.Context) bool {
 		return false
 	}
 
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, MaxWebhookBodyBytes)
 	body, err := io.ReadAll(ctx.Request.Body)
 	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			v.logger.Warn("Webhook body exceeds size limit",
+				zap.Int64("limit", tooLarge.Limit), zap.String("remote", ctx.ClientIP()))
+			ctx.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{"error": "webhook body too large"})
+			return false
+		}
 		v.logger.Error("Failed to read request body", zap.Error(err))
 		return false
 	}
 	// Restore body so the handler can read it.
 	ctx.Request.Body = io.NopCloser(bytes.NewBuffer(body))
 
-	expected := v.computeSignature(body)
+	expected := v.computeSignature(tsRaw, body)
 	if !hmac.Equal([]byte(strings.ToLower(signature)), []byte(expected)) {
 		v.logger.Warn("Webhook signature verification failed",
 			zap.String("remote", ctx.ClientIP()))
@@ -170,10 +183,10 @@ func (v *WebhookVerifier) isReplay(signature string) bool {
 	return false
 }
 
-func (v *WebhookVerifier) computeSignature(body []byte) string {
-	h := hmac.New(sha256.New, v.secret)
-	h.Write(body)
-	return hex.EncodeToString(h.Sum(nil))
+// computeSignature signs the timestamp header value and the raw body together
+// so a captured signature cannot be replayed with a fresh timestamp.
+func (v *WebhookVerifier) computeSignature(timestamp string, body []byte) string {
+	return GenerateWebhookSignature(string(v.secret), timestamp, body)
 }
 
 // WebhookSignatureMiddleware verifies signatures and replay protection for
@@ -183,17 +196,25 @@ func WebhookSignatureMiddleware(logger *zap.Logger) gin.HandlerFunc {
 
 	return func(ctx *gin.Context) {
 		if !verifier.VerifySignature(ctx) {
-			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid webhook signature",
-			})
+			// VerifySignature may already have written a specific status
+			// (e.g. 413 for an oversized body); do not overwrite it.
+			if !ctx.IsAborted() {
+				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+					"error": "invalid webhook signature",
+				})
+			}
 			return
 		}
 		ctx.Next()
 	}
 }
 
-func GenerateWebhookSignature(secret string, body []byte) string {
+// GenerateWebhookSignature returns the hex HMAC-SHA256 of timestamp + "\n" + body.
+// Callers must send the same timestamp in the X-Alertmanager-Timestamp header.
+func GenerateWebhookSignature(secret, timestamp string, body []byte) string {
 	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(timestamp))
+	h.Write([]byte("\n"))
 	h.Write(body)
 	return hex.EncodeToString(h.Sum(nil))
 }

@@ -34,6 +34,7 @@ import (
 	oauth2model "gitee.com/tddh/mutong/models/oauth2"
 	"gitee.com/tddh/mutong/services"
 	alert "gitee.com/tddh/mutong/services/alert"
+	audstore "gitee.com/tddh/mutong/services/audit"
 	authsvc "gitee.com/tddh/mutong/services/auth"
 	diagnosis_svc "gitee.com/tddh/mutong/services/diagnosis"
 	execService "gitee.com/tddh/mutong/services/executor"
@@ -42,6 +43,7 @@ import (
 	"gitee.com/tddh/mutong/services/prompt"
 	retrospective_svc "gitee.com/tddh/mutong/services/retrospective"
 	"gitee.com/tddh/mutong/services/search"
+	"gitee.com/tddh/mutong/services/terminal"
 	"gitee.com/tddh/mutong/services/trace"
 	_ "github.com/apache/skywalking-go"
 	"github.com/gin-contrib/cors"
@@ -69,12 +71,14 @@ var (
 	configPath      string
 	logLevel        string
 	scopeServerAddr string
+	gopsEnabled     bool
 )
 
 func init() {
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "configs/", "config directory path")
 	rootCmd.Flags().StringVarP(&logLevel, "log-level", "", "info", "error info warning debug ")
-	rootCmd.Flags().StringVarP(&scopeServerAddr, "scope-server-addr", "", "http://localhost", "scope server address")
+	rootCmd.Flags().StringVarP(&scopeServerAddr, "scope-server-addr", "", "", "pyroscope server address; empty disables continuous profiling")
+	rootCmd.Flags().BoolVar(&gopsEnabled, "gops", false, "enable the gops diagnostics agent")
 }
 
 func runApp(cmd *cobra.Command, args []string) {
@@ -93,7 +97,7 @@ func runApp(cmd *cobra.Command, args []string) {
 	}
 	logger := cfg.Logger
 	authsvc.SetSessionLogger(cfg.GetLogger())
-	pyroscopeServer(logger)
+	startDiagnostics(logger)
 
 	// 确保资源在退出时关闭
 	defer func() {
@@ -160,7 +164,7 @@ func runApp(cmd *cobra.Command, args []string) {
 			inspectionProcessor.Stop()
 		}
 	}()
-	engine, k8sExec, diagEngine, chatManager := initializeGin(ctrls, userSvc, cfg.Logger, alertProcessor, inspectionProcessor, graphDB, k8sresourceSvc, cfg, oauth2Provider, rdb, sessions, oidcClient)
+	engine, k8sExec, diagEngine, chatManager, autoDiag, termMgr := initializeGin(ctx, ctrls, userSvc, cfg.Logger, alertProcessor, inspectionProcessor, graphDB, k8sresourceSvc, cfg, oauth2Provider, rdb, sessions, oidcClient)
 
 	addr := os.Getenv("MUTONG_ADDR")
 	if addr == "" {
@@ -208,6 +212,12 @@ func runApp(cmd *cobra.Command, args []string) {
 		}
 		if chatManager != nil {
 			chatManager.Stop()
+		}
+		if autoDiag != nil {
+			autoDiag.Stop()
+		}
+		if termMgr != nil {
+			termMgr.StopCleanup()
 		}
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Duration(cfg.Server.ShutdownTimeoutSec)*time.Second)
 		defer shutdownCancel()
@@ -271,21 +281,24 @@ func runApp(cmd *cobra.Command, args []string) {
 	<-ctx.Done()
 }
 
-func pyroscopeServer(logger *zap.Logger) {
-	if scopeServerAddr == "" {
-		return
+// startDiagnostics enables optional profiling/diagnostics tooling. Both are
+// opt-in and neither may abort startup: a missing profiler backend must not
+// take the platform down.
+func startDiagnostics(logger *zap.Logger) {
+	if scopeServerAddr != "" {
+		if _, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName: "mutong.ink",
+			ServerAddress:   scopeServerAddr,
+		}); err != nil {
+			logger.Error("Failed to start pyroscope profiler, continuing without profiling",
+				zap.String("server", scopeServerAddr), zap.Error(err))
+		}
 	}
 
-	_, err := pyroscope.Start(pyroscope.Config{
-		ApplicationName: "mutong.ink",
-		ServerAddress:   scopeServerAddr,
-	})
-	if err != nil {
-		panic(err)
-	}
-
-	if err := agent.Listen(agent.Options{ShutdownCleanup: true}); err != nil {
-		logger.Error("Failed to start gops agent", zap.Error(err))
+	if gopsEnabled {
+		if err := agent.Listen(agent.Options{ShutdownCleanup: true}); err != nil {
+			logger.Error("Failed to start gops agent", zap.Error(err))
+		}
 	}
 }
 
@@ -536,12 +549,16 @@ func setupMiddleware(engine *gin.Engine, cfg *config.Config, sessions *authsvc.S
 	}
 	_ = engine.SetTrustedProxies(strings.Split(proxies, ","))
 
-	engine.Use(cors.New(cors.Config{
-		AllowOrigins:     allowedOrigins(),
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Content-Type", "Accept", "Authorization", "X-Trace-ID", "X-Role", "X-Admin-Key", "X-Alert-Token", "X-Alertmanager-Signature", "X-Alertmanager-Timestamp"},
-		AllowCredentials: true,
-	}))
+	// 未配置显式 origin 时不挂 CORS 中间件：浏览器同源策略默认拒绝跨域，
+	// 而 cors.New 对空 AllowOrigins 会 panic，导致默认配置无法启动。
+	if origins := allowedOrigins(); len(origins) > 0 {
+		engine.Use(cors.New(cors.Config{
+			AllowOrigins:     origins,
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowHeaders:     []string{"Content-Type", "Accept", "Authorization", "X-Trace-ID", "X-Role", "X-Admin-Key", "X-Alert-Token", "X-Alertmanager-Signature", "X-Alertmanager-Timestamp"},
+			AllowCredentials: true,
+		}))
+	}
 	engine.Use(controllers.AuthMiddleware(logger))
 	engine.Use(controllers.WebhookSignatureMiddleware(logger))
 	engine.Use(controllers.RateLimitMiddleware(cfg.Server.RateLimitPerSec, time.Second))
@@ -575,6 +592,14 @@ func setupMiddleware(engine *gin.Engine, cfg *config.Config, sessions *authsvc.S
 
 	engine.Use(controllers.RequireAuthMiddleware())
 	engine.Use(controllers.CasbinMiddleware(logger))
+}
+
+// registerHealthz installs the unauthenticated liveness probe. It must be
+// called before setupMiddleware so the auth chain never applies to it.
+func registerHealthz(engine *gin.Engine) {
+	engine.GET("/healthz", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
 }
 
 // registerStaticRoutes serves the built frontend and the pre-login pages.
@@ -616,13 +641,18 @@ func registerStaticRoutes(engine *gin.Engine, logger *zap.Logger) {
 	}
 }
 
-func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager) {
+func initializeGin(ctx context.Context, ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager, *execService.AutoDiagnosisPipeline, *terminal.TerminalSessionManager) {
 	var execCtrl *controllers.ExecutorController
 	var k8sExec *execService.K8sExecutor
 	var diagEngine *diagnosis_svc.Engine
 	var chatManager *diagnosis_svc.ChatSessionManager
+	var autoDiag *execService.AutoDiagnosisPipeline
 
 	engine := gin.New()
+
+	// Liveness probe for the container HEALTHCHECK. Registered before the
+	// middleware chain so it stays reachable without credentials.
+	registerHealthz(engine)
 
 	setupMiddleware(engine, cfg, sessions, oauth2Provider, oidcClient, logger)
 
@@ -660,7 +690,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 	}
 
 	// Register OAuth 2.0 endpoints (public)
-	deviceH := &oauth2ctrl.DeviceHandler{DB: cfg.DB}
+	deviceH := oauth2ctrl.NewDeviceHandler(cfg.DB)
 	oauth2ctrl.RegisterOAuth2Routes(engine, oauth2Provider, os.Getenv("MUTONG_ISSUER_URL"), deviceH)
 	deviceH.RegisterDeviceRoutes(engine)
 
@@ -671,6 +701,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 
 	// Register auth endpoints (login, me, logout)
 	authCtrl := controllers.NewAuthController(cfg.DB, sessions, loginLimit)
+	authCtrl.Logger = logger
 	authCtrl.OIDCAvailable = oidcClient != nil
 	authCtrl.AuthMode = cfg.Auth.Mode
 	authCtrl.RegisterRoutes(engine)
@@ -794,17 +825,30 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		}
 	}
 	terminalCtrl := controllers.NewTerminalController(logger, k8sClientForTerminal, restConfigForTerminal)
+	terminalCtrl.SetAllowedNamespaces(cfg.GetTerminalConf().AllowedNamespaces)
+	if db := cfg.GetConfigGormDB(); db != nil {
+		table := cfg.GetExecutorConf().AuditLog.OperationTable
+		if table == "" {
+			table = config.DefaultOperationAuditTable
+		}
+		if opStore, err := audstore.NewPostgresOperationAuditStore(db, table); err == nil {
+			terminalCtrl.SetAuditStore(opStore)
+		} else {
+			logger.Warn("Failed to initialize terminal audit store", zap.Error(err))
+		}
+	}
 	terminalCtrl.RegisterRoutes(engine)
 	// Start periodic cleanup of expired terminal sessions (30 minutes max age)
-	terminalCtrl.Manager.StartCleanup(5*time.Minute, 30*time.Minute)
+	termMgr := terminalCtrl.Manager
+	termMgr.StartCleanup(5*time.Minute, 30*time.Minute)
 
 	if alertProcessor != nil {
-		diagEngine := diagnosis_svc.NewEngine(logger, db, alertProcessor)
+		diagEngine = diagnosis_svc.NewEngine(logger, db, alertProcessor)
 
 		llmProvider := cfg.GetLLMProvider()
 		if llmProvider != nil {
 			if einoP, ok := llmProvider.(*diagnosis_svc.EinoLLMProvider); ok {
-				if mgr, err := prompt.NewManager("configs/prompts"); err == nil {
+				if mgr, err := prompt.NewManager(authsvc.ResolveConfigPath("configs/prompts")); err == nil {
 					einoP.SetPromptManager(mgr)
 				}
 			}
@@ -854,7 +898,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			logger.Info("Diagnosis session Redis not configured, using memory-only mode")
 		}
 
-		chatManager := diagnosis_svc.NewChatSessionManager(logger, llmProvider, diagEngine, redisStorage, pgStorage)
+		chatManager = diagnosis_svc.NewChatSessionManager(logger, llmProvider, diagEngine, redisStorage, pgStorage)
 
 		cacheTTL := 15 * time.Minute
 		if cfg.Diagnosis.CacheTTL > 0 {
@@ -895,6 +939,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 		diagCtrl := controllers.NewDiagnosisController(logger, diagEngine, promSvcGlobal.AsMetricsQuerier(), chatManager, cacheTTL, k8sC, logQ, cfg.GetCache(), inspectionProcessor, k8sSvc.GetInformerFactory, time.Duration(cfg.Server.SSEWriteTimeoutSec)*time.Second)
 
 		if cfg.ExternalSearch.Enabled {
+			cfg.Sanitizer.ApplyDefaults()
 			sanitCfg := diagnosis_svc.SanitizerConfig{
 				Enabled:                 cfg.Sanitizer.Enabled,
 				HighPIIBlockThreshold:   cfg.Sanitizer.HighPIIBlockThreshold,
@@ -908,9 +953,6 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					Pattern: r.Pattern,
 					Enabled: r.Enabled,
 				})
-			}
-			if len(sanitCfg.Rules) == 0 {
-				sanitCfg = diagnosis_svc.DefaultSanitizerConfig()
 			}
 
 			sanitizer, serr := diagnosis_svc.NewSanitizer("main-app", sanitCfg)
@@ -929,7 +971,17 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					logger.Info("GitHub Issues search enabled (authenticated)")
 				}
 				if tavilyClient != nil || githubClient != nil {
-					diagCtrl.SetExternalSearch(tavilyClient, githubClient, sanitizer, nil)
+					diagCtrl.SetExternalSearch(tavilyClient, githubClient, sanitizer, func(ctx context.Context, toolName, engine string, query string, redactions, returned int, blocked bool, reason string) {
+						logger.Info("external search audit",
+							zap.String("tool", toolName),
+							zap.String("engine", engine),
+							zap.String("query", query),
+							zap.Int("redactions", redactions),
+							zap.Int("returned", returned),
+							zap.Bool("blocked", blocked),
+							zap.String("reason", reason),
+						)
+					})
 				}
 			}
 		}
@@ -963,7 +1015,6 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 			aSvc.StartStatsSync(alertStatsInterval)
 			logger.Info("Alert stats persistence enabled", zap.Duration("sync_interval", alertStatsInterval))
 
-			var autoDiag *execService.AutoDiagnosisPipeline
 			if k8sExec != nil {
 				br := execService.NewRemediationBridge()
 				autoDiag = execService.NewAutoDiagnosisPipeline(logger, diagEngine, br, k8sExec, cfg.GetExecutorConf().Enabled)
@@ -976,7 +1027,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 					autoDiag.SetDeepDiagnoser(deepFn)
 					logger.Info("Deep tool-based diagnosis enabled for auto-diagnosis pipeline")
 				}
-				go autoDiag.Start(context.Background())
+				go autoDiag.Start(ctx)
 			}
 		}
 
@@ -1023,7 +1074,7 @@ func initializeGin(ctrls *controllers.Controllers, userSvc interfaces.UserInterf
 	bizTopoCtrl := controllers.NewBusinessTopologyController(bizTopoSvc)
 	bizTopoCtrl.RegisterRoutes(engine)
 
-	return engine, k8sExec, diagEngine, chatManager
+	return engine, k8sExec, diagEngine, chatManager, autoDiag, termMgr
 }
 
 func initializePrometheus(cfg *config.Config, logger *zap.Logger) *prometheus_svc.QueryService {

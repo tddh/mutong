@@ -1,106 +1,67 @@
 package oauth2
 
 import (
-	"crypto/rand"
-	"fmt"
+	"errors"
 	"html"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
-	oauth2model "gitee.com/tddh/mutong/models/oauth2"
+	authsvc "gitee.com/tddh/mutong/services/auth"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // DeviceHandler handles the Device Authorization Grant (RFC 8628) endpoints.
+// Security-critical state transitions live in authsvc.DeviceFlowService.
 type DeviceHandler struct {
-	DB *gorm.DB
+	DB  *gorm.DB
+	svc *authsvc.DeviceFlowService
 }
 
-// userCodeChars is the character set for user codes (excludes ambiguous chars like 0/O, 1/I/l).
-const userCodeChars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+func NewDeviceHandler(db *gorm.DB) *DeviceHandler {
+	return &DeviceHandler{DB: db, svc: authsvc.NewDeviceFlowService(db, "")}
+}
 
-func generateUserCode() (string, error) {
-	code := make([]byte, 8)
-	for i := range code {
-		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(userCodeChars))))
-		if err != nil {
-			return "", err
+// deviceUserID extracts the verified identity set by the auth middleware,
+// which stores uint for sessions and *uint for PAT/SAT paths.
+func deviceUserID(c *gin.Context) (uint, bool) {
+	v, ok := c.Get("user_id")
+	if !ok {
+		return 0, false
+	}
+	switch id := v.(type) {
+	case uint:
+		return id, id != 0
+	case *uint:
+		if id != nil {
+			return *id, *id != 0
 		}
-		code[i] = userCodeChars[n.Int64()]
 	}
-	return string(code), nil
-}
-
-func generateDeviceCode() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x", b), nil
+	return 0, false
 }
 
 // HandleDeviceAuth handles POST /oauth2/device/auth
 func (h *DeviceHandler) HandleDeviceAuth(c *gin.Context) {
-	clientID := c.PostForm("client_id")
-	scope := c.PostForm("scope")
-
-	if clientID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "client_id is required"})
-		return
-	}
-
-	// Verify client exists
-	var client oauth2model.OAuth2Client
-	if err := h.DB.Where("client_id = ?", clientID).First(&client).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid client_id"})
-		return
-	}
-
-	deviceCode, err := generateDeviceCode()
+	authz, err := h.svc.Start(c.Request.Context(), c.PostForm("client_id"), c.PostForm("scope"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate device code"})
+		switch {
+		case errors.Is(err, authsvc.ErrDeviceClientRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id is required"})
+		case errors.Is(err, authsvc.ErrDeviceInvalidClient):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid client_id"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start device authorization"})
+		}
 		return
 	}
 
-	userCode, err := generateUserCode()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate user code"})
-		return
-	}
-
-	// Store device code
-	dc := &oauth2model.DeviceCode{
-		DeviceCode: deviceCode,
-		UserCode:   userCode,
-		ClientID:   clientID,
-		Scope:      scope,
-		Status:     "pending",
-		ExpiresAt:  time.Now().Add(10 * time.Minute),
-	}
-
-	if err := h.DB.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "device_code"}},
-		DoUpdates: clause.AssignmentColumns([]string{"user_code", "client_id", "scope", "status", "expires_at"}),
-	}).Create(dc).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to store device code"})
-		return
-	}
-
-	issuerURL := "http://localhost:8888"
-	if origin := c.Request.Header.Get("Origin"); origin != "" {
-		issuerURL = origin
-	}
-
+	uri, complete := h.svc.VerificationURIs(authz.UserCode)
 	c.JSON(http.StatusOK, gin.H{
-		"device_code":               deviceCode,
-		"user_code":                 userCode,
-		"verification_uri":          issuerURL + "/device",
-		"verification_uri_complete": issuerURL + "/device?code=" + userCode,
+		"device_code":               authz.DeviceCode,
+		"user_code":                 authz.UserCode,
+		"verification_uri":          uri,
+		"verification_uri_complete": complete,
 		"expires_in":                600,
 		"interval":                  5,
 	})
@@ -115,55 +76,52 @@ func (h *DeviceHandler) HandleDeviceToken(c *gin.Context) {
 		return
 	}
 
-	deviceCode := c.PostForm("device_code")
-	if deviceCode == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "device_code is required"})
+	authz, err := h.svc.Exchange(c.Request.Context(), c.PostForm("device_code"), c.PostForm("client_id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, authsvc.ErrDeviceNotFound):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_device_code", "error_description": "device code not found"})
+		case errors.Is(err, authsvc.ErrDeviceExpired):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "expired_device_code", "error_description": "device code has expired"})
+		case errors.Is(err, authsvc.ErrDevicePending):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "authorization_pending"})
+		case errors.Is(err, authsvc.ErrDeviceDenied):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "access_denied"})
+		case errors.Is(err, authsvc.ErrDeviceClientMismatch):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_client", "error_description": "client_id does not match device authorization"})
+		case errors.Is(err, authsvc.ErrDeviceUsed):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_grant", "error_description": "device code already used"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
+		}
 		return
 	}
 
-	var dc oauth2model.DeviceCode
-	if err := h.DB.Where("device_code = ?", deviceCode).First(&dc).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_device_code", "error_description": "device code not found"})
+	if authz.UserID == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 		return
 	}
 
-	if time.Now().After(dc.ExpiresAt) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "expired_device_code", "error_description": "device code has expired"})
+	// Issue a real persisted PAT bound to the approving user and granted scope,
+	// so it passes the same validation/revocation path as every other token.
+	_, raw, err := authsvc.CreateToken(h.DB, authz.UserID, nil, "device authorization", "pat", strings.Fields(authz.Scope), 1)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "server_error"})
 		return
 	}
 
-	switch dc.Status {
-	case "pending":
-		c.JSON(http.StatusBadRequest, gin.H{"error": "authorization_pending"})
-		return
-	case "denied":
-		c.JSON(http.StatusBadRequest, gin.H{"error": "access_denied"})
-		return
-	case "authorized":
-		// Issue tokens
-		accessToken := generateRandomToken()
-		refreshToken := generateRandomToken()
-
-		h.DB.Model(&dc).Update("status", "completed")
-
-		c.JSON(http.StatusOK, gin.H{
-			"access_token":  accessToken,
-			"refresh_token": refreshToken,
-			"token_type":    "Bearer",
-			"expires_in":    900,
-			"scope":         dc.Scope,
-		})
-	case "expired":
-		fallthrough
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "expired_device_code"})
-	}
+	c.JSON(http.StatusOK, gin.H{
+		"access_token": raw,
+		"token_type":   "Bearer",
+		"expires_in":   86400,
+		"scope":        authz.Scope,
+	})
 }
 
 // HandleDevicePage serves a simple page for users to enter their device code.
 func (h *DeviceHandler) HandleDevicePage(c *gin.Context) {
-	// Require authentication before approving device code
-	if _, exists := c.Get("user_id"); !exists {
+	userID, authed := deviceUserID(c)
+	if !authed {
 		c.Redirect(http.StatusFound, "/view/login.html?redirect="+url.QueryEscape("/device?"+c.Request.URL.RawQuery))
 		c.Abort()
 		return
@@ -179,32 +137,33 @@ func (h *DeviceHandler) HandleDevicePage(c *gin.Context) {
 			return
 		}
 
-		var dc oauth2model.DeviceCode
-		if err := h.DB.Where("user_code = ?", userCode).First(&dc).Error; err != nil {
-			c.Data(http.StatusOK, "text/html; charset=utf-8", devicePageHTML("无效的设备代码", code, true))
+		var err error
+		if action == "approve" {
+			err = h.svc.Approve(c.Request.Context(), userCode, userID)
+		} else {
+			err = h.svc.Deny(c.Request.Context(), userCode, userID)
+		}
+		if err != nil {
+			msg := "无效的设备代码"
+			switch {
+			case errors.Is(err, authsvc.ErrDeviceExpired):
+				msg = "设备代码已过期"
+			case errors.Is(err, authsvc.ErrDeviceUsed):
+				msg = "该设备代码已被处理"
+			}
+			c.Data(http.StatusOK, "text/html; charset=utf-8", devicePageHTML(msg, code, true))
 			return
 		}
 
 		if action == "approve" {
-			h.DB.Model(&dc).Updates(map[string]interface{}{
-				"status": "authorized",
-				"scope":  dc.Scope,
-			})
 			c.Data(http.StatusOK, "text/html; charset=utf-8", devicePageHTML("授权成功！您可以关闭此页面。", "", false))
 		} else {
-			h.DB.Model(&dc).Update("status", "denied")
 			c.Data(http.StatusOK, "text/html; charset=utf-8", devicePageHTML("授权已拒绝。", "", false))
 		}
 		return
 	}
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", devicePageHTML("", code, false))
-}
-
-func generateRandomToken() string {
-	b := make([]byte, 32)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("%x", b)
 }
 
 func devicePageHTML(message string, code string, isError bool) []byte {
@@ -255,9 +214,4 @@ func (h *DeviceHandler) RegisterDeviceRoutes(r *gin.Engine) {
 	r.POST("/oauth/v2/device_authorization", h.HandleDeviceAuth)
 	r.GET("/device", h.HandleDevicePage)
 	r.POST("/device", h.HandleDevicePage)
-}
-
-func init() {
-	// Register c.HTML to not panic — the device page is a simple inline template.
-	// In production, load from view/dist/device.html or use an inline template.
 }

@@ -734,8 +734,10 @@ func (p *HTTPLLMProvider) DiagnoseChatWithTools(ctx context.Context, messages []
 		Content:      choice.Message.Content,
 	}
 	for _, tc := range choice.Message.ToolCalls {
-		var args map[string]string
-		_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+		args, err := parseToolCallArgs(tc.Function.Arguments)
+		if err != nil {
+			return nil, fmt.Errorf("tool call %q: %w", tc.Function.Name, err)
+		}
 		result.ToolCalls = append(result.ToolCalls, ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Function.Name,
@@ -743,6 +745,22 @@ func (p *HTTPLLMProvider) DiagnoseChatWithTools(ctx context.Context, messages []
 		})
 	}
 	return result, nil
+}
+
+// parseToolCallArgs 解析工具调用参数：空参数视为无参调用，
+// 非法 JSON 必须报错，避免带着空参数误执行工具。
+func parseToolCallArgs(raw string) (map[string]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return map[string]string{}, nil
+	}
+	var args map[string]string
+	if err := json.Unmarshal([]byte(raw), &args); err != nil {
+		return nil, fmt.Errorf("invalid tool call arguments: %w", err)
+	}
+	if args == nil {
+		args = map[string]string{}
+	}
+	return args, nil
 }
 
 // StreamCallback 流式输出回调
@@ -888,8 +906,10 @@ func (p *HTTPLLMProvider) parseOpenAISSEWithTools(body io.Reader, cb StreamCallb
 			for i, acc := range toolAccums {
 				if i < newIdx && !acc.Completed {
 					acc.Completed = true
-					var args map[string]string
-					_ = json.Unmarshal([]byte(acc.Args), &args)
+					args, err := parseToolCallArgs(acc.Args)
+					if err != nil {
+						return nil, fmt.Errorf("tool call %q: %w", acc.Name, err)
+					}
 					toolCalls = append(toolCalls, ToolCall{
 						ID:        acc.ID,
 						Name:      acc.Name,
@@ -933,8 +953,10 @@ func (p *HTTPLLMProvider) parseOpenAISSEWithTools(body io.Reader, cb StreamCallb
 					continue
 				}
 				acc.Completed = true
-				var args map[string]string
-				_ = json.Unmarshal([]byte(acc.Args), &args)
+				args, err := parseToolCallArgs(acc.Args)
+				if err != nil {
+					return nil, fmt.Errorf("tool call %q: %w", acc.Name, err)
+				}
 				toolCalls = append(toolCalls, ToolCall{
 					ID:        acc.ID,
 					Name:      acc.Name,

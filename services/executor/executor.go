@@ -104,14 +104,14 @@ func (m *memoryAuditStore) GetByID(id string) (*ex.AuditLog, error) {
 	return nil, fmt.Errorf("audit log not found: %s", id)
 }
 
-func NewK8sExecutor(logger interfaces.Logger, k8sClient *kubernetes.Clientset, cfg *cfg.Config) *K8sExecutor {
+func NewK8sExecutor(logger interfaces.Logger, k8sClient *kubernetes.Clientset, conf *cfg.Config) *K8sExecutor {
 	// Initialize with in-memory default store; may be replaced with MySQL store below
 	store := newMemoryAuditStore()
-	if cfg != nil {
-		auditCfg := cfg.GetExecutorConf().AuditLog
+	if conf != nil {
+		auditCfg := conf.GetExecutorConf().AuditLog
 		if strings.ToLower(strings.TrimSpace(auditCfg.Type)) == "postgres" {
-			if db := cfg.GetConfigGormDB(); db != nil {
-				if s, err := NewPostgresAuditStore(db, auditCfg.Table); err == nil {
+			if db := conf.GetConfigGormDB(); db != nil {
+				if s, err := NewPostgresAuditStore(logger, db, auditCfg.Table); err == nil {
 					store = s
 				} else {
 					logger.Warn("Failed to initialize PostgreSQL audit store, using in-memory storage", zap.Error(err))
@@ -120,23 +120,40 @@ func NewK8sExecutor(logger interfaces.Logger, k8sClient *kubernetes.Clientset, c
 		}
 	}
 	e := &K8sExecutor{
-		logger:       logger,
-		k8sClient:    k8sClient,
-		cfg:          cfg,
-		auditStore:   store,
-		opAuditStore: nil,
-		stopCh:       make(chan struct{}),
+		logger:     logger,
+		k8sClient:  k8sClient,
+		cfg:        conf,
+		auditStore: store,
+		stopCh:     make(chan struct{}),
 	}
-	if cfg != nil {
-		e.autoMode.Store(cfg.GetExecutorConf().AutoMode)
+	if conf != nil {
+		e.autoMode.Store(conf.GetExecutorConf().AutoMode)
+		// 操作审计：只要数据库可用就接线，保证每个执行动作留痕
+		if db := conf.GetConfigGormDB(); db != nil {
+			table := conf.GetExecutorConf().AuditLog.OperationTable
+			if table == "" {
+				table = cfg.DefaultOperationAuditTable
+			}
+			if opStore, err := audstore.NewPostgresOperationAuditStore(db, table); err == nil {
+				e.opAuditStore = opStore
+			} else {
+				logger.Warn("Failed to initialize operation audit store", zap.Error(err))
+			}
+		}
+		e.logger.Info("Executor initialized",
+			zap.Bool("enabled", conf.GetExecutorConf().Enabled),
+			zap.Bool("autoMode", conf.GetExecutorConf().AutoMode),
+			zap.Bool("operationAudit", e.opAuditStore != nil))
 	}
-	e.logger.Info("Executor initialized",
-		zap.Bool("enabled", cfg.GetExecutorConf().Enabled),
-		zap.Bool("autoMode", cfg.GetExecutorConf().AutoMode))
 
 	go e.cleanCoolDowns(10*time.Minute, 10*time.Minute)
 
 	return e
+}
+
+// SetOperationAuditStore 注入操作审计存储（可选，构造时已按配置自动接线）
+func (e *K8sExecutor) SetOperationAuditStore(store audstore.OperationAuditStore) {
+	e.opAuditStore = store
 }
 
 func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.ExecutionResult, error) {
@@ -150,32 +167,24 @@ func (e *K8sExecutor) Execute(ctx context.Context, plan ex.ExecutionPlan) (*ex.E
 		return nil, fmt.Errorf("unsupported action: %s", action)
 	}
 
-	execCfg := e.getActionConf(string(action))
-	threshold := execCfg.AutoThreshold
-
 	autoMode := e.IsAutoMode()
 	if plan.ApprovedBy == "" {
-		// 未经人工审批：必须处于自动模式且置信度达标才执行
+		// 未经人工审批：必须显式开启自动模式，且通过自动执行门槛（动作白名单 + 配置侧低风险 + 置信度）
+		reason := "approval required"
 		if autoMode {
-			if plan.Confidence < threshold {
-				audit := ex.AuditLog{
-					ID:           generateAuditID(),
-					Plan:         plan,
-					Result:       ex.ExecutionResult{Success: false, Message: "auto mode disabled: confidence below threshold", Timestamp: time.Now()},
-					AutoExecuted: true,
-					ApprovedBy:   "",
-					Timestamp:    time.Now(),
-				}
-				_ = e.appendAuditLog(audit)
-				return &audit.Result, nil
+			if allowed, denyReason := e.canAutoExecute(action, plan.Confidence); !allowed {
+				reason = denyReason
+			} else {
+				reason = ""
 			}
-		} else {
+		}
+		if reason != "" {
 			audit := ex.AuditLog{
 				ID:           generateAuditID(),
 				Plan:         plan,
-				Result:       ex.ExecutionResult{Success: false, Message: "approval required", Timestamp: time.Now()},
+				Result:       ex.ExecutionResult{Success: false, Message: reason, Timestamp: time.Now()},
 				AutoExecuted: false,
-				ApprovedBy:   plan.ApprovedBy,
+				ApprovedBy:   "",
 				Timestamp:    time.Now(),
 			}
 			_ = e.appendAuditLog(audit)
@@ -713,6 +722,32 @@ func (e *K8sExecutor) updateHPA(ctx context.Context, plan ex.ExecutionPlan) erro
 	return err
 }
 
+// autoExecutableActions 允许自动执行的动作白名单：仅 Pod 级安全重启
+// （eviction 尊重 PDB，且受重启次数上限与冷却期护栏约束）。
+// 滚动重启/扩缩容/删除/改镜像/改配置等一律转人工提案，避免 LLM 自报置信度驱动高危操作。
+var autoExecutableActions = map[ex.ActionType]bool{
+	ex.ActionRestartPod: true,
+}
+
+// canAutoExecute 自动执行门槛：动作白名单 + 配置（规则侧）显式声明的低风险与正阈值 + 置信度达标。
+// LLM 自报的 plan.Risk / plan.Confidence 不能作为唯一依据。
+func (e *K8sExecutor) canAutoExecute(action ex.ActionType, confidence float64) (bool, string) {
+	if !autoExecutableActions[action] {
+		return false, "pending approval: action is not allowed for auto-execution"
+	}
+	if e.cfg == nil {
+		return false, "pending approval: executor configuration missing"
+	}
+	ac, ok := e.cfg.GetExecutorConf().Actions[string(action)]
+	if !ok || !strings.EqualFold(strings.TrimSpace(ac.Risk), "low") || ac.AutoThreshold <= 0 {
+		return false, "pending approval: action is not configured as low-risk auto-executable"
+	}
+	if confidence < ac.AutoThreshold {
+		return false, "pending approval: confidence below threshold"
+	}
+	return true, ""
+}
+
 func (e *K8sExecutor) getActionConf(action string) cfg.ActionConf {
 	if e.cfg == nil {
 		return cfg.ActionConf{Risk: "low", AutoThreshold: 0.0}
@@ -750,6 +785,11 @@ func matchesAuditLog(a ex.AuditLog, filters map[string]string) bool {
 	}
 	if v, ok := filters["autoExecuted"]; ok {
 		if (v == "true" && !a.AutoExecuted) || (v == "false" && a.AutoExecuted) {
+			return false
+		}
+	}
+	if v, ok := filters["fingerprint"]; ok {
+		if a.Plan.Fingerprint != v {
 			return false
 		}
 	}

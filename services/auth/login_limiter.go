@@ -2,11 +2,16 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+// ErrLimiterUnavailable signals that Redis is configured but unreachable. The
+// login flow must fail closed (reject) rather than silently disable rate limiting.
+var ErrLimiterUnavailable = errors.New("login limiter unavailable")
 
 type LoginLimiter struct {
 	rdb *redis.Client
@@ -17,8 +22,14 @@ func NewLoginLimiter(rdb *redis.Client) *LoginLimiter {
 }
 
 func (l *LoginLimiter) CheckIP(ctx context.Context, ip string) error {
+	if l == nil || l.rdb == nil {
+		return nil // limiter disabled (no Redis configured)
+	}
 	key := "ratelimit:login:ip:" + ip
-	count, _ := l.rdb.Incr(ctx, key).Result()
+	count, err := l.rdb.Incr(ctx, key).Result()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
+	}
 	if count == 1 {
 		l.rdb.Expire(ctx, key, 1*time.Minute)
 	}
@@ -41,9 +52,17 @@ func (l *LoginLimiter) RecordFailure(ctx context.Context, username string) (fail
 	return fc, false
 }
 
-func (l *LoginLimiter) IsLocked(ctx context.Context, username string) bool {
-	exists, _ := l.rdb.Exists(ctx, "lockout:"+username).Result()
-	return exists > 0
+// IsLocked reports whether the account is locked out. A Redis error is returned
+// so the caller can fail closed instead of treating the account as unlocked.
+func (l *LoginLimiter) IsLocked(ctx context.Context, username string) (bool, error) {
+	if l == nil || l.rdb == nil {
+		return false, nil
+	}
+	exists, err := l.rdb.Exists(ctx, "lockout:"+username).Result()
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
+	}
+	return exists > 0, nil
 }
 
 func (l *LoginLimiter) ClearFailures(ctx context.Context, username string) {
@@ -63,7 +82,10 @@ func (l *LoginLimiter) GetStatus(ctx context.Context, ip string, username string
 	}
 
 	requireCaptcha = totalFail >= 3
-	locked = l.IsLocked(ctx, username)
+	locked, err := l.IsLocked(ctx, username)
+	if err != nil {
+		locked = true // fail closed when the lockout state cannot be read
+	}
 	return totalFail, requireCaptcha, locked
 }
 

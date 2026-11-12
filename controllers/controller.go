@@ -32,11 +32,6 @@ func (ctrls *Controllers) RegisterRoutes(app *gin.Engine) {
 func (ctrls *Controllers) RegisterControllersRoutes(app *gin.Engine) {
 }
 
-func (ctrls *Controllers) InitCollect() {
-	go ctrls.K8sResourceCtrl.Collect("")
-	go ctrls.K8sResourceCtrl.ConsumeKafkaMessages()
-}
-
 func (ctrls *Controllers) InitCollectWithContext(ctx context.Context) {
 	go ctrls.K8sResourceCtrl.CollectWithContext(ctx, "")
 	go ctrls.K8sResourceCtrl.ConsumeKafkaMessagesWithContext(ctx)

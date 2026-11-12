@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +16,8 @@ import (
 	kubernetes "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	maudit "gitee.com/tddh/mutong/models/audit"
+	audstore "gitee.com/tddh/mutong/services/audit"
 	t "gitee.com/tddh/mutong/services/terminal"
 )
 
@@ -58,14 +61,71 @@ type TerminalController struct {
 	k8sClient  *kubernetes.Clientset
 	restConfig *rest.Config
 	logger     *zap.Logger
+	auditStore audstore.OperationAuditStore
 }
 
 func NewTerminalController(logger *zap.Logger, k8sClient *kubernetes.Clientset, restConfig *rest.Config) *TerminalController {
+	manager := t.NewTerminalSessionManager()
+	manager.SetLogger(logger)
 	return &TerminalController{
-		Manager:    t.NewTerminalSessionManager(),
+		Manager:    manager,
 		k8sClient:  k8sClient,
 		restConfig: restConfig,
 		logger:     logger,
+	}
+}
+
+// SetAllowedNamespaces 注入终端命名空间白名单（可选，空=默认拒绝系统命名空间）
+func (c *TerminalController) SetAllowedNamespaces(namespaces []string) {
+	c.Manager.SetAllowedNamespaces(namespaces)
+}
+
+// SetAuditStore 注入操作审计存储（可选，未注入时仍写服务端日志）
+func (c *TerminalController) SetAuditStore(store audstore.OperationAuditStore) {
+	c.auditStore = store
+}
+
+// terminalOperator 解析当前请求的操作者标识
+func terminalOperator(ctx *gin.Context) string {
+	if u := ctx.GetString("username"); u != "" {
+		return u
+	}
+	if u := GetUserUUID(ctx); u != "" {
+		return u
+	}
+	if uid, ok := GetUserID(ctx); ok {
+		return fmt.Sprintf("user-%d", uid)
+	}
+	return "unknown"
+}
+
+// recordTerminalAudit 终端会话/执行留痕：服务端日志 + 操作审计表
+func (c *TerminalController) recordTerminalAudit(operator string, ev t.AuditEvent) {
+	c.logger.Info("Terminal audit",
+		zap.String("operator", operator),
+		zap.String("action", ev.Action),
+		zap.String("cluster", ev.Cluster),
+		zap.String("namespace", ev.Namespace),
+		zap.String("pod", ev.Pod),
+		zap.String("container", ev.Container),
+		zap.String("shell", ev.Shell),
+		zap.String("session", ev.SessionID),
+		zap.String("result", ev.Result))
+	if c.auditStore == nil {
+		return
+	}
+	if err := c.auditStore.Save(maudit.OperationAuditLog{
+		Operator:     operator,
+		Action:       ev.Action,
+		ResourceType: "Pod",
+		ResourceName: ev.Pod,
+		Namespace:    ev.Namespace,
+		Result:       ev.Result,
+		Reason:       "web terminal",
+		Timestamp:    time.Now(),
+		Details:      fmt.Sprintf("cluster=%s container=%s shell=%s session=%s", ev.Cluster, ev.Container, ev.Shell, ev.SessionID),
+	}); err != nil {
+		c.logger.Error("Failed to persist terminal audit log", zap.Error(err), zap.String("session", ev.SessionID))
 	}
 }
 
@@ -85,7 +145,7 @@ func (c *TerminalController) namespaces(ctx *gin.Context) {
 	nsList, err := c.k8sClient.CoreV1().Namespaces().List(ctx.Request.Context(), metav1.ListOptions{})
 	if err != nil {
 		c.logger.Error("Failed to list namespaces", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list namespaces"})
 		return
 	}
 
@@ -108,7 +168,7 @@ func (c *TerminalController) pods(ctx *gin.Context) {
 	podList, err := c.k8sClient.CoreV1().Pods(namespace).List(ctx.Request.Context(), metav1.ListOptions{})
 	if err != nil {
 		c.logger.Error("Failed to list pods", zap.Error(err), zap.String("namespace", namespace))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list pods"})
 		return
 	}
 
@@ -132,7 +192,8 @@ func (c *TerminalController) containers(ctx *gin.Context) {
 	if podName == "" {
 		podList, err := c.k8sClient.CoreV1().Pods(namespace).List(ctx.Request.Context(), metav1.ListOptions{})
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			c.logger.Error("Failed to list pods", zap.Error(err), zap.String("namespace", namespace))
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list pods"})
 			return
 		}
 		pods := make([]string, 0, len(podList.Items))
@@ -146,7 +207,7 @@ func (c *TerminalController) containers(ctx *gin.Context) {
 	pod, err := c.k8sClient.CoreV1().Pods(namespace).Get(ctx.Request.Context(), podName, metav1.GetOptions{})
 	if err != nil {
 		c.logger.Error("Failed to get pod", zap.Error(err), zap.String("namespace", namespace), zap.String("pod", podName))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get pod containers"})
 		return
 	}
 
@@ -229,16 +290,40 @@ func (c *TerminalController) ws(ctx *gin.Context) {
 		container = pod
 	}
 
+	operator := terminalOperator(ctx)
+	// exec 前校验命名空间白名单，禁止进入系统命名空间
+	if !c.Manager.IsNamespaceAllowed(namespace) {
+		c.logger.Warn("Terminal namespace denied",
+			zap.String("operator", operator),
+			zap.String("cluster", cluster),
+			zap.String("namespace", namespace),
+			zap.String("pod", pod))
+		c.recordTerminalAudit(operator, t.AuditEvent{
+			Cluster: cluster, Namespace: namespace, Pod: pod, Container: container,
+			Action: "terminal_session_denied", Result: "namespace not allowed",
+		})
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: namespace not allowed for terminal access\x1b[0m\r\n"))
+		return
+	}
+
 	if c.Manager.SessionCount() >= 100 {
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: too many concurrent terminal sessions\x1b[0m\r\n"))
 		return
 	}
-	sess, _ := c.Manager.CreateSession(cluster, namespace, pod, container, ws)
-	if sess != nil {
-		defer func() { _ = c.Manager.CloseSession(sess.ID) }()
-		sess.SetK8sClient(c.k8sClient, c.restConfig)
-		go sess.StartK8sExec(cluster, namespace, pod, container, shell)
+	sess, err := c.Manager.CreateSession(cluster, namespace, pod, container, ws)
+	if err != nil {
+		c.logger.Warn("Terminal session rejected", zap.Error(err), zap.String("namespace", namespace), zap.String("pod", pod))
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31mError: terminal session not permitted\x1b[0m\r\n"))
+		return
 	}
+	defer func() { _ = c.Manager.CloseSession(sess.ID) }()
+	sess.SetK8sClient(c.k8sClient, c.restConfig)
+	sess.SetAuditHook(func(ev t.AuditEvent) { c.recordTerminalAudit(operator, ev) })
+	c.recordTerminalAudit(operator, t.AuditEvent{
+		SessionID: sess.ID, Cluster: cluster, Namespace: namespace, Pod: pod, Container: container,
+		Action: "terminal_session_open", Result: "opened",
+	})
+	go sess.StartK8sExec(cluster, namespace, pod, container, shell)
 
 	for {
 		_, msg, err := ws.ReadMessage()

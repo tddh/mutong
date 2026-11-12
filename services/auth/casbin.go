@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -9,6 +11,27 @@ import (
 	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"gorm.io/gorm"
 )
+
+// ResolveConfigPath resolves a repo-relative config path without depending on
+// the process CWD. It prefers the CWD (development), then MUTONG_CONFIG_DIR
+// (explicit deployment override), then the executable's directory (bundled
+// release). The first existing candidate wins; if none exist it returns the
+// CWD-relative path so the caller surfaces a clear "file not found" error.
+func ResolveConfigPath(rel string) string {
+	candidates := []string{rel}
+	if dir := os.Getenv("MUTONG_CONFIG_DIR"); dir != "" {
+		candidates = append(candidates, filepath.Join(dir, rel))
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), rel))
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return rel
+}
 
 // RBAC policy modes.
 const (
@@ -29,7 +52,7 @@ func InitCasbin(db *gorm.DB) error {
 	if err != nil {
 		return err
 	}
-	e, err := casbin.NewEnforcer("configs/casbin_model.conf", adapter)
+	e, err := casbin.NewEnforcer(ResolveConfigPath("configs/casbin_model.conf"), adapter)
 	if err != nil {
 		return err
 	}

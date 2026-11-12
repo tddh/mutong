@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -17,6 +18,18 @@ type SessionClaims struct {
 	Role         string `json:"role"`
 	AuthProvider string `json:"auth_provider"`
 	ExpiresAt    int64  `json:"exp"`
+	// PasswordFingerprint binds the session to the password hash at issue time
+	// so a password change revokes outstanding sessions. Empty for tokens issued
+	// before this binding existed; those still get status/role revocation.
+	PasswordFingerprint string `json:"pwd,omitempty"`
+}
+
+// PasswordFingerprint returns a short, non-reversible fingerprint of a password
+// hash. It is embedded in session claims to detect password changes without
+// storing the hash itself in the token.
+func PasswordFingerprint(passwordHash string) string {
+	sum := sha256.Sum256([]byte(passwordHash))
+	return hex.EncodeToString(sum[:8])
 }
 
 // SessionManager issues and verifies local HMAC-signed session tokens.

@@ -42,7 +42,7 @@ func (c *MetricsController) getPodMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetPodMetrics(ctx.Request.Context(), namespace, name)
 	if err != nil {
 		c.logger.Error("Failed to get pod metrics", zap.Error(err), zap.String("namespace", namespace), zap.String("pod", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)
@@ -61,7 +61,7 @@ func (c *MetricsController) getNodeMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetNodeMetrics(ctx.Request.Context(), name)
 	if err != nil {
 		c.logger.Error("Failed to get node metrics", zap.Error(err), zap.String("node", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)
@@ -81,7 +81,7 @@ func (c *MetricsController) getDeploymentMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetDeploymentMetrics(ctx.Request.Context(), namespace, name)
 	if err != nil {
 		c.logger.Error("Failed to get deployment metrics", zap.Error(err), zap.String("namespace", namespace), zap.String("deployment", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)
@@ -101,7 +101,7 @@ func (c *MetricsController) getStatefulSetMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetStatefulSetMetrics(ctx.Request.Context(), namespace, name)
 	if err != nil {
 		c.logger.Error("Failed to get statefulset metrics", zap.Error(err), zap.String("namespace", namespace), zap.String("statefulset", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)
@@ -121,7 +121,7 @@ func (c *MetricsController) getDaemonSetMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetDaemonSetMetrics(ctx.Request.Context(), namespace, name)
 	if err != nil {
 		c.logger.Error("Failed to get daemonset metrics", zap.Error(err), zap.String("namespace", namespace), zap.String("daemonset", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)
@@ -141,7 +141,7 @@ func (c *MetricsController) getServiceMetrics(ctx *gin.Context) {
 	points, err := c.querier.GetServiceMetrics(ctx.Request.Context(), namespace, name)
 	if err != nil {
 		c.logger.Error("Failed to get service metrics", zap.Error(err), zap.String("namespace", namespace), zap.String("service", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 	ctx.JSON(http.StatusOK, points)

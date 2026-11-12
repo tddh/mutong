@@ -5,12 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"gitee.com/tddh/mutong/models"
 	"gorm.io/gorm"
 )
+
+// ErrTokenNotFound is returned when a token does not exist, is already revoked,
+// or does not belong to the requesting user. It carries no internal detail.
+var ErrTokenNotFound = errors.New("token not found or already revoked")
 
 func GenerateAPIToken(tokenType string) (raw, prefix, hash string) {
 	b := make([]byte, 32)
@@ -81,7 +86,7 @@ func RevokeToken(db *gorm.DB, tokenID uint, userID uint) error {
 		return fmt.Errorf("revoke token: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("token not found or already revoked")
+		return ErrTokenNotFound
 	}
 	return nil
 }

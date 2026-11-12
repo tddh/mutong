@@ -260,6 +260,65 @@ func TestProcessLabelsRelationship_MatchingExcludedValue(t *testing.T) {
 	}
 }
 
+// SEC-16：Label 顶点写入必须走 sanitizer，标签键值中的引号/反斜杠不得破坏 nGQL 语句
+func TestProcessLabelsRelationship_SanitizesInjection(t *testing.T) {
+	mockDB := &mockNebulaGraphDB{
+		executeFn: func(query string) (*nebula.ResultSet, error) {
+			return nil, nil
+		},
+	}
+	mockCache := &mockNebulaCache{
+		getFn: func(key string) ([]byte, error) {
+			return nil, bigcache.ErrEntryNotFound
+		},
+	}
+	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
+
+	maliciousValue := `evil'; DELETE VERTEX 'x`
+	maliciousKey := `k\e'y`
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Pod",
+			"metadata": map[string]interface{}{
+				"name": "test-pod",
+				"uid":  "test-uid-inject",
+				"labels": map[string]interface{}{
+					maliciousKey: maliciousValue,
+				},
+			},
+		},
+	}
+
+	svc.processLabelsRelationship(obj)
+
+	var labelQuery string
+	for _, call := range mockDB.calls {
+		if containsStr(call, "INSERT VERTEX IF NOT EXISTS Label") {
+			labelQuery = call
+		}
+	}
+	if labelQuery == "" {
+		t.Fatal("expected Label INSERT query")
+	}
+	if !containsStr(labelQuery, "VALUES '") {
+		t.Errorf("label vertex must use sanitizer-quoted literals: %s", labelQuery)
+	}
+	if containsStr(labelQuery, `VALUES "`) {
+		t.Errorf("label vertex must not use raw double-quoted interpolation: %s", labelQuery)
+	}
+	// 单引号与反斜杠必须被转义，注入载荷不能闭合字面量
+	if !containsStr(labelQuery, `evil\'; DELETE VERTEX \'x`) {
+		t.Errorf("single quotes in label value must be escaped: %s", labelQuery)
+	}
+	if containsStr(labelQuery, `evil'; DELETE`) {
+		t.Errorf("unescaped injection payload reached nGQL: %s", labelQuery)
+	}
+	if !containsStr(labelQuery, `k\\e\'y`) {
+		t.Errorf("backslash and quote in label key must be escaped: %s", labelQuery)
+	}
+}
+
 // --- Tests for processMutatingWebhookConfigurationRelationship ---
 
 func TestProcessWebhookConfigurationRelationship_NoWebhooks(t *testing.T) {

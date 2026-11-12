@@ -109,7 +109,8 @@ func (c *DiagnosisController) RegisterRoutes(app *gin.Engine) {
 func (c *DiagnosisController) runDiagnosis(ctx *gin.Context) {
 	var req diagnosis.DiagnosisRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid diagnosis request payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 
@@ -128,7 +129,7 @@ func (c *DiagnosisController) runDiagnosis(ctx *gin.Context) {
 	result, err := c.engine.Diagnose(ctx.Request.Context(), req)
 	if err != nil {
 		c.logger.Error("Diagnosis failed", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "diagnosis failed"})
 		return
 	}
 
@@ -162,7 +163,8 @@ func (c *DiagnosisController) runDiagnosis(ctx *gin.Context) {
 func (c *DiagnosisController) rerunDiagnosis(ctx *gin.Context) {
 	var req diagnosis.DiagnosisRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid rerun diagnosis request payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 
@@ -180,7 +182,7 @@ func (c *DiagnosisController) rerunDiagnosis(ctx *gin.Context) {
 	result, err := c.engine.Diagnose(ctx.Request.Context(), req)
 	if err != nil {
 		c.logger.Error("Rerun diagnosis failed", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "diagnosis failed"})
 		return
 	}
 
@@ -236,7 +238,7 @@ func (c *DiagnosisController) executeMCPTool(ctx *gin.Context) {
 		c.logger.Error("MCP tool execution failed",
 			zap.String("tool", name),
 			zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "tool execution failed"})
 		return
 	}
 
@@ -253,7 +255,8 @@ func (c *DiagnosisController) executeMCPTool(ctx *gin.Context) {
 func (c *DiagnosisController) startChat(ctx *gin.Context) {
 	var req diagnosis_svc.ChatStartRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid chat start request payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 
@@ -261,7 +264,7 @@ func (c *DiagnosisController) startChat(ctx *gin.Context) {
 	session, initialResult, err := c.chatManager.Create(ctx.Request.Context(), userID, req)
 	if err != nil {
 		c.logger.Error("Failed to create chat session", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create chat session"})
 		return
 	}
 
@@ -333,7 +336,8 @@ func (c *DiagnosisController) sendChatMessage(ctx *gin.Context) {
 		Content string `json:"content"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid chat message payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 
@@ -456,7 +460,7 @@ func (c *DiagnosisController) streamLLMResponse(session *diagnosis_svc.ChatSessi
 		roundCancel()
 		if err != nil {
 			c.logger.Error("Function calling failed", zap.Error(err), zap.Int("round", round))
-			_ = session.SendSSE(&diagnosis_svc.SSEEvent{Type: "error", Content: "AI 分析出错: " + err.Error()})
+			_ = session.SendSSE(&diagnosis_svc.SSEEvent{Type: "error", Content: "AI 分析出错，请稍后重试"})
 			return
 		}
 
@@ -488,15 +492,18 @@ func (c *DiagnosisController) streamLLMResponse(session *diagnosis_svc.ChatSessi
 				toolCancel()
 
 				resultStr := result
+				clientResult := result
 				if execErr != nil {
+					// 内部错误细节只进服务端日志与 LLM 上下文，不回显客户端
 					resultStr = "错误: " + execErr.Error()
+					clientResult = "工具执行失败，详见服务端日志"
 					c.logger.Error("Tool execution failed (streamLLM)",
 						zap.String("tool", tc.Name),
 						zap.Any("args", tc.Arguments),
 						zap.Error(execErr))
 				}
 
-				resultData, _ := json.Marshal(map[string]interface{}{"result": resultStr})
+				resultData, _ := json.Marshal(map[string]interface{}{"result": clientResult})
 				_ = session.SendSSE(&diagnosis_svc.SSEEvent{
 					Type:    "tool_result",
 					Content: tc.Name,
@@ -560,7 +567,8 @@ type chatContextResponse struct {
 func (c *DiagnosisController) chatContext(ginCtx *gin.Context) {
 	var req chatContextRequest
 	if err := ginCtx.ShouldBindJSON(&req); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid chat context request payload", zap.Error(err))
+		ginCtx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 	if req.AlertFingerprint == "" && req.ResourceKind == "" && req.ResourceName == "" && req.Description == "" {
@@ -705,7 +713,7 @@ func (c *DiagnosisController) chatContext(ginCtx *gin.Context) {
 		result, err := c.engine.Diagnose(ctx, diagReq)
 		if err != nil {
 			c.logger.Error("Initial diagnosis failed", zap.Error(err))
-			ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "initial diagnosis failed: " + err.Error()})
+			ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "initial diagnosis failed"})
 			return
 		}
 		dCtx.Topology = result.TopologySnapshot
@@ -787,7 +795,8 @@ type askChatResponse struct {
 func (c *DiagnosisController) askChat(ginCtx *gin.Context) {
 	var req askChatRequest
 	if err := ginCtx.ShouldBindJSON(&req); err != nil {
-		ginCtx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid ask chat request payload", zap.Error(err))
+		ginCtx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 	if len(req.Messages) == 0 {
@@ -950,6 +959,9 @@ func (c *DiagnosisController) askChat(ginCtx *gin.Context) {
 					c.logger.Info("Tool executed successfully", zap.String("tool", tc.Name), zap.Int("resultLen", len(r.result)))
 				}
 				summary := resultStr
+				if r.err != nil {
+					summary = "工具执行失败，详见服务端日志"
+				}
 				if len(summary) > 200 {
 					summary = summary[:200] + "..."
 				}
@@ -1259,7 +1271,8 @@ func (c *DiagnosisController) listSessions(ginCtx *gin.Context) {
 
 	sessions, total, err := c.chatManager.ListSessions(ginCtx.Request.Context(), userID, limit, offset)
 	if err != nil {
-		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.logger.Error("Failed to list chat sessions", zap.Error(err), zap.Uint("user_id", userID))
+		ginCtx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list sessions"})
 		return
 	}
 
@@ -1285,7 +1298,12 @@ func (c *DiagnosisController) getSession(ginCtx *gin.Context) {
 	}
 
 	userID, _ := GetUserID(ginCtx)
-	if session.UserID != 0 && userID != 0 && session.UserID != userID {
+	// 无法确认属主（userID=0）时一律拒绝，管理员保留跨用户查看语义
+	if GetUserRole(ginCtx) != "admin" && (userID == 0 || session.UserID != userID) {
+		c.logger.Warn("Session ownership check failed",
+			zap.String("session_id", sessionID),
+			zap.Uint("request_user_id", userID),
+			zap.Uint("session_user_id", session.UserID))
 		ginCtx.JSON(http.StatusForbidden, gin.H{"error": "permission denied"})
 		return
 	}

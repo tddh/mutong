@@ -26,12 +26,17 @@ func NewMonitoringController(logger *zap.Logger, querier interfaces.MetricsQueri
 func (c *MonitoringController) RegisterRoutes(app *gin.Engine) {
 	api := app.Group("/api/v1/monitoring")
 	api.GET("/metrics/:resourceType", c.GetResourceMetrics)
-	api.GET("/timeseries", c.GetMetricTimeseries)
+	// 任意 PromQL 表达式查询只允许管理员使用
+	api.GET("/timeseries", RequireRole("admin"), c.GetMetricTimeseries)
 	api.GET("/health", c.GetSystemHealth)
 	api.GET("/catalog", c.GetMetricCatalog)
 }
 
 func (c *MonitoringController) GetResourceMetrics(ctx *gin.Context) {
+	if c.metricsQuerier == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Prometheus metrics are not configured"})
+		return
+	}
 	resourceType := ctx.Param("resourceType")
 	namespace := ctx.Query("namespace")
 	name := ctx.Query("name")
@@ -64,7 +69,7 @@ func (c *MonitoringController) GetResourceMetrics(ctx *gin.Context) {
 
 	if err != nil {
 		c.logger.Error("Failed to get metrics", zap.Error(err), zap.String("resourceType", resourceType), zap.String("namespace", namespace), zap.String("name", name))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metrics"})
 		return
 	}
 
@@ -72,6 +77,10 @@ func (c *MonitoringController) GetResourceMetrics(ctx *gin.Context) {
 }
 
 func (c *MonitoringController) GetMetricTimeseries(ctx *gin.Context) {
+	if c.metricsQuerier == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Prometheus metrics are not configured"})
+		return
+	}
 	expr := ctx.Query("expr")
 	if expr == "" {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "expr is required"})
@@ -86,7 +95,7 @@ func (c *MonitoringController) GetMetricTimeseries(ctx *gin.Context) {
 	results, err := c.metricsQuerier.QueryMetricTimeseries(ctx.Request.Context(), expr, start, end, step)
 	if err != nil {
 		c.logger.Error("Failed to query timeseries", zap.Error(err), zap.String("expr", expr))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to query timeseries"})
 		return
 	}
 
@@ -104,9 +113,10 @@ func (c *MonitoringController) GetSystemHealth(ctx *gin.Context) {
 
 	err := c.metricsQuerier.CheckHealth(ctx.Request.Context())
 	if err != nil {
+		c.logger.Warn("Prometheus health check failed", zap.Error(err))
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "unhealthy",
-			"error":  err.Error(),
+			"error":  "prometheus health check failed",
 		})
 		return
 	}
@@ -117,10 +127,14 @@ func (c *MonitoringController) GetSystemHealth(ctx *gin.Context) {
 }
 
 func (c *MonitoringController) GetMetricCatalog(ctx *gin.Context) {
+	if c.metricsQuerier == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "Prometheus metrics are not configured"})
+		return
+	}
 	catalog, err := c.metricsQuerier.GetMetricCatalog(ctx.Request.Context(), true, false)
 	if err != nil {
 		c.logger.Error("Failed to get metric catalog", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get metric catalog"})
 		return
 	}
 

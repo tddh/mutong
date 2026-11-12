@@ -1,15 +1,17 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 
 	"gitee.com/tddh/mutong/models"
+	"gitee.com/tddh/mutong/services"
 	"gitee.com/tddh/mutong/services/auth"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -21,6 +23,16 @@ type AuthController struct {
 	LoginLimit    *auth.LoginLimiter
 	OIDCAvailable bool
 	AuthMode      string
+	Logger        *zap.Logger
+}
+
+// log returns the configured logger, falling back to the zap global so callers
+// that do not wire a logger still compile and run.
+func (ac *AuthController) log() *zap.Logger {
+	if ac.Logger != nil {
+		return ac.Logger
+	}
+	return zap.L()
 }
 
 // cookieSecure reports whether session cookies should carry the Secure flag.
@@ -78,17 +90,28 @@ func (ac *AuthController) Login(c *gin.Context) {
 
 	if ac.LoginLimit != nil {
 		if err := ac.LoginLimit.CheckIP(c.Request.Context(), ip); err != nil {
+			if errors.Is(err, auth.ErrLimiterUnavailable) {
+				ac.log().Error("login limiter unavailable; rejecting login (fail closed)", zap.Error(err))
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "登录服务暂不可用，请稍后再试"})
+				return
+			}
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "请求过于频繁，请稍后再试"})
 			return
 		}
-		if ac.LoginLimit.IsLocked(c.Request.Context(), req.Username) {
+		locked, err := ac.LoginLimit.IsLocked(c.Request.Context(), req.Username)
+		if err != nil {
+			ac.log().Error("login limiter unavailable; rejecting login (fail closed)", zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "登录服务暂不可用，请稍后再试"})
+			return
+		}
+		if locked {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "账号已被临时锁定，请15分钟后重试"})
 			return
 		}
 	}
 
-	var user models.User
-	if err := ac.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+	user, err := services.FindUserByUsername(ac.DB, req.Username)
+	if err != nil {
 		if ac.LoginLimit != nil {
 			ac.LoginLimit.RecordFailure(c.Request.Context(), req.Username)
 			ac.LoginLimit.RecordIPFailure(c.Request.Context(), ip)
@@ -120,10 +143,11 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return
 	}
 	sessionToken, err := ac.Sessions.Issue(auth.SessionClaims{
-		UserID:       user.ID,
-		UUID:         user.UUID,
-		Role:         user.Role,
-		AuthProvider: "local",
+		UserID:              user.ID,
+		UUID:                user.UUID,
+		Role:                user.Role,
+		AuthProvider:        "local",
+		PasswordFingerprint: auth.PasswordFingerprint(user.PasswordHash),
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue session"})
@@ -144,18 +168,22 @@ func (ac *AuthController) Login(c *gin.Context) {
 }
 
 func (ac *AuthController) Me(c *gin.Context) {
-	var user models.User
+	var user *models.User
 
 	if uuid := GetUserUUID(c); uuid != "" {
-		if err := ac.DB.Where("uuid = ?", uuid).First(&user).Error; err != nil {
+		u, err := services.FindUserByUUID(ac.DB, uuid)
+		if err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
 			return
 		}
+		user = u
 	} else if uid, ok := GetUserID(c); ok {
-		if err := ac.DB.First(&user, uid).Error; err != nil {
+		u, err := services.FindUserByID(ac.DB, uid)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 			return
 		}
+		user = u
 	} else {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
 		return
@@ -255,7 +283,12 @@ func (ac *AuthController) RevokeToken(c *gin.Context) {
 		return
 	}
 	if err := ac.TokenSvc.RevokeToken(ac.DB, uint(tokenID), uid); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		if errors.Is(err, auth.ErrTokenNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "token not found or already revoked"})
+			return
+		}
+		ac.log().Error("failed to revoke token", zap.Uint("token_id", uint(tokenID)), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to revoke token"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "token revoked"})
@@ -266,24 +299,9 @@ func (ac *AuthController) CreateInitialAdmin(username, password string) error {
 	if err != nil {
 		return err
 	}
-
-	var existing models.User
-	err = ac.DB.Where("username = ?", username).First(&existing).Error
-	if err == nil {
-		// Admin already exists. Never reset the password from an environment
-		// variable on every startup: that turns a leaked env var into a
-		// permanent, non-rotatable backdoor.
-		return nil
-	}
-
-	return ac.DB.Create(&models.User{
-		UUID:         uuid.New().String(),
-		Username:     username,
-		PasswordHash: hash,
-		Email:        username + "@mutong.local",
-		Role:         "admin",
-		Status:       "active",
-	}).Error
+	// Never reset an existing admin's password from an environment variable on
+	// every startup; the service creates the account only when absent.
+	return services.EnsureInitialAdmin(ac.DB, username, hash)
 }
 
 func (ac *AuthController) LoginStatus(c *gin.Context) {

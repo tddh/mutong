@@ -11,6 +11,7 @@ import (
 	"gitee.com/tddh/mutong/models"
 	"gitee.com/tddh/mutong/services/auth"
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -93,17 +94,17 @@ func TestBearerTokenMiddlewareSupportsPATSessionAndOIDC(t *testing.T) {
 	}
 }
 
-// TestBearerTokenMiddlewareLegacyLocalLogin verifies that a plain-UUID
-// session cookie from AuthController.Login (before the HMAC-signed era)
-// still works via the backward-compatible UUID lookup path.
-func TestBearerTokenMiddlewareLegacyLocalLogin(t *testing.T) {
+// TestBearerTokenMiddlewareRejectsPlainUUIDCookie verifies the legacy
+// "cookie is a UUID" fallback is gone: a plain-UUID mutong_session cookie must
+// not authenticate. BearerTokenMiddleware alone establishes no identity, and
+// combined with RequireAuthMiddleware the request is rejected with 401.
+func TestBearerTokenMiddlewareRejectsPlainUUIDCookie(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = db.AutoMigrate(&models.User{}, &models.APIToken{})
 
-	// Local login user (no ZitadelUserID, AuthProvider="local")
 	user := models.User{
 		UUID:         "plain-legacy-uuid",
 		Username:     "legacy-admin",
@@ -120,18 +121,19 @@ func TestBearerTokenMiddlewareLegacyLocalLogin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(BearerTokenMiddleware(db, sessions, nil, nil))
+	r.Use(RequireAuthMiddleware())
 	r.GET("/whoami", func(c *gin.Context) {
 		c.JSON(200, gin.H{"uuid": GetUserUUID(c), "token_type": c.GetString("token_type")})
 	})
 
-	// Simulate old AuthController.Login: plain UUID as mutong_session
+	// A plain UUID (not an HMAC-signed session token) must be rejected.
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
 	req.AddCookie(&http.Cookie{Name: "mutong_session", Value: "plain-legacy-uuid"})
 	r.ServeHTTP(w, req)
 
-	if w.Code != 200 {
-		t.Fatalf("expected 200 for legacy local login, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("plain UUID cookie must not authenticate: expected 401, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -235,5 +237,276 @@ func TestLoginSetsHttpOnlyCookie(t *testing.T) {
 	}
 	if !sessionCookie.HttpOnly {
 		t.Error("mutong_session cookie should be HttpOnly")
+	}
+}
+
+// --- SEC-02 / SEC-13: PAT/SAT lifecycle, scopes, and session revocation ---
+
+func newPATTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&models.User{}, &models.APIToken{}, &models.ServiceAccount{}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+func patRouter(db *gorm.DB) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(BearerTokenMiddleware(db, nil, nil, nil))
+	r.GET("/whoami", func(c *gin.Context) { c.JSON(200, gin.H{"uuid": GetUserUUID(c)}) })
+	r.HEAD("/whoami", func(c *gin.Context) { c.Status(200) })
+	r.POST("/whoami", func(c *gin.Context) { c.JSON(200, gin.H{"uuid": GetUserUUID(c)}) })
+	return r
+}
+
+func doBearer(r *gin.Engine, method, raw string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, "/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestPATLifecycleEnforcement(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(*gorm.DB) string
+		want  int
+	}{
+		{
+			name: "active user PAT allowed",
+			setup: func(db *gorm.DB) string {
+				u := models.User{UUID: "u-ok", Username: "ok", Role: "viewer", Status: "active"}
+				db.Create(&u)
+				_, raw, _ := auth.CreateToken(db, &u.ID, nil, "pat", "pat", nil, 30)
+				return raw
+			},
+			want: http.StatusOK,
+		},
+		{
+			name: "disabled user PAT rejected",
+			setup: func(db *gorm.DB) string {
+				u := models.User{UUID: "u-dis", Username: "dis", Role: "viewer", Status: "disabled"}
+				db.Create(&u)
+				_, raw, _ := auth.CreateToken(db, &u.ID, nil, "pat", "pat", nil, 30)
+				return raw
+			},
+			want: http.StatusUnauthorized,
+		},
+		{
+			name: "missing user PAT rejected",
+			setup: func(db *gorm.DB) string {
+				bogus := uint(9999)
+				_, raw, _ := auth.CreateToken(db, &bogus, nil, "pat", "pat", nil, 30)
+				return raw
+			},
+			want: http.StatusUnauthorized,
+		},
+		{
+			name: "soft-deleted user PAT rejected",
+			setup: func(db *gorm.DB) string {
+				u := models.User{UUID: "u-del", Username: "del", Role: "viewer", Status: "active"}
+				db.Create(&u)
+				_, raw, _ := auth.CreateToken(db, &u.ID, nil, "pat", "pat", nil, 30)
+				db.Delete(&u)
+				return raw
+			},
+			want: http.StatusUnauthorized,
+		},
+		{
+			name: "active SAT allowed",
+			setup: func(db *gorm.DB) string {
+				sa := models.ServiceAccount{Name: "svc-ok", Status: "active"}
+				db.Create(&sa)
+				_, raw, _ := auth.CreateToken(db, nil, &sa.ID, "sat", "sat", nil, 30)
+				return raw
+			},
+			want: http.StatusOK,
+		},
+		{
+			name: "disabled SAT rejected",
+			setup: func(db *gorm.DB) string {
+				sa := models.ServiceAccount{Name: "svc-dis", Status: "disabled"}
+				db.Create(&sa)
+				_, raw, _ := auth.CreateToken(db, nil, &sa.ID, "sat", "sat", nil, 30)
+				return raw
+			},
+			want: http.StatusUnauthorized,
+		},
+		{
+			name: "missing SAT rejected",
+			setup: func(db *gorm.DB) string {
+				bogus := uint(9999)
+				_, raw, _ := auth.CreateToken(db, nil, &bogus, "sat", "sat", nil, 30)
+				return raw
+			},
+			want: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newPATTestDB(t)
+			raw := tc.setup(db)
+			w := doBearer(patRouter(db), http.MethodGet, raw)
+			if w.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestPATScopeEnforcement(t *testing.T) {
+	tests := []struct {
+		name   string
+		scopes []string
+		method string
+		want   int
+	}{
+		{"read scope allows GET", []string{"read"}, http.MethodGet, http.StatusOK},
+		{"read scope blocks POST", []string{"read"}, http.MethodPost, http.StatusForbidden},
+		{"read:alerts blocks POST", []string{"read:alerts"}, http.MethodPost, http.StatusForbidden},
+		{"read scope allows HEAD", []string{"read"}, http.MethodHead, http.StatusOK},
+		{"empty scopes allow POST", nil, http.MethodPost, http.StatusOK},
+		{"read+write allow POST", []string{"read", "write"}, http.MethodPost, http.StatusOK},
+		{"write allows POST", []string{"write"}, http.MethodPost, http.StatusOK},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newPATTestDB(t)
+			u := models.User{UUID: "u-scope", Username: "scope", Role: "viewer", Status: "active"}
+			db.Create(&u)
+			_, raw, err := auth.CreateToken(db, &u.ID, nil, "pat", "pat", tc.scopes, 30)
+			if err != nil {
+				t.Fatal(err)
+			}
+			w := doBearer(patRouter(db), tc.method, raw)
+			if w.Code != tc.want {
+				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestSessionRevokedWhenUserDisabled(t *testing.T) {
+	db := newPATTestDB(t)
+	u := models.User{UUID: "u-sess", Username: "carol", Role: "admin", Status: "active", PasswordHash: "h"}
+	db.Create(&u)
+	sessions := auth.NewSessionManager([]byte("0123456789abcdef0123456789abcdef"), 24*time.Hour)
+	raw, err := sessions.Issue(auth.SessionClaims{
+		UserID: u.ID, UUID: u.UUID, Role: u.Role, AuthProvider: "local",
+		PasswordFingerprint: auth.PasswordFingerprint(u.PasswordHash),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	build := func() *gin.Engine {
+		gin.SetMode(gin.TestMode)
+		r := gin.New()
+		r.Use(BearerTokenMiddleware(db, sessions, nil, nil))
+		r.Use(RequireAuthMiddleware())
+		r.GET("/whoami", func(c *gin.Context) { c.JSON(200, gin.H{"uuid": GetUserUUID(c)}) })
+		return r
+	}
+	do := func(r *gin.Engine) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/whoami", nil)
+		req.AddCookie(&http.Cookie{Name: "mutong_session", Value: raw})
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	// Active user: session authenticates.
+	if w := do(build()); w.Code != http.StatusOK {
+		t.Fatalf("active session expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Disable the user; a fresh middleware (fresh guard cache) must revoke it.
+	db.Model(&models.User{}).Where("uuid = ?", u.UUID).Update("status", "disabled")
+	if w := do(build()); w.Code != http.StatusUnauthorized {
+		t.Fatalf("disabled user session expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- SEC-02: casbin denies empty identity, exempts public paths ---
+
+func TestCasbinRejectsEmptyUserUUID(t *testing.T) {
+	auth.SetRBACMode(auth.RBACEnforce)
+	t.Cleanup(func() { auth.SetRBACMode(auth.RBACEnforce) })
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.Use(CasbinMiddleware(nil))
+	r.GET("/api/v1/things", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/things", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("empty user_uuid on protected path expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestCasbinSkipsPublicPaths(t *testing.T) {
+	auth.SetRBACMode(auth.RBACEnforce)
+	t.Cleanup(func() { auth.SetRBACMode(auth.RBACEnforce) })
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.Use(CasbinMiddleware(nil))
+	r.POST("/api/auth/login", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/auth/login", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("public path must not be blocked by casbin, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// --- SEC-10: login fails closed when the limiter's Redis is unavailable ---
+
+func TestLoginFailsClosedWhenLimiterUnavailable(t *testing.T) {
+	db := newPATTestDB(t)
+	hash, err := auth.NewPasswordService().HashPassword("pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := models.User{UUID: "u-login", Username: "loginuser", Role: "admin", Status: "active", PasswordHash: hash}
+	db.Create(&u)
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:         "127.0.0.1:1",
+		DialTimeout:  200 * time.Millisecond,
+		ReadTimeout:  200 * time.Millisecond,
+		WriteTimeout: 200 * time.Millisecond,
+		MaxRetries:   -1,
+	})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	ac := &AuthController{
+		DB:          db,
+		PasswordSvc: auth.NewPasswordService(),
+		TokenSvc:    auth.NewTokenService(),
+		Sessions:    auth.NewSessionManager([]byte("0123456789abcdef0123456789abcdef"), 24*time.Hour),
+		LoginLimit:  auth.NewLoginLimiter(rdb),
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/auth/login", ac.Login)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", strings.NewReader(`{"username":"loginuser","password":"pw"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected fail-closed 503, got %d: %s", w.Code, w.Body.String())
 	}
 }

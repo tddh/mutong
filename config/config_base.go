@@ -58,6 +58,8 @@ type Config struct {
 	ExternalSearch ExternalSearchConfig `yaml:"external_search" json:"external_search"`
 	// Sanitizer holds PII redaction and security rules configuration (applies to all external calls)
 	Sanitizer SanitizerConfig `yaml:"sanitizer" json:"sanitizer"`
+	// Terminal holds web terminal access control configuration
+	Terminal TerminalConf `yaml:"terminal" json:"terminal"`
 }
 
 type ResourceProfile struct {
@@ -371,6 +373,8 @@ type AuditLogConf struct {
 	ConnectionString string            `yaml:"connectionString" json:"connectionString"`
 	Table            string            `yaml:"table" json:"table"`
 	MySQL            AuditLogMySQLConf `yaml:"mysql" json:"mysql"`
+	// OperationTable 操作审计表名（留空使用 DefaultOperationAuditTable）
+	OperationTable string `yaml:"operationTable" json:"operationTable,omitempty"`
 }
 
 // AuditLogMySQLConf holds MySQL specific configuration for audit log storage

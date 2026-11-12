@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
+	"gitee.com/tddh/mutong/interfaces"
 	ex "gitee.com/tddh/mutong/models/executor"
 	"gorm.io/gorm"
 )
@@ -94,25 +97,27 @@ func (auditLogModel) TableName() string { // dynamic via package-level var
 var mysqlAuditTableName string
 
 // NewPostgresAuditStore creates a PostgreSQL-backed audit log store
-func NewPostgresAuditStore(db *gorm.DB, table string) (AuditLogStore, error) {
+func NewPostgresAuditStore(logger interfaces.Logger, db *gorm.DB, table string) (AuditLogStore, error) {
 	if db == nil {
 		return nil, fmt.Errorf("nil db provided for PostgreSQL audit store")
 	}
 	mysqlAuditTableName = table
 	// Ensure table exists
 	if err := db.AutoMigrate(&auditLogModel{}); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("auto migrate audit log table: %w", err)
 	}
-	backfillSuccessFlag(db)
+	backfillSuccessFlag(logger, db)
 	return &PostgresAuditStore{db: db, table: table}, nil
 }
 
 // backfillSuccessFlag 回填历史审计记录的 success 标志（旧版表无此列）。
 // 只匹配 Execute 已知的成功消息模式，幂等，不会把失败/待审批记录误标为成功。
 // 注意：AutoMigrate 为存量行填的是 NULL（不是 false），需先归一化，否则 "success = false" 匹配不到。
-func backfillSuccessFlag(db *gorm.DB) {
+func backfillSuccessFlag(logger interfaces.Logger, db *gorm.DB) {
 	if err := db.Model(&auditLogModel{}).Where("success IS NULL").Update("success", false).Error; err != nil {
-		fmt.Printf("[executor] normalize null success flag failed: %v\n", err)
+		if logger != nil {
+			logger.Warn("[executor] normalize null success flag failed", zap.Error(err))
+		}
 	}
 
 	patterns := []string{
@@ -140,11 +145,13 @@ func backfillSuccessFlag(db *gorm.DB) {
 	query := "success = ? AND (" + strings.Join(conds, " OR ") + ")"
 	tx := db.Model(&auditLogModel{}).Where(query, args...).Update("success", true)
 	if tx.Error != nil {
-		fmt.Printf("[executor] backfill audit success flag failed: %v\n", tx.Error)
+		if logger != nil {
+			logger.Warn("[executor] backfill audit success flag failed", zap.Error(tx.Error))
+		}
 		return
 	}
-	if tx.RowsAffected > 0 {
-		fmt.Printf("[executor] backfill audit success flag: rows affected = %d\n", tx.RowsAffected)
+	if tx.RowsAffected > 0 && logger != nil {
+		logger.Info("[executor] backfill audit success flag", zap.Int64("rowsAffected", tx.RowsAffected))
 	}
 }
 
@@ -243,7 +250,7 @@ func (s *PostgresAuditStore) List(filters map[string]string) ([]ex.AuditLog, err
 func (s *PostgresAuditStore) GetByID(id string) (*ex.AuditLog, error) {
 	numID, err := strconv.Atoi(id)
 	if err != nil {
-		return nil, fmt.Errorf("invalid audit id: %s", id)
+		return nil, fmt.Errorf("invalid audit id %q: %w", id, err)
 	}
 	var r auditLogModel
 	if err := s.db.First(&r, numID).Error; err != nil {

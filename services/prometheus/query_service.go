@@ -429,10 +429,41 @@ func getDefaultMapping() map[string][]MetricQueryConfig {
 	}
 }
 
+// validK8sName 校验 K8s 命名字符集（RFC1123：小写字母、数字、'-'、'.'），
+// 拒绝任何可能破坏 PromQL 标签匹配器的字符。
+func validK8sName(v string) bool {
+	if v == "" || len(v) > 253 {
+		return false
+	}
+	for _, r := range v {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// escapeLabelValue 转义 PromQL 双引号标签值中的反斜杠与双引号。
+func escapeLabelValue(v string) string {
+	v = strings.ReplaceAll(v, `\`, `\\`)
+	return strings.ReplaceAll(v, `"`, `\"`)
+}
+
 func (s *QueryService) QueryMetric(ctx context.Context, resourceKind, namespace, resourceName string) ([]QueryResult, error) {
-	// If baseURL is not configured, return empty results without error
-	if s.baseURL == "" {
+	// nil 服务或未配置 baseURL 时返回空结果，避免解引用 panic
+	if s == nil || s.baseURL == "" {
 		return nil, nil
+	}
+	// Node 指标只按 instance（资源名）匹配，namespace 允许为空；其余类型必须带合法 namespace
+	if namespace == "" && resourceKind != "Node" {
+		return nil, fmt.Errorf("namespace is required for %s metrics", resourceKind)
+	}
+	if namespace != "" && !validK8sName(namespace) {
+		return nil, fmt.Errorf("invalid namespace for prometheus query: %q", namespace)
+	}
+	if !validK8sName(resourceName) {
+		return nil, fmt.Errorf("invalid resource name for prometheus query: %q", resourceName)
 	}
 	queries, ok := s.mapping[resourceKind]
 	if !ok || len(queries) == 0 {
@@ -441,12 +472,24 @@ func (s *QueryService) QueryMetric(ctx context.Context, resourceKind, namespace,
 
 	var results []QueryResult
 	for _, q := range queries {
-		query := fmt.Sprintf(q.QueryTemplate, namespace, resourceName)
+		// 模板里的 %s 按 namespace/name 交替填充（Node 只有 instance 一个标签）
+		verbs := strings.Count(q.QueryTemplate, "%s")
+		args := make([]interface{}, 0, verbs)
+		for i := 0; i < verbs; i++ {
+			if resourceKind == "Node" || i%2 == 1 {
+				args = append(args, escapeLabelValue(resourceName))
+			} else {
+				args = append(args, escapeLabelValue(namespace))
+			}
+		}
+		query := fmt.Sprintf(q.QueryTemplate, args...)
 		result, err := s.executeQuery(ctx, query, q.MetricName, q.ThresholdWarning, q.ThresholdCritical)
 		if err != nil {
-			s.logger.Debug("Failed to query metric",
-				zap.String("metric", q.MetricName),
-				zap.Error(err))
+			if s.logger != nil {
+				s.logger.Debug("Failed to query metric",
+					zap.String("metric", q.MetricName),
+					zap.Error(err))
+			}
 			continue
 		}
 		if result != nil {
@@ -459,7 +502,7 @@ func (s *QueryService) QueryMetric(ctx context.Context, resourceKind, namespace,
 
 // QueryInstant 执行 Prometheus instant query，返回单个数值结果
 func (s *QueryService) QueryInstant(ctx context.Context, expr string) (float64, error) {
-	if s.baseURL == "" {
+	if s == nil || s.baseURL == "" {
 		return 0, nil
 	}
 	u := fmt.Sprintf("%s/api/v1/query?query=%s", s.baseURL, url.QueryEscape(expr))
@@ -502,6 +545,9 @@ func (s *QueryService) QueryInstant(ctx context.Context, expr string) (float64, 
 
 // QueryRange 执行 Prometheus range query，返回时间序列数据
 func (s *QueryService) QueryRange(ctx context.Context, expr string, start, end time.Time, step time.Duration) ([]QueryRangeResult, error) {
+	if s == nil {
+		return []QueryRangeResult{}, nil
+	}
 	// Try cache first
 	if s.cache != nil {
 		key := fmt.Sprintf("%s|%d|%d|%d", expr, start.Unix(), end.Unix(), int(step.Seconds()))
@@ -715,7 +761,7 @@ func (s *QueryService) executeQuery(ctx context.Context, query, metricName strin
 }
 
 func (s *QueryService) IsEnabled() bool {
-	return s.baseURL != ""
+	return s != nil && s.baseURL != ""
 }
 
 type AlertPrometheusQuerier interface {
@@ -730,6 +776,9 @@ type AlertPrometheusResult struct {
 }
 
 func (s *QueryService) AsAlertPrometheusQuerier() AlertPrometheusQuerier {
+	if s == nil {
+		return nil
+	}
 	return s
 }
 
@@ -751,13 +800,24 @@ func (s *QueryService) QueryMetricForAlert(ctx context.Context, resourceKind, na
 	return alertResults, nil
 }
 
-// AsMetricsQuerier 返回实现 interfaces.MetricsQuerier 的适配器
+// AsMetricsQuerier 返回实现 interfaces.MetricsQuerier 的适配器。
+// nil 服务必须返回 nil 接口，否则调用方的判空会被非 nil 接口绕过。
 func (s *QueryService) AsMetricsQuerier() interfaces.MetricsQuerier {
+	if s == nil {
+		return nil
+	}
 	return &metricsQuerierAdapter{svc: s}
 }
 
 // GetHPAStatus 查询指定 namespace 下指定 HPA 的状态信息
 func (s *QueryService) GetHPAStatus(ctx context.Context, namespace, hpaName string) (*HPAStatus, error) {
+	if s == nil || s.baseURL == "" {
+		return &HPAStatus{}, nil
+	}
+	if !validK8sName(namespace) || !validK8sName(hpaName) {
+		return nil, fmt.Errorf("invalid namespace or hpa name for prometheus query")
+	}
+	ns, name := escapeLabelValue(namespace), escapeLabelValue(hpaName)
 	// helper function to query a single Prometheus expression and parse float64 value
 	queryOne := func(expr string) (float64, error) {
 		url := s.baseURL + "/query?query=" + url.QueryEscape(expr)
@@ -799,11 +859,11 @@ func (s *QueryService) GetHPAStatus(ctx context.Context, namespace, hpaName stri
 	}
 
 	// 关键指标：当前/期望副本数与最小/最大副本数
-	current, _ := queryOne(fmt.Sprintf("kube_hpa_status_current_replicas{namespace=\"%s\",hpa=\"%s\"}", namespace, hpaName))
-	desired, _ := queryOne(fmt.Sprintf("kube_hpa_status_desired_replicas{namespace=\"%s\",hpa=\"%s\"}", namespace, hpaName))
-	MinR, _ := queryOne(fmt.Sprintf("kube_hpa_spec_min_replicas{namespace=\"%s\",hpa=\"%s\"}", namespace, hpaName))
-	MaxR, _ := queryOne(fmt.Sprintf("kube_hpa_spec_max_replicas{namespace=\"%s\",hpa=\"%s\"}", namespace, hpaName))
-	cpuUtil, _ := queryOne(fmt.Sprintf("kube_hpa_status_current_cpu_utilization_percentage{namespace=\"%s\",hpa=\"%s\"}", namespace, hpaName))
+	current, _ := queryOne(fmt.Sprintf("kube_hpa_status_current_replicas{namespace=\"%s\",hpa=\"%s\"}", ns, name))
+	desired, _ := queryOne(fmt.Sprintf("kube_hpa_status_desired_replicas{namespace=\"%s\",hpa=\"%s\"}", ns, name))
+	MinR, _ := queryOne(fmt.Sprintf("kube_hpa_spec_min_replicas{namespace=\"%s\",hpa=\"%s\"}", ns, name))
+	MaxR, _ := queryOne(fmt.Sprintf("kube_hpa_spec_max_replicas{namespace=\"%s\",hpa=\"%s\"}", ns, name))
+	cpuUtil, _ := queryOne(fmt.Sprintf("kube_hpa_status_current_cpu_utilization_percentage{namespace=\"%s\",hpa=\"%s\"}", ns, name))
 
 	status := &HPAStatus{
 		CurrentReplicas: int32(current),

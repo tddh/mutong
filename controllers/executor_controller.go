@@ -79,13 +79,14 @@ func (c *ExecutorController) execute(ctx *gin.Context) {
 	}
 	var plan exModel.ExecutionPlan
 	if err := ctx.ShouldBindJSON(&plan); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid execution plan payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 	res, err := c.exec.Execute(ctx.Request.Context(), plan)
 	if err != nil {
 		c.logger.Error("Executor execution failed", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "execution failed"})
 		return
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -147,7 +148,7 @@ func (c *ExecutorController) approveAudit(ctx *gin.Context) {
 	if execErr != nil {
 		// 执行层业务拒绝（护栏、K8s 拒绝等）：作为执行结果返回，不是接口错误
 		c.logger.Warn("Approved plan execution rejected", zap.Error(execErr), zap.String("plan_id", plan.ID))
-		ctx.JSON(http.StatusOK, exModel.ExecutionResult{Success: false, Message: execErr.Error(), Timestamp: time.Now()})
+		ctx.JSON(http.StatusOK, exModel.ExecutionResult{Success: false, Message: "执行被拒绝，详见执行审计日志", Timestamp: time.Now()})
 		return
 	}
 	ctx.JSON(http.StatusOK, res)
@@ -192,7 +193,7 @@ func (c *ExecutorController) auditLogs(ctx *gin.Context) {
 	logs, err := c.exec.GetAuditLogs(ctx.Request.Context(), filters)
 	if err != nil {
 		c.logger.Error("Failed to fetch audit logs", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch audit logs"})
 		return
 	}
 	ctx.JSON(http.StatusOK, logs)
@@ -207,7 +208,8 @@ func (c *ExecutorController) toggleAutoMode(ctx *gin.Context) {
 		AutoMode bool `json:"autoMode"`
 	}
 	if err := ctx.ShouldBindJSON(&payload); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid auto mode payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 	c.exec.SetAutoMode(payload.AutoMode)
@@ -227,7 +229,8 @@ func (c *ExecutorController) diagnoseAndExecute(ctx *gin.Context) {
 
 	var req diagModel.DiagnosisRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.logger.Warn("Invalid diagnosis request payload", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid request payload"})
 		return
 	}
 
@@ -241,7 +244,7 @@ func (c *ExecutorController) diagnoseAndExecute(ctx *gin.Context) {
 	result, err := c.engine.Diagnose(ctx.Request.Context(), req)
 	if err != nil {
 		c.logger.Error("Diagnosis failed", zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "diagnosis failed"})
 		return
 	}
 
@@ -252,7 +255,7 @@ func (c *ExecutorController) diagnoseAndExecute(ctx *gin.Context) {
 		execRes, err = bridge.ExecuteRemediation(ctx.Request.Context(), plan, c.exec)
 		if err != nil {
 			c.logger.Error("Auto remediation execution failed", zap.Error(err))
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "diagnosis": result})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "remediation execution failed", "diagnosis": result})
 			return
 		}
 	}

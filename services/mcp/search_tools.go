@@ -59,7 +59,7 @@ func (s *Server) handleSearchKnowledgeBase(ctx context.Context, args map[string]
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "搜索查询: %s\n\n", sanitized)
-	if answer != "" {
+	if answer != "" && len(sanitizer.FilterResults([]diagnosis.SearchResult{{Content: answer}})) > 0 {
 		fmt.Fprintf(&sb, "AI 摘要: %s\n\n", answer)
 	}
 	for i, r := range filtered {
@@ -123,6 +123,15 @@ func (s *Server) handleSearchGitHubIssues(ctx context.Context, args map[string]s
 		return fmt.Sprintf("[GitHub 搜索失败: %v]", err), nil
 	}
 
+	// Issue 标题/标签可被任何人构造，与 Tavily 结果走同一注入过滤
+	filtered := make([]search.IssueResult, 0, len(issues))
+	for _, iss := range issues {
+		probe := []diagnosis.SearchResult{{Title: iss.Title, Content: strings.Join(iss.Labels, ", "), URL: iss.URL}}
+		if len(sanitizer.FilterResults(probe)) > 0 {
+			filtered = append(filtered, iss)
+		}
+	}
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("GitHub Issues 搜索: %s\n\n", sanitized))
 	if repo != "" {
@@ -130,7 +139,7 @@ func (s *Server) handleSearchGitHubIssues(ctx context.Context, args map[string]s
 	}
 	sb.WriteString(fmt.Sprintf("状态过滤: %s\n\n", state))
 
-	for i, iss := range issues {
+	for i, iss := range filtered {
 		sb.WriteString(fmt.Sprintf("[%d] #%d %s\n", i+1, iss.Number, iss.Title))
 		sb.WriteString(fmt.Sprintf("    状态: %s | 创建: %s\n", iss.State, iss.Created))
 		if len(iss.Labels) > 0 {
@@ -139,12 +148,12 @@ func (s *Server) handleSearchGitHubIssues(ctx context.Context, args map[string]s
 		sb.WriteString(fmt.Sprintf("    链接: %s\n\n", iss.URL))
 	}
 
-	if len(issues) == 0 {
+	if len(filtered) == 0 {
 		sb.WriteString("[未找到相关 Issues，请尝试其他关键词或仓库]\n")
 	}
 
 	if auditFunc != nil {
-		auditFunc(ctx, "search_github_issues", "github", sanitized, count, len(issues), false, "")
+		auditFunc(ctx, "search_github_issues", "github", sanitized, count, len(filtered), false, "")
 	}
 
 	return sb.String(), nil

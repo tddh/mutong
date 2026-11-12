@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestServerConfigDefaults(t *testing.T) {
 	cfg := &Config{}
@@ -80,6 +84,41 @@ func TestExecutorInternalDefaults(t *testing.T) {
 	}
 	if cfg.Executor.DefaultHPA.TargetCPU != 50 {
 		t.Errorf("expected TargetCPU 50, got %d", cfg.Executor.DefaultHPA.TargetCPU)
+	}
+	if cfg.Executor.AuditLog.OperationTable != DefaultOperationAuditTable {
+		t.Errorf("expected OperationTable %q, got %q", DefaultOperationAuditTable, cfg.Executor.AuditLog.OperationTable)
+	}
+}
+
+// 操作审计表名允许显式覆盖
+func TestExecutorOperationTableOverride(t *testing.T) {
+	cfg := &Config{}
+	cfg.Executor.AuditLog.OperationTable = "custom_op_audit"
+	cfg.setExecutorInternalDefaults()
+	if cfg.Executor.AuditLog.OperationTable != "custom_op_audit" {
+		t.Errorf("explicit OperationTable must be preserved, got %q", cfg.Executor.AuditLog.OperationTable)
+	}
+}
+
+// 终端命名空间白名单：默认为空（由服务侧默认拒绝系统 ns），配置后按 YAML 加载
+func TestTerminalAllowedNamespacesConfig(t *testing.T) {
+	empty := &Config{}
+	if len(empty.GetTerminalConf().AllowedNamespaces) != 0 {
+		t.Fatalf("default AllowedNamespaces must be empty, got %v", empty.GetTerminalConf().AllowedNamespaces)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	content := "terminal:\n  allowedNamespaces:\n    - team-a\n    - team-b\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got := cfg.GetTerminalConf().AllowedNamespaces
+	if len(got) != 2 || got[0] != "team-a" || got[1] != "team-b" {
+		t.Errorf("unexpected AllowedNamespaces: %v", got)
 	}
 }
 

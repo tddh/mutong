@@ -4,7 +4,7 @@
 > 状态（2026-11 逐项对照代码复核）：**M0 安全止血已全部落地，M1 发布工程基本落地，M2 运行时质量已落地，M3 架构与测试部分落地**。§12 任务清单已按实际实现勾选；未勾选项为仍未完成或无法在本机验证的部分，均附剩余工作说明。安全验收脚本（§9.2）与预发冒烟仍需在真实环境执行一次。
 > 范围：`controllers/`、`services/`、`cmd/`、`config/`、`view/`、CI 与部署文件
 >
-> 工具链现状：`go.mod` 声明 `go 1.27.0`，CI 使用 Go `1.27.x` + golangci-lint `v2.14.0`，`Dockerfile` 基于 `golang:1.27-alpine`。下文 §1 的 Go 1.25/1.26 数字是 **2026-10-21 的历史基线**，不代表当前状态。
+> 工具链现状：`go.mod` 声明 `go 1.27.4`，CI 使用 Go `1.27.x` + golangci-lint `v2.14.0`，`Dockerfile` 基于 `golang:1.27-alpine`。下文 §1 的 Go 1.25/1.26 数字是 **2026-10-21 的历史基线**，不代表当前状态。
 
 ---
 
@@ -26,7 +26,7 @@
 
 | 项 | 当前状态 |
 |---|---|
-| 工具链 | `go.mod` = `go 1.27.0`；CI Go `1.27.x`；`Dockerfile` = `golang:1.27-alpine` |
+| 工具链 | `go.mod` = `go 1.27.4`；CI Go `1.27.x`；`Dockerfile` = `golang:1.27-alpine` |
 | CI job | lint / test / build / frontend / docker 五个 job 已就位（`.github/workflows/ci.yml`），本轮新增 govulncheck job 与 `release.yml` |
 | 前端测试 | `view/vitest.setup.ts` 注入 jsdom Storage，`.nvmrc` 固定 Node 24，`view/src/__tests__/` 下 14 个测试文件 |
 | 前端规范 | `view/eslint.config.js` + `.prettierrc` + `eslint-config-prettier`，`bun run lint` / `format` / `format:check` |
@@ -84,13 +84,13 @@
 - **证据**：`controllers/auth_middleware.go:202-205`、`k8sresource_controller.go:21-28`、`user_controller.go:19`、`role_controller.go:19`、`alert_controller.go:252`、`cmd/main.go:547`。
 - **改动**
   1. 中间件改为**默认拒绝**：白名单用精确路径（`/api/auth/login`、`/api/auth/captcha*`、`/api/auth/oidc/*`、`/api/v1/alerts/webhook`、`/api/v1/alerts/external/:source` 需另加校验）；其余一律要求 `user_id`。
-  2. 把 `/k8s/resources/**`、`/users`、`/roles` 迁到 `/api/v1/` 下；旧路径保留 301（仅 GET）。
+  2. 把 `/k8s/resources/**`、`/users`、`/roles` 迁到 `/api/v1/` 下；旧路径保留 308 重定向（保留 query string）。
   3. `/metrics` 仅内网或加 Bearer；`/swagger` 增加 `server.enableSwagger` 配置，默认 false。
   4. 路由注册改为表驱动，注册时声明 `public/auth/admin` 级别。
 - **验收**：无凭证逐个 curl 新路由清单，全部 401/403；`auth_middleware_test.go` 增加表驱动用例。
-- **回滚**：保留旧路由 301 与白名单开关（`server.strict_auth: true`）。
+- **回滚**：保留旧路由 308 重定向与白名单开关（`server.strict_auth: true`）。
 - **估时**：1 人日（路由迁移 + 测试）。
-- **落地情况（2026-11）**：1–3 已实现——`RequireAuthMiddleware` 改为默认拒绝 + `isPublicPath` 精确白名单；`/k8s/resources/**`、`/users`、`/roles` 已迁到 `/api/v1/` 并保留 301；`server.enableSwagger` 默认 false，`/metrics` 需 `MUTONG_METRICS_PUBLIC=true` 才公开。**第 4 项表驱动路由注册未做**，各控制器仍自行 `RegisterRoutes`；`server.strict_auth` 开关也未引入（默认拒绝已是硬行为）。
+- **落地情况（2026-11）**：1–3 已实现——`RequireAuthMiddleware` 改为默认拒绝 + `isPublicPath` 精确白名单；`/k8s/resources/**`、`/users`、`/roles` 已迁到 `/api/v1/` 并保留 308 重定向（保留 query string，避免 graph/search 必填参数丢失）；`server.enableSwagger` 默认 false，`/metrics` 需 `MUTONG_METRICS_PUBLIC=true` 才公开。**第 4 项表驱动路由注册未做**，各控制器仍自行 `RegisterRoutes`；`server.strict_auth` 开关也未引入（默认拒绝已是硬行为）。
 
 ### S0-2 会话认证（P0）
 
@@ -270,7 +270,7 @@ docker build -t mutong:ci .
 
 ### M0
 
-- [x] S0-1 鉴权默认拒绝 + 路由迁移（`RequireAuthMiddleware` / `isPublicPath`、`/api/v1/` 迁移 + 301、`enableSwagger` 默认 false、`/metrics` 默认鉴权）
+- [x] S0-1 鉴权默认拒绝 + 路由迁移（`RequireAuthMiddleware` / `isPublicPath`、`/api/v1/` 迁移 + 308 保留 query、`enableSwagger` 默认 false、`/metrics` 默认鉴权）
   - 剩余：表驱动路由注册未做；`server.strict_auth` 开关未引入
 - [x] S0-2 删除 UUID 回退 + Cookie 属性（HMAC 验签强制、`SameSite=Lax` + `HttpOnly` + `Secure`、`sessions == nil` 返回 503、`oauth2/token.go` 不再写 cookie）
   - 额外落地：`SessionGuard` 30s TTL 复核用户状态/角色/密码指纹
@@ -292,7 +292,7 @@ docker build -t mutong:ci .
 - [x] E0-4 `.dockerignore`（排除真实 `configs/config.*.yaml`、`kubeconfig*`、`.envrc.local`、`agent.yaml`、`artifacts/`、`.git/`、`view/node_modules/`、`*.log`、`coverage.out`）
 - [x] E0-5 容器首启可写/可诊断（`deploy/entrypoint.sh` 检测目录可写性，不可写时回退 `/tmp/mutong-configs` 并从 `.example` 生成；两个镜像均设 ENTRYPOINT）
 - [x] E0-6 前端 CI job（`bun install --frozen-lockfile` + lint + test + build）
-- [x] E0-7 Go 1.27 + 依赖升级（`go.mod` = `go 1.27.0`，CI Go `1.27.x`）
+- [x] E0-7 Go 1.27 + 依赖升级（`go.mod` = `go 1.27.4`，CI Go `1.27.x`）
   - 剩余：`govulncheck` 清零**未在本机复测**；govulncheck job 本轮加入 CI，结果以 CI 产物为准
 - [x] E0-8 vitest setup + Node 版本固定（`view/vitest.setup.ts` 注入 jsdom Storage，`.nvmrc` = 24）
 - [x] E0-9 compose 口令改 `${VAR:?required}`（`POSTGRES_PASSWORD` / `NEBULA_PASSWORD` / `MUTONG_REDIS_PASSWORD` 均必填）
@@ -312,10 +312,10 @@ docker build -t mutong:ci .
 ### M3
 
 - [x] config 拆分（结构体定义已独立到 `config/config_base.go`，加载与装配留在 `config/config.go`）
-  - 剩余：装配**未迁到 `app/wiring.go`**（无 `app/` 目录），`wireDiagnosis/wireAlerts/wireTerminal` 未拆分；`initializeGin` 仍为单函数（`cmd/main.go:640-1054`，约 415 行）
+  - 剩余：装配**未迁到 `app/wiring.go`**（无 `app/` 目录），`wireDiagnosis/wireAlerts/wireTerminal` 未拆分；`initializeGin` 仍为单函数（`cmd/main.go:673-1107`，约 435 行）
 - [x] pkg/safe（`pkg/safe/safe.go` 已建，含 recover + 堆栈）
   - 剩余：`Loop` 未实现，替换覆盖面不足
-- [ ] 核心包测试补齐（覆盖率 ≥30%）——`services/auth` 6 个、`services/executor` 4 个、`services/diagnosis` 8 个测试文件已就位，`services/mcp`/`inspection`/`terminal` 各 1 个；`services/trace`/`logsearch`/`audit`/`prompt` 仍为 0。**覆盖率未复测，不声称达标**
+- [ ] 核心包测试补齐（覆盖率 ≥30%）——`services/auth` 6 个、`services/executor` 7 个、`services/diagnosis` 9 个测试文件已就位，`services/mcp`/`inspection`/`terminal` 各 1 个；`services/trace`/`logsearch`/`audit`/`prompt` 仍为 0。**覆盖率未复测，不声称达标**
 - [x] 死代码/重复实现清理（重复 sanitizer 包已合并到 `pkg/ngql`，单测归位；`controller.go` 的 `K8sResourceCollect()`/`K8sResourceRelationship()` 已删；`view/jslibs`、`view/shared` 已不存在）
   - 剩余：`RegisterControllersRoutes()` 空函数仍被调用；`diagnosis_controller.go` 6 处 `nolint:unused` 废弃 chat 方法仍在
 - [x] 文档与 CHANGELOG 同步（README 中英、ROADMAP、SECURITY、TODO、evolution、本规划与计划文档已按代码复核更新；新增 `docs/PROJECT_ARCHITECTURE.md`）

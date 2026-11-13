@@ -143,7 +143,7 @@ Mutong 的演进映射了 Kubernetes 运维的三个阶段，每一步都是为�
 - **多容器切换**: Pod 内多容器自由切换
 - **会话管理**: 独立会话生命周期管理，连接关闭时回收 K8s exec 流与 goroutine
 - **自适应大小**: 终端 resize 事件自动同步
-- **命名空间准入**: 默认拒绝系统命名空间（`kube-system` / `kube-public` / `kube-node-lease`），其余允许；`terminal.allowedNamespaces` 配置项与 `SetAllowedNamespaces` 注入接口已就绪，但 `cmd/main.go` 尚未接线，配置该项当前不改变行为（见 [架构文档「已知实现缺口」](docs/PROJECT_ARCHITECTURE.md)）。会话建立 / 拒绝与 exec 起止产生审计事件，当前写服务端日志（审计表注入同样待接线）
+- **命名空间准入**: 默认拒绝系统命名空间（`kube-system` / `kube-public` / `kube-node-lease`），其余允许；`terminal.allowedNamespaces` 白名单已在 `cmd/main.go` 启动时经 `SetAllowedNamespaces` 注入生效。会话建立 / 拒绝与 exec 起止产生审计事件，写服务端日志；DB 可用时经 `SetAuditStore` 同步落 `operation_audit_logs` 表
 - **前端本地打包**: xterm.js 及其 addon 由 Vite 本地打包，不再依赖 CDN
 
 ### 9. 链路追踪
@@ -249,8 +249,8 @@ mutongctl config set server https://mutong.example.com  # 配置服务地址
 
 | 组件 | 技术 | 说明 |
 |------|------|------|
-| 后端语言 | Go | 1.27 |
-| Web 框架 | Gin | v1.10，路由聚合注册 |
+| 后端语言 | Go | 1.27.4 |
+| Web 框架 | Gin | v1.12.0，路由聚合注册 |
 | 图数据库 | NebulaGraph | v3 客户端，存储资源拓扑 |
 | 关系数据库 | PostgreSQL + pgvector | GORM 驱动，向量语义 + 结构化混合检索 |
 | 消息队列 | Kafka（franz-go） | 死信队列 + 指数退避重试 |
@@ -296,7 +296,7 @@ mutong/
 │   │   ├── cmdb_data_silo.yml monitoring_blindspot.yml
 │   │   ├── resource_quota.yml image_audit.yml
 │   └── prompts/                 #   LLM Prompt 模板
-├── controllers/                 # 控制器层（34 个 Go 文件：31 实现 + 3 测试，含 oauth2/ 子包）
+├── controllers/                 # 控制器层（59 个 Go 文件：31 实现 + 28 测试，含 oauth2/ 子包）
 ├── services/                    # 服务层
 │   ├── alert/                   #   告警管道: enricher → suppressor → router → notifier
 │   ├── diagnosis/               #   AI 诊断引擎（含混合检索模块）
@@ -352,7 +352,7 @@ mutong/
 ├── ROADMAP.md                   # 版本路线图
 ├── CONTRIBUTING.md              # 贡献指南
 ├── SECURITY.md                  # 安全政策与漏洞报告流程
-├── go.mod                       # Go 模块定义（go 1.27.0）
+├── go.mod                       # Go 模块定义（go 1.27.4）
 └── LICENSE                      # MIT 许可证
 ```
 
@@ -555,6 +555,7 @@ executor:
 | `MUTONG_GITHUB_TOKEN` | GitHub Issues 搜索 Token（可选） | - |
 | `MUTONG_INIT_ADMIN_PASSWORD` | 首次启动创建 `admin` 账号的密码；账号已存在时不重置 | 不设置则不创建管理员 |
 | `MUTONG_ISSUER_URL` | OAuth2 / OIDC 发行者 URL | - |
+| `MUTONG_VIEW_DIR` | 前端构建产物目录绝对路径，覆盖默认探测 | 空（按二进制同级 `view/dist` 探测） |
 
 安全相关环境变量（`MUTONG_SESSION_SECRET`、`MUTONG_ADMIN_KEY`、`MUTONG_WEBHOOK_SECRET`、`MUTONG_TRUSTED_PROXIES` 等）见下方 [安全配置](#安全配置)。
 
@@ -566,7 +567,7 @@ executor:
 
 | 组件 | 版本 | 用途 | 安装 |
 |------|------|------|------|
-| Go | 1.27 | 后端编译运行（`go.mod` 声明 `go 1.27.0`） | [go.dev/dl](https://go.dev/dl/) |
+| Go | 1.27.4 | 后端编译运行（`go.mod` 声明 `go 1.27.4`） | [go.dev/dl](https://go.dev/dl/) |
 | Bun | 1.x+ | 前端包管理 | [bun.sh](https://bun.sh/) |
 | NebulaGraph | 3.8+ | 图数据库 — 存储 K8s 资源拓扑关系 | [nebula-graph.io](https://www.nebula-graph.io/download) |
 | Kafka（或 Redpanda） | Kafka 2.x+ / Redpanda v24+ | 消息队列 — K8s 资源变更事件异步传输 | [kafka.apache.org](https://kafka.apache.org/downloads) |
@@ -910,12 +911,12 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | `just run-debug` | 调试模式运行（log-level=debug） |
 | `just run-config <file>` | 指定配置文件运行 |
 | `just dev-ui` | 前端开发模式（热重载） |
-| `just build-ui` | 构建前端（输出到 artifacts/view） |
+| `just build-ui` | 构建前端（输出到 view/dist） |
 | `just preview-ui` | 前端预览 |
 | `just test` | 运行所有单元测试（-race） |
 | `just test-cover` | 运行测试并生成覆盖率报告 |
 | `just test-module <module>` | 运行指定模块测试 |
-| `just test-alert` | 运行告警系统 API 测试 |
+| `just test-alert` | 运行告警系统 API 测试（⚠️ 引用的 `test_alert.sh` 当前不存在，命令暂不可用） |
 | `just test-ui` | 前端测试（vitest） |
 | `just bench` | 基准测试 |
 | `just smoke-test` | 运行动态冒烟测试 |
@@ -933,7 +934,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 | `just build-cli-mac` | 仅编译 macOS arm64 版 mutongctl |
 | `just test-cli` | 运行 CLI 单元测试 |
 | `just all-cli` | CLI 测试 + 构建 |
-| `just run-js` | 运行 JavaScript 测试文件 |
+| `just run-js` | 运行 JavaScript 测试文件（⚠️ 引用的 `view/test.js` 当前不存在，命令暂不可用） |
 
 ## 开发指南
 
@@ -954,7 +955,7 @@ Vite 开发代理配置（`just dev-ui` 自动生效）：
 name: "check-pod-restarts"
 description: "检查 Pod 重启次数"
 query: |
-  MATCH (p:K8sResource{kind:'Pod', is_deleted:false})
+  MATCH (p:K8sResource{kind:"Pod", is_deleted:false})
   RETURN p.K8sResource.name AS name, p.K8sResource.name_space AS namespace
 check:
   type: min_rows
@@ -981,7 +982,7 @@ suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
 检查 NebulaGraph 服务是否运行（`nebula-console -addr localhost -port 9669 -u root -p nebula`），确认 `configs/config.core.yaml` 中 `nebula.host` 和 `nebula.port` 配置正确。
 
 **Q: 拓扑页面无数据**  
-检查 Kafka 是否正常运行，确认 `configs/config.infra.yaml` 中 Kafka broker 和 topic 配置正确。Informer 首次同步需要 1-2 分钟。
+检查 Kafka 是否正常运行，确认 `configs/config.core.yaml` 的 `kafka` 段中 broker 和 topic 配置正确。Informer 首次同步需要 1-2 分钟。
 
 **Q: 集群状态显示"未知"**  
 检查 kubeconfig 文件路径是否正确，确认 `configs/config.core.yaml` 中的 `kubernetes.config` 指向有效的 kubeconfig。
@@ -1046,13 +1047,13 @@ suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
 - **风险分级**：13 类自愈操作均带 Low / Medium / High 风险等级与阈值，全量写审计日志。
 - **LLM 不可越权**：模型输出的 `risk` / `confidence` 不作为执行依据，`auto_fixable` 恒为 false；MCP 提案组工具只生成待审批记录，**任何情况下都不自动执行**。
 - **执行后验证与回滚**：可回滚动作验证失败时自动恢复「最近已知健康版本」，其余标记待人工介入。
-- **终端隔离**：namespace 准入默认拒绝系统命名空间（`terminal.allowedNamespaces` 尚未在启动时注入，见上文「Web 终端」）+ 会话审计事件；会话关闭时回收 K8s exec 流与 goroutine。
+- **终端隔离**：namespace 准入默认拒绝系统命名空间，`terminal.allowedNamespaces` 白名单已在启动时注入生效（见上文「Web 终端」）+ 会话审计事件（DB 可用时落 `operation_audit_logs`）；会话关闭时回收 K8s exec 流与 goroutine。
 
 ### 暴露面收敛
 
 - Swagger UI 默认关闭（`server.enableSwagger`）；`/metrics` 默认需要鉴权（`MUTONG_METRICS_PUBLIC=true` 才放行）。
 - CORS 默认拒绝跨域，`MUTONG_ALLOWED_ORIGINS` 中的 `*` 被忽略。
-- 静态资源只服务构建产物目录（`artifacts/view` 或 `view/dist`），不暴露 `view/` 源码树。
+- 静态资源只服务前端构建产物：按二进制同级 `view/dist` 定位（候选目录须含 `index.html`），可用 `MUTONG_VIEW_DIR` 显式覆盖；不暴露 `view/` 源码树。
 - 容器以非 root 用户 `mutong` 运行，镜像只包含 `*.example` 配置模板。
 
 完整安全政策与漏洞报告流程见 [SECURITY.md](SECURITY.md)。
@@ -1093,7 +1094,7 @@ suggestion: "Pod 频繁重启，请检查资源限制与应用日志"
 | `auth.rbac_mode` | `config.auth.yaml` | `enforce` | `enforce` 拦截并返回 403；`shadow` 只记录拒绝日志不拦截（灰度用）；`off` 完全跳过 RBAC（应急开关） |
 | `executor.enabled` | `config.infra.yaml` | `false` | 自愈执行器总开关 |
 | `executor.autoMode` | `config.infra.yaml` | `false` | 自动执行模式；关闭时所有计划进入待审批 |
-| `terminal.allowedNamespaces` | `configs/config.*.yaml` 的 `terminal` 段 | 空（拒绝系统命名空间） | Web 终端可访问的 namespace 白名单。**字段与注入接口已实现，但 `cmd/main.go` 未调用注入，当前生效的始终是默认策略** |
+| `terminal.allowedNamespaces` | `configs/config.*.yaml` 的 `terminal` 段 | 空（拒绝系统命名空间） | Web 终端可访问的 namespace 白名单。**已在 `cmd/main.go` 启动时经 `SetAllowedNamespaces` 注入生效**；留空时维持默认策略（拒绝系统命名空间） |
 
 ### 最小可用部署示例
 

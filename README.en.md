@@ -147,7 +147,7 @@ Mutong's evolution maps the three stages of Kubernetes operations, each step dri
 - **Multi-Container Switching**: freely switch between containers within a Pod
 - **Session Management**: independent session lifecycle management; K8s exec streams and goroutines are reclaimed when the connection closes
 - **Auto-Resize**: terminal resize events are synchronized automatically
-- **Namespace admission**: system namespaces (`kube-system` / `kube-public` / `kube-node-lease`) are denied by default, everything else is allowed. The `terminal.allowedNamespaces` config field and the `SetAllowedNamespaces` injection hook exist, but `cmd/main.go` does not wire them yet, so setting it currently changes nothing (see the "Known implementation gaps" section of [docs/PROJECT_ARCHITECTURE.md](docs/PROJECT_ARCHITECTURE.md)). Session open/deny and exec start/end emit audit events, which currently go to the server log only (the audit-store injection is likewise pending)
+- **Namespace admission**: system namespaces (`kube-system` / `kube-public` / `kube-node-lease`) are denied by default, everything else is allowed. The `terminal.allowedNamespaces` allowlist is wired at startup in `cmd/main.go` via `SetAllowedNamespaces` and takes effect. Session open/deny and exec start/end emit audit events to the server log; when a database is available they are also persisted to the `operation_audit_logs` table via `SetAuditStore`
 - **Locally Bundled Frontend**: xterm.js and its addons are bundled locally by Vite — no CDN dependency
 
 ### 9. Distributed Tracing
@@ -253,8 +253,8 @@ mutongctl config set server https://mutong.example.com  # Configure the server a
 
 | Component | Technology | Notes |
 |-----------|-----------|-------|
-| Backend Language | Go | 1.27 |
-| Web Framework | Gin | v1.10, aggregated route registration |
+| Backend Language | Go | 1.27.4 |
+| Web Framework | Gin | v1.12.0, aggregated route registration |
 | Graph Database | NebulaGraph | v3 client, stores resource topology |
 | Relational Database | PostgreSQL + pgvector | GORM driver, vector semantic + structured hybrid retrieval |
 | Message Queue | Kafka (franz-go) | Dead letter queue + exponential backoff retry |
@@ -300,7 +300,7 @@ mutong/
 │   │   ├── cmdb_data_silo.yml monitoring_blindspot.yml
 │   │   ├── resource_quota.yml image_audit.yml
 │   └── prompts/                 #   LLM prompt templates
-├── controllers/                 # Controller layer (34 Go files: 31 implementation + 3 tests, incl. the oauth2/ subpackage)
+├── controllers/                 # Controller layer (59 Go files: 31 implementation + 28 tests, incl. the oauth2/ subpackage)
 ├── services/                    # Service layer
 │   ├── alert/                   #   Alert pipeline: enricher → suppressor → router → notifier
 │   ├── diagnosis/               #   AI diagnosis engine (incl. hybrid retrieval)
@@ -359,7 +359,7 @@ mutong/
 ├── ROADMAP.md                   # Version roadmap
 ├── CONTRIBUTING.md              # Contribution guide
 ├── SECURITY.md                  # Security policy and vulnerability reporting
-├── go.mod                       # Go module definition (go 1.27.0)
+├── go.mod                       # Go module definition (go 1.27.4)
 └── LICENSE                      # MIT license
 ```
 
@@ -564,6 +564,7 @@ The following environment variables override the corresponding config file field
 | `MUTONG_GITHUB_TOKEN` | GitHub Issues search token (optional) | - |
 | `MUTONG_INIT_ADMIN_PASSWORD` | Password used to create the `admin` account on first start; never resets an existing account | Admin account is not created when unset |
 | `MUTONG_ISSUER_URL` | OAuth2 / OIDC issuer URL | - |
+| `MUTONG_VIEW_DIR` | Absolute path to the frontend build output, overrides default probing | Empty (probes `view/dist` next to the binary) |
 
 Security-related variables (`MUTONG_SESSION_SECRET`, `MUTONG_ADMIN_KEY`, `MUTONG_WEBHOOK_SECRET`, `MUTONG_TRUSTED_PROXIES`, etc.) are documented in [Security Configuration](#security-configuration) below.
 
@@ -575,7 +576,7 @@ Security-related variables (`MUTONG_SESSION_SECRET`, `MUTONG_ADMIN_KEY`, `MUTONG
 
 | Component | Version | Purpose | Install |
 |-----------|---------|---------|---------|
-| Go | 1.27 | Backend build and run (`go.mod` declares `go 1.27.0`) | [go.dev/dl](https://go.dev/dl/) |
+| Go | 1.27.4 | Backend build and run (`go.mod` declares `go 1.27.4`) | [go.dev/dl](https://go.dev/dl/) |
 | Bun | 1.x+ | Frontend package management | [bun.sh](https://bun.sh/) |
 | NebulaGraph | 3.8+ | Graph database — stores K8s resource topology | [nebula-graph.io](https://www.nebula-graph.io/download) |
 | Kafka (or Redpanda) | Kafka 2.x+ / Redpanda v24+ | Message queue — async transport of K8s resource change events | [kafka.apache.org](https://kafka.apache.org/downloads) |
@@ -920,12 +921,12 @@ Build workflow is managed with `just`:
 | `just run-debug` | Run in debug mode (log-level=debug) |
 | `just run-config <file>` | Run with a specific config file |
 | `just dev-ui` | Frontend dev mode (hot reload) |
-| `just build-ui` | Build the frontend (output to artifacts/view) |
+| `just build-ui` | Build the frontend (output to view/dist) |
 | `just preview-ui` | Frontend preview |
 | `just test` | Run all unit tests (-race) |
 | `just test-cover` | Run tests and generate a coverage report |
 | `just test-module <module>` | Run tests for a specific module |
-| `just test-alert` | Run alert system API tests |
+| `just test-alert` | Run alert system API tests (⚠️ the referenced `test_alert.sh` does not exist; the command is currently unusable) |
 | `just test-ui` | Frontend tests (vitest) |
 | `just bench` | Benchmarks |
 | `just smoke-test` | Run dynamic smoke tests |
@@ -943,7 +944,7 @@ Build workflow is managed with `just`:
 | `just build-cli-mac` | Build the macOS arm64 mutongctl only |
 | `just test-cli` | Run CLI unit tests |
 | `just all-cli` | CLI tests + build |
-| `just run-js` | Run JavaScript test files |
+| `just run-js` | Run JavaScript test files (⚠️ the referenced `view/test.js` does not exist; the command is currently unusable) |
 
 ## Development Guide
 
@@ -964,7 +965,7 @@ No Go changes needed — create `<rule_name>.yml` under `configs/rules/inspectio
 name: "check-pod-restarts"
 description: "Check Pod restart counts"
 query: |
-  MATCH (p:K8sResource{kind:'Pod', is_deleted:false})
+  MATCH (p:K8sResource{kind:"Pod", is_deleted:false})
   RETURN p.K8sResource.name AS name, p.K8sResource.name_space AS namespace
 check:
   type: min_rows
@@ -991,7 +992,7 @@ If the built-in check types are not enough, write a `command` plugin script (JSO
 Check that NebulaGraph is running (`nebula-console -addr localhost -port 9669 -u root -p nebula`) and that `nebula.host` / `nebula.port` in `configs/config.core.yaml` are correct. When running via Docker Compose, make sure metad and storaged are up too — graphd alone cannot serve queries.
 
 **Q: No data on the topology page**  
-Check that Kafka is running and that the broker and topic settings in `configs/config.infra.yaml` are correct. The initial informer sync takes 1-2 minutes.
+Check that Kafka is running and that the broker and topic settings in the `kafka` section of `configs/config.core.yaml` are correct. The initial informer sync takes 1-2 minutes.
 
 **Q: Cluster status shows "unknown"**  
 Check that the kubeconfig path is valid and that `kubernetes.config` in `configs/config.core.yaml` points to a working kubeconfig.
@@ -1018,7 +1019,7 @@ Check the Elasticsearch settings in `configs/config.infra.yaml`: `elasticsearch.
 ### Web Terminal
 
 **Q: Web terminal connection fails**  
-Confirm the target Pod is Running and that `/bin/sh` (or the selected shell) exists in the container. Check that RBAC allows exec and that the namespace is not a system namespace — `kube-system` / `kube-public` / `kube-node-lease` are denied by default. Note that `terminal.allowedNamespaces` is not yet injected at startup, so it cannot be used to widen or narrow this policy.
+Confirm the target Pod is Running and that `/bin/sh` (or the selected shell) exists in the container. Check that RBAC allows exec and that the namespace is not a system namespace — `kube-system` / `kube-public` / `kube-node-lease` are denied by default. The `terminal.allowedNamespaces` allowlist is injected at startup and can be used to widen or narrow this policy.
 
 ### Performance
 
@@ -1056,13 +1057,13 @@ The platform is designed around three principles — **deny by default, server-s
 - **Risk grading**: all 13 remediation actions carry a Low / Medium / High risk level and threshold, and every action is audited.
 - **The LLM cannot escalate**: model-supplied `risk` / `confidence` never drive execution and `auto_fixable` is always false; MCP proposal-group tools only create pending-approval records and are **never auto-executed**.
 - **Post-execution verification & rollback**: reversible actions that fail verification automatically restore the last known good version; others are flagged for manual intervention.
-- **Terminal isolation**: namespace admission denies system namespaces by default (`terminal.allowedNamespaces` is not yet injected at startup — see "Web Terminal" above) plus session audit events; K8s exec streams and goroutines are reclaimed when a session closes.
+- **Terminal isolation**: namespace admission denies system namespaces by default, and the `terminal.allowedNamespaces` allowlist is injected at startup (see "Web Terminal" above), plus session audit events (persisted to `operation_audit_logs` when a database is available); K8s exec streams and goroutines are reclaimed when a session closes.
 
 ### Reduced Exposure
 
 - Swagger UI is off by default (`server.enableSwagger`); `/metrics` requires authentication unless `MUTONG_METRICS_PUBLIC=true`.
 - CORS denies cross-origin requests by default, and `*` in `MUTONG_ALLOWED_ORIGINS` is ignored.
-- Static assets are served only from build output (`artifacts/view` or `view/dist`), never from the `view/` source tree.
+- Static assets are served only from the frontend build output, located at `view/dist` next to the binary (candidate dirs must contain `index.html`), overridable via `MUTONG_VIEW_DIR`; never from the `view/` source tree.
 - Containers run as the non-root user `mutong`, and images contain only `*.example` config templates.
 
 See [SECURITY.md](SECURITY.md) for the full security policy and vulnerability reporting process.
@@ -1103,7 +1104,7 @@ Confirm the following before a production deployment. Variable names and default
 | `auth.rbac_mode` | `config.auth.yaml` | `enforce` | `enforce` blocks with 403; `shadow` only logs denials without blocking (for rollout); `off` skips RBAC entirely (emergency switch) |
 | `executor.enabled` | `config.infra.yaml` | `false` | Master switch for the self-healing executor |
 | `executor.autoMode` | `config.infra.yaml` | `false` | Auto-execution mode; when off, every plan goes to pending approval |
-| `terminal.allowedNamespaces` | `terminal` section of `configs/config.*.yaml` | Empty (system namespaces denied) | Namespace allowlist for the Web terminal. **The field and injection hook exist, but `cmd/main.go` never calls the injection, so the default policy is always what applies** |
+| `terminal.allowedNamespaces` | `terminal` section of `configs/config.*.yaml` | Empty (system namespaces denied) | Namespace allowlist for the Web terminal. **Wired at startup in `cmd/main.go` via `SetAllowedNamespaces`**; when left empty the default policy (deny system namespaces) applies |
 
 ### Minimal Viable Deployment
 

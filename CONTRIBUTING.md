@@ -6,7 +6,7 @@
 
 ## 开发环境
 
-前置条件：**Go 1.27**（`go.mod` 声明 `go 1.27.0`）、**Bun 1.x+**、**Just**、Node 24（前端测试，见 `.nvmrc`）。NebulaGraph 3.8+ 与 Kafka（或 Redpanda）是运行期硬依赖，本地可用 `docker compose up -d` 起依赖。
+前置条件：**Go 1.27.4**（`go.mod` 声明 `go 1.27.4`）、**Bun 1.x+**、**Just**、Node 24（前端测试，见 `.nvmrc`）。NebulaGraph 3.8+ 与 Kafka（或 Redpanda）是运行期硬依赖，本地可用 `docker compose up -d` 起依赖。
 
 ```bash
 git clone https://gitee.com/tddh/mutong.git

@@ -15,19 +15,19 @@
 |------|------|----------------|
 | PII 脱敏 + 映射账本 | ✅ 已实现 | `services/diagnosis/sanitizer.go`：`Redact()` 生成 `[REDACTED_<RULE>_<n>]` 占位符并写入内存映射；默认规则 ip_v4 / email / jwt / secret（aws_key、ali_key 默认关闭）。账本为**进程级共享**（`main.go` 只建一个 `"main-app"` 实例），非会话级 |
 | 高 PII 阻断 + 禁用词 | ✅ 已实现 | `ShouldBlock()`：按「含占位符的词 / 总词数」比例与 `highPIIBlockThreshold`（默认 0.5）比较；命中 `bannedTerms` 直接阻断 |
-| Prompt Injection 入站过滤 | ⚠️ 部分 | `FilterResults()` 仅在 Tavily 路径调用；`handleSearchGitHubIssues` **未过滤**返回结果 |
+| Prompt Injection 入站过滤 | ✅ 已实现 | `FilterResults()` 在 Tavily 与 GitHub 两条路径均调用；`handleSearchGitHubIssues` 对 Issue 标题/标签做同一注入过滤（`services/mcp/search_tools.go`） |
 | 搜索词指纹提取（§5.2） | ⚠️ 简化实现 | `ExtractSearchFingerprint()` 只按 `maxQueryLength`（默认 200）截断，未实现正则提取组件/版本/错误码；另有 `Genericize()` 把占位符转成 `<IP_V4>` 这类泛化词后再出站 |
 | 状态还原 De-redaction（§5.4） | ❌ 未接线 | `Restore()` 已实现但**全仓无调用方**；诊断报告中的占位符当前不会被还原 |
 | Tavily Web 搜索 | ✅ 已上线 | `services/search/tavily_client.go`，`search_knowledge_base` 工具；支持 `topic=general/news/security`，返回 AI 摘要 + 最多 `maxResults`（默认 3）条，每条正文截断 400 字符 |
 | GitHub Issues 搜索 | ✅ 已上线 | `services/search/github_client.go`，`search_github_issues` 工具；`state` 支持 `open/closed/all`（默认 open），无 token 时受 60 次/小时限制 |
 | Bing 备选引擎 | ❌ 未实现 | 代码中无 Bing 客户端与配置项 |
-| 审计落库（§5.5） | ❌ 未接线 | `mcp.AuditLogFunc` 钩子已实现并在阻断/成功路径调用，但 `cmd/main.go` 传入 `nil`；无 `external_search_audit` 表，元数据仅存在于工具返回文本与服务端日志 |
+| 审计落库（§5.5） | ⚠️ 仅日志 | `mcp.AuditLogFunc` 钩子已实现并在阻断/成功路径调用，`cmd/main.go` 传入日志闭包（`logger.Info("external search audit", …)`），元数据写服务端日志；仍无 `external_search_audit` 表，**未落库** |
 | 配置开关与策略 | ✅ 已实现 | `config/sanitizer_config.go`（`ExternalSearchConfig` / `SanitizerConfig`）+ `configs/config.diagnosis.yaml` 的 `external_search` 与 `sanitizer` 段；`MUTONG_TAVILY_KEY` / `MUTONG_GITHUB_TOKEN` 覆盖 YAML |
 | Prompt 策略（§8） | ⚠️ 位置不同 | 未新增 `configs/prompts/search_strategy.md`；外部搜索使用指引内联在 `controllers/diagnosis_controller.go` 的 system prompt 中 |
 | 工具注册与可见性 | ✅ 已实现 | `external_search.enabled=false` 或对应客户端未就绪时，工具不注册（`WithExternalSearch`），对 LLM 不可见 |
 | 独立 `search.Client` 接口 | ❌ 未创建 | 两个客户端各自独立，未抽象公共接口；配置结构体落在 `config/sanitizer_config.go` 而非 `config_base.go` |
 
-**已知配置缺陷（需代码/配置侧修复，本文不改代码）**：`config.SanitizerConfig` 的 yaml 标签是 camelCase（`highPIIBlockThreshold`、`maxQueryLength`、`bannedTerms`、`promptInjectionPatterns`），而 `configs/config.diagnosis.yaml` 与 `.example` 写的是 snake_case（`high_pii_block_threshold` 等）。yaml.v3 按标签精确匹配，这些键**不会绑定**：`bannedTerms` 与注入过滤模式实际为空；又因 `rules` 能绑定（非空），`cmd/main.go` 不会回落到 `DefaultSanitizerConfig()`，阈值与长度改由 `NewSanitizer()` 兜底为 0.5 / 200。修复方向：把 YAML 键改为 camelCase，或给结构体补 snake_case 标签。
+**配置键名缺陷已修复**：`config.SanitizerConfig` 与 `diagnosis.SanitizerConfig` 的 yaml 标签现已统一为 snake_case（`high_pii_block_threshold`、`max_query_length`、`banned_terms`、`prompt_injection_patterns`），与 `configs/config.diagnosis.yaml` / `.example` 一致，键可正常绑定。`cmd/main.go` 在构建 sanitizer 前调用 `cfg.Sanitizer.ApplyDefaults()`，对零值字段（阈值/长度/注入模式/规则）逐项回落默认值，不再出现「注入模式实际为空」的问题。
 
 ---
 
@@ -194,7 +194,7 @@ Mutong 当前的 AI 诊断引擎采用单 Agent + 20 个 MCP 工具架构（**�
 
 ### 4.2 数据流
 
-> 第 5 步为简化实现（截断 + 泛化），第 10 步（De-redact）与第 11 步（审计落库）**尚未接线**，详见 §0 / §5.2 / §5.4 / §5.5。
+> 第 5 步为简化实现（截断 + 泛化），第 10 步（De-redact）**尚未接线**；第 11 步（审计）已传日志闭包写服务端日志，但**未落库**，详见 §0 / §5.2 / §5.4 / §5.5。
 
 ```
 1. 告警触发 ─→ [Context Collector] 并行采集拓扑/指标/日志 (现有逻辑不变)
@@ -339,7 +339,7 @@ Agent 返回的诊断报告中包含的是占位符 (如 `[REDACTED_IP_1]`)。**
 
 ### 5.5 Layer 4: 审计日志 (Audit Trail)
 
-> **实现现状（2026-11-12）**：审计**钩子**已实现——`mcp.AuditLogFunc` 在阻断与成功两条路径上被调用，字段与下文 JSON 基本对应（toolName / engine / query（脱敏后）/ redactions / returned / blocked / reason）。但 `cmd/main.go` 调用 `SetExternalSearch(..., nil)` 传入空钩子，且不存在 `external_search_audit` 表与保留期清理，因此**元数据未落库**。hash-chained 设计亦未实现。
+> **实现现状（2026-11-12）**：审计**钩子**已实现——`mcp.AuditLogFunc` 在阻断与成功两条路径上被调用，字段与下文 JSON 基本对应（toolName / engine / query（脱敏后）/ redactions / returned / blocked / reason）。`cmd/main.go` 调用 `SetExternalSearch(...)` 时传入日志闭包（`logger.Info("external search audit", …)`），元数据写服务端日志；但不存在 `external_search_audit` 表与保留期清理，因此**元数据未落库**。hash-chained 设计亦未实现。
 
 参考 `llm-search-mediator` 的 hash-chained 审计日志设计：
 
@@ -453,7 +453,7 @@ func (t *KnowledgeBaseSearchTool) InvokableRun(ctx context.Context, argumentsInJ
 | 参数 | `query` (required, string): 错误信息或堆栈关键字 |
 | 参数 | `repo` (optional, string): 限制搜索仓库，如 `kubernetes/kubernetes` |
 | 参数 | `state` (optional, string): Issue 状态，**实现支持 `open` / `closed` / `all`**，默认 `open` |
-| 返回 | 最多 `maxResults`（默认 3）个 Issue 的编号、标题、状态、创建时间、标签和 URL；**当前未对返回结果做 Prompt Injection 过滤** |
+| 返回 | 最多 `maxResults`（默认 3）个 Issue 的编号、标题、状态、创建时间、标签和 URL；**返回结果已过 Prompt Injection 过滤**（标题/标签走 `FilterResults`，与 Tavily 同一过滤） |
 
 **Eino Tool 实现**:
 
@@ -527,7 +527,7 @@ func (t *GitHubIssuesSearchTool) InvokableRun(ctx context.Context, argumentsInJS
 # 外部知识库搜索（ExternalSearchConfig）
 external_search:
   enabled: true                  # 代码默认 false；随包 YAML 为 true，但无 API Key 时 Tavily 工具不注册
-  auditEnabled: true             # 字段存在，但审计钩子未接线（见 §5.5），当前不产生落库记录
+  auditEnabled: true             # 字段存在；审计钩子已传日志闭包（见 §5.5），当前仅写服务端日志、不落库
   tavily:
     apiKey: ""                   # 由 MUTONG_TAVILY_KEY 覆盖，勿写明文
     endpoint: "https://api.tavily.com/search"
@@ -542,12 +542,12 @@ external_search:
 # 安全脱敏（SanitizerConfig，独立顶层段，不是 external_search.security）
 sanitizer:
   enabled: true
-  highPIIBlockThreshold: 0.5     # 注意：随包 YAML 目前误写为 high_pii_block_threshold
-  maxQueryLength: 200            # 注意：随包 YAML 目前误写为 max_query_length
-  bannedTerms:                   # 注意：随包 YAML 目前误写为 banned_terms
+  high_pii_block_threshold: 0.5
+  max_query_length: 200
+  banned_terms:
     - "internal.corp.net"
     - "kubeconfig"
-  promptInjectionPatterns:       # 注意：随包 YAML 目前误写为 prompt_injection_patterns
+  prompt_injection_patterns:
     - "ignore previous"
     - "you are now"
     - "system prompt"
@@ -571,10 +571,10 @@ sanitizer:
 
 **与原方案的差异**：
 
-- 键名统一为 camelCase（原方案写 snake_case）；`sanitizer` 提升为独立顶层段，原 `external_search.security` 子段不存在。
+- `sanitizer` 段键名为 snake_case（与结构体 yaml 标签一致，缺陷已修复）；`external_search` 段仍为 camelCase（`auditEnabled`/`apiKey`/`timeoutSeconds`/`maxResults`）。`sanitizer` 提升为独立顶层段，原 `external_search.security` 子段不存在。
 - 无 `bing` 段、无 `audit_retention_days`、无 `rate_limit_per_minute`、无 `strict_sanitization` 开关。脱敏事实上不可关闭：`WithExternalSearch` 要求 sanitizer 非 nil 才注册工具，而 `sanitizer.enabled` 字段虽被读入配置却**未被 `NewSanitizer` / handler 使用**，置 false 不会跳过脱敏。
 - YAML **不支持 `${VAR}` 插值**：密钥通过 `MUTONG_TAVILY_KEY` / `MUTONG_GITHUB_TOKEN` 在 `config.SetDefaultConfig()` 中覆盖，写 `${...}` 会被当成字面量。
-- `sanitizer.rules` 为空时 `cmd/main.go` 回落 `diagnosis.DefaultSanitizerConfig()`；非空则完全以 YAML 为准（这也是 §0 所述键名缺陷不会自动兜底的原因）。
+- `cmd/main.go` 构建 sanitizer 前调用 `cfg.Sanitizer.ApplyDefaults()`，对零值字段（阈值/长度/注入模式/规则）逐项回落 `DefaultSanitizerConfig()` 的默认值；YAML 显式给出的非零值以 YAML 为准。
 
 ### 7.2 环境变量
 
@@ -643,7 +643,7 @@ Craft specific and focused queries:
 |------|------|------|------|
 | 1.1 | 编写 `diagnosis/sanitizer.go` | PII 脱敏函数 + 单元测试 | ✅ `sanitizer.go` + `sanitizer_test.go`（197 行）；覆盖率未测量 |
 | 1.2 | 编写 Query Extractor | 搜索词精简逻辑 | ⚠️ 仅长度截断 + `Genericize()` 泛化，正则指纹提取未实现 |
-| 1.3 | 编写 Prompt Injection 过滤器 | inbound 过滤逻辑 | ⚠️ `FilterResults()` 已实现，但只用于 Tavily 路径；且随包 YAML 键名不匹配导致模式列表为空（§0） |
+| 1.3 | 编写 Prompt Injection 过滤器 | inbound 过滤逻辑 | ✅ `FilterResults()` 已实现，Tavily 与 GitHub 两条路径均调用；YAML 键名已统一 snake_case，模式列表正常绑定（§0） |
 | 1.4 | 新增配置结构体 `SearchConfig` | 配置加载逻辑 | ✅ 实际命名为 `ExternalSearchConfig` / `SanitizerConfig`（`config/sanitizer_config.go`） |
 | 1.5 | 运行历史告警回归测试 | 确认脱敏后无敏感信息残留 | ❌ 未见回归测试记录 |
 
@@ -659,13 +659,13 @@ Craft specific and focused queries:
 | 2.1 | 编写 `search/tavily_client.go` | Tavily API 封装 | ✅ 含超时、`maxResults`、AI 摘要、topic |
 | 2.2 | 编写 `mcp/search_tools.go` | `search_knowledge_base` 工具注册 | ✅ `WithExternalSearch` 条件注册 |
 | 2.3 | 升级 System Prompt | 搜索策略指引 | ⚠️ 内联在 `controllers/diagnosis_controller.go`，未落地独立 prompt 文件 |
-| 2.4 | 集成审计日志 | 外部调用元数据记录 | ❌ 钩子已留，`main.go` 传 nil，无落库 |
+| 2.4 | 集成审计日志 | 外部调用元数据记录 | ⚠️ 钩子已传日志闭包，元数据写服务端日志，无落库 |
 | 2.5 | 端到端测试 (模拟告警→诊断→搜索) | 完整流程验证 | ❌ `services/search/` 与 `mcp/search_tools.go` 均无专测 |
 
 **验收标准**:
 - Agent 可在置信度不足时自动调用搜索工具（✅ 工具全量注册，由 LLM 自主决定）
 - 搜索结果正确注入诊断上下文（✅ 工具返回文本进入 ReAct 循环）
-- 审计日志正确写入数据库（❌ 未接线）
+- 审计日志正确写入数据库（❌ 未落库，仅写服务端日志）
 - 脱敏层在每次搜索前生效（✅ 两个 handler 都先 `Redact` + `ShouldBlock`）
 
 ### Phase 3: GitHub Issues 搜索 (第 5 周) 🟢 锦上添花 — ✅ 已上线
@@ -674,7 +674,7 @@ Craft specific and focused queries:
 |------|------|------|------|
 | 3.1 | 编写 `search/github_client.go` | GitHub REST API 封装 | ✅ 强制 `is:issue`、`repo:`/`state:` 过滤、按 updated 排序、token 可选 |
 | 3.2 | 注册 `search_github_issues` 工具 | GitHub 搜索 MCP Tool | ✅ 无 token 也注册（60 次/小时） |
-| 3.3 | 集成测试 | 端到端验证 | ❌ 无专测；返回结果未过注入过滤 |
+| 3.3 | 集成测试 | 端到端验证 | ❌ 无专测；返回结果已过注入过滤 |
 
 ### Phase 4: 生产上线 (第 6 周) 🔵 — ⚠️ 部分
 
@@ -728,8 +728,8 @@ Craft specific and focused queries:
 - [x] 任何包含内部 IP 的查询被脱敏——实际占位符为 `[REDACTED_IP_V4_<n>]`（原方案写的 `[REDACTED_IP]` 不带序号）
 - [x] 任何包含 Token/密码的查询被脱敏——占位符为 `[REDACTED_JWT_<n>]` / `[REDACTED_SECRET_<n>]`
 - [x] 高 PII 占比查询被完全阻断（`ShouldBlock()`，含单测）
-- [ ] Prompt Injection 模式被正确检测并过滤——`FilterResults()` 已实现且有单测，但 GitHub 路径未调用，且随包 YAML 键名不匹配导致模式列表为空（§0）
-- [ ] 审计日志正确记录所有外部调用的元数据——钩子已留但传 nil，未落库
+- [x] Prompt Injection 模式被正确检测并过滤——`FilterResults()` 已实现且有单测，Tavily 与 GitHub 两条路径均调用，YAML 键名已统一 snake_case、模式列表正常绑定（§0）
+- [ ] 审计日志正确记录所有外部调用的元数据——钩子已传日志闭包，元数据写服务端日志，仍未落库
 - [x] 脱敏层异常时搜索被安全阻断 (fail-safe)——`NewSanitizer` 失败即不调用 `SetExternalSearch`，工具不注册
 
 ### 性能验收

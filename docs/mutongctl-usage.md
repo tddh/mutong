@@ -198,26 +198,30 @@ mutongctl search tavily -q "Pod CrashLoopBackOff 排查方法"
 mutongctl search tavily -q "Prometheus 高基数优化" -t general
 ```
 
-### 执行器（危险操作需 --confirm，支持 12 种操作类型）
+### 执行器（危险操作需 --confirm，支持 13 种操作类型）
 
 ```bash
 mutongctl exec status
 mutongctl exec audit --action restart_pod
 
-# 12 种操作类型
+# 13 种操作类型
+# execute 实际 flag 仅：--action/-a、--target、--namespace/-n、--reason/-r、--risk、--replicas、--output/-o（另需全局 --confirm）
 mutongctl exec execute --action restart_pod --target <pod> -n default --confirm
 mutongctl exec execute --action delete_pod --target <pod> -n default --confirm
 mutongctl exec execute --action scale_deployment --target <deploy> -n default --replicas 3 --confirm
-mutongctl exec execute --action create_hpa --target <deploy> -n default --min 1 --max 5 --cpu 50 --confirm
-mutongctl exec execute --action update_hpa --target <deploy> -n default --min 2 --max 10 --cpu 80 --confirm
-mutongctl exec execute --action update_configmap --target <cm> -n default --data key=val --confirm
-mutongctl exec execute --action update_secret --target <secret> -n default --data key=val --confirm
-mutongctl exec execute --action update_resource_limits --target <deploy> -n default --cpu-limit 500m --mem-limit 1Gi --confirm
-mutongctl exec execute --action update_deployment_image --target <deploy> -n default --image nginx:1.22 --confirm
+mutongctl exec execute --action rollout_restart --target <deploy> -n default --confirm  # 滚动重启 Deployment
 mutongctl exec execute --action rollout_undo --target <deploy> -n default --confirm  # 回滚到上一版本（CLI 暂不支持指定 revision）
-mutongctl exec execute --action update_annotations --target <deploy> -n default --ann key=val --confirm
-mutongctl exec execute --action update_labels --target <deploy> -n default --label key=val --confirm
+mutongctl exec execute --action create_hpa --target <deploy> -n default --confirm  # 未传明细时用默认 min 1 / max 5 / CPU 50%
+mutongctl exec execute --action update_hpa --target <deploy> -n default --confirm
+mutongctl exec execute --action update_configmap --target <cm> -n default --confirm  # data 明细需走 API
+mutongctl exec execute --action update_secret --target <secret> -n default --confirm  # data 明细需走 API
+mutongctl exec execute --action update_resource_limits --target <deploy> -n default --confirm  # limits/requests 明细需走 API
+mutongctl exec execute --action update_deployment_image --target <deploy> -n default --confirm  # image 明细需走 API
+mutongctl exec execute --action update_annotations --target <deploy> -n default --confirm  # 注解明细需走 API
+mutongctl exec execute --action update_labels --target <deploy> -n default --confirm  # 标签明细需走 API
 ```
+
+> **参数限制**：`execute` 只暴露 `--action`/`--target`/`--namespace`/`--reason`/`--risk`/`--replicas`/`--output`（见 `cmd/mutongctl/exec/execute.go`），**没有** `--min`/`--max`/`--cpu`/`--data`/`--cpu-limit`/`--mem-limit`/`--image`/`--ann`/`--label` 等 flag。HPA 的 min/max/CPU、ConfigMap/Secret 的 data、容器镜像、资源 limits/requests、注解/标签、rollout revision 等明细参数需通过 API `POST /api/v1/executor/execute` 提交完整 ExecutionPlan；`create_hpa`/`update_hpa` 未传明细时执行器回落默认值（min 1 / max 5 / CPU 50%）。
 
 ### 终端（⚠️ 仅人类交互）
 

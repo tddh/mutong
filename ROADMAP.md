@@ -12,10 +12,10 @@
 - [x] 复盘分析（事件时间线 + 因果链 DAG + 混合检索）
 - [x] MCP 工具服务器（29 个工具：22 诊断 + 7 执行类提议）
 - [x] 业务拓扑（Beyla eBPF + OTel Collector 自动发现，含 L4 flow 拓扑）
-- [x] Web 终端 + 日志查询 + 指标监控 + 链路追踪
+- [x] Web 终端 + 日志查询 + 指标监控 + 链路追踪（注：链路追踪后端默认未接通——`config.infra.yaml` 的 `opentelemetry.enabled=false`，TraceController 未挂载，追踪页无可用后端，见 `docs/TODO.md`）
 - [x] CLI 工具 mutongctl（20 个命令模块）
 - [x] RBAC 权限（admin / operator / viewer，Casbin enforce/shadow/off）
-- [x] 外部知识检索（Tavily + GitHub Issues，含 PII 脱敏与审计）
+- [x] 外部知识检索（Tavily + GitHub Issues，含 PII 脱敏与审计）（注：审计钩子已传日志闭包，调用元数据写服务端日志，**尚未落库**，无 `external_search_audit` 表，见 `docs/external-search-plan.md`）
 - [x] 鉴权默认拒绝 + 会话 HMAC 验签 + 执行器 admin 门禁
 - [x] 告警 Webhook HMAC-SHA256 签名（时间戳参与签名）+ 重放拒绝 + 1MB body 上限
 - [x] `GET /healthz` 无鉴权存活探针

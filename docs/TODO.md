@@ -22,7 +22,7 @@
 
 ### 2. RBAC 用户 / 角色管理
 - **后端**：三种角色（admin / operator / viewer）已注册，Casbin 中间件已挂载并按 `auth.rbac_mode`（enforce/shadow/off）生效
-- **现状**：用户 API 仅 `GET /api/v1/users`（返回当前用户），角色 API 仅 `GET /api/v1/roles`；旧路径 `/users`、`/roles` 已 301 到新路径
+- **现状**：用户 API 仅 `GET /api/v1/users`（返回当前用户），角色 API 仅 `GET /api/v1/roles`；旧路径 `/users`、`/roles` 已 308 重定向到新路径（保留 query string）
 - **缺口**：
   - 缺少 POST/PUT/DELETE 端点
   - `UserService` 仅有 `CreateUserFromZitadel` 自动创建
@@ -57,11 +57,11 @@
   6. 无论 OIDC 初始化成功与否，都会注册路由（失败时返回 503 而非 404） ✅
 - **仍需改进**：
   - 用户/角色 CRUD（见 P2 待办项）
-  - Zitadel/OIDC 文档需更完善（已在 user-manual.md 补充）
+  - Zitadel/OIDC 文档需更完善
   - Zitadel 实际配置项（issuer, client_id 等）需在生产部署时填完
 
 ### 7. 链路追踪 — 后端未接通（已修正描述，2026-09-04）
-- **代码现状**：`cmd/main.go:635-642` 已按配置条件注册 `TraceController`（`/api/v1/trace/query|spans|services`），此前"从未注册"的说法已过时
+- **代码现状**：`cmd/main.go:817-824` 已按配置条件注册 `TraceController`（`/api/v1/trace/query|spans|services`），此前"从未注册"的说法已过时
 - **实际缺口**：注册前提是 `opentelemetry.enabled && collectorURL != ""`，而 `configs/config.infra.yaml` 默认 `enabled: false`
 - **tf001 实测**：启动日志 `OpenTelemetry not configured, tracing API disabled`；`http://localhost:4318` 无监听 → 追踪页确无后端可用
 - **待办**：接入真实 OTel Collector / Tempo，确认 `OTelQueryService` 查询协议与后端匹配（现有实现走 collectorURL，需验证是否支持 trace 读取），再恢复菜单入口

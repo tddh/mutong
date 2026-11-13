@@ -711,7 +711,7 @@ git commit -m "feat(topology): 一次性合并重复 BusinessApp 顶点的维护
 **Files:**
 - Modify: `services/business_topology_service.go:216-222`
 
-- [ ] **Step 1: 移除不存在的属性条件**
+- [x] **Step 1: 移除不存在的属性条件**（已落地：`services/business_topology_service.go:394-401` 的 `matchBusinessAppByName` 已去掉 `is_deleted` 条件，字符串字面量改走 `sanitizer.QuoteString`；commit `3a41b71`）
 
 `matchBusinessAppByName` 的查询里 `a.BusinessApp.is_deleted == false` 引用了一个 BusinessApp tag 上不存在的属性（BusinessApp 无 is_deleted），导致查询恒失败、告警富化第一步静默跳过。改为：
 
@@ -722,12 +722,12 @@ git commit -m "feat(topology): 一次性合并重复 BusinessApp 顶点的维护
 		strconv.Quote(appName), strconv.Quote(namespace))
 ```
 
-- [ ] **Step 2: 编译 + 测试**
+- [x] **Step 2: 编译 + 测试**（2026-11 复核：`go build ./...` exit 0，`services` 包拓扑相关测试全绿）
 
 Run: `go build ./... && go test -race -count=1 ./services/... 2>&1 | tail -10`
 Expected: PASS。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**（已提交：`3a41b71`）
 
 ```bash
 git add services/business_topology_service.go
@@ -764,7 +764,7 @@ Beyla (eBPF, network.enable + otel_metrics_export → collector:4318)
 
 **零依赖新增**：`go.opentelemetry.io/proto/otlp v1.10.0` 已在 go.mod，含 `metrics/v1` 子包，直接 import。
 
-- [ ] **Step 1: 写失败测试（flow 指标解析）**
+- [ ] **Step 1: 写失败测试（flow 指标解析）**（**未落地**：`services/flow_topology_syncer_test.go` 不存在，`TestProcessFlow_*` 未编写；flow 解析目前只被集成路径间接覆盖，需补专项单测）
 
 `services/flow_topology_syncer_test.go`（复用 trace 测试的 `traceGraphDB`/`newTraceSyncer` 等辅助模式）：
 
@@ -799,12 +799,12 @@ func TestProcessFlow_SameWorkloadCrossReplica(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [ ] **Step 2: 运行确认失败**（依赖 Step 1 的测试，尚未编写）
 
 Run: `go test ./services/ -run TestProcessFlow -count=1 -v`
 Expected: 编译失败（`newFlowSyncer`/`processMetricsRecord` 未定义）。
 
-- [ ] **Step 3: 实现 FlowTopologySyncer**
+- [x] **Step 3: 实现 FlowTopologySyncer**（已落地：`services/flow_topology_syncer.go`，复用 `lookupByOwnerName` + `upsertCallEdge`；commit `b5f5429`，去重加固 `d918bb3`）
 
 `services/flow_topology_syncer.go`（复用 TraceTopologySyncer 的 `lookupByOwnerName`、`upsertCallEdge`、`businessAppRef`）：
 
@@ -889,16 +889,16 @@ func flowAttr(attrs []*commonv1.KeyValue, keys ...string) string {
 
 （`Start/Stop/consumeLoop/flushLoop` 照抄 `TraceTopologySyncer` 的模式；`handleFlowPoint` 里的多属性名 fallback 覆盖 OTel 语义/新老版本差异，落地时抓真实数据点确认后收敛为一个。）
 
-- [ ] **Step 4: 运行测试确认通过**
+- [ ] **Step 4: 运行测试确认通过**（该命名测试不存在，无法执行；依赖 Step 1 补测）
 
 Run: `go test ./services/ -run TestProcessFlow -count=1 -v`
 Expected: PASS（`lookupByOwnerName` 走 cache miss → 自动建点，产出 1 条自环边）。
 
-- [ ] **Step 5: 配置层 + 装配**
+- [x] **Step 5: 配置层 + 装配**（已落地：`config/config_base.go:156-157` 的 `FlowTopic`/`FlowGroup`，`config/config.go` 的 `SetupFlowKafkaClient()`/`GetFlowMessageQueue()`，`cmd/main.go` 装配并启动 `flowSyncer`，`configs/config.core.yaml` 的 `flowTopic: mutong_flow_01`/`flowGroup: mutong_flow_v01`）
 
 照 `SetupTraceKafkaClient` 三件套加第四套：`config_base.go` 的 KafkaConf 加 `FlowTopic/FlowGroup/FlowClient`；`config.go` 加 `SetupFlowKafkaClient()`（消费 `FlowTopic`、group `FlowGroup`）与 `GetFlowMessageQueue()`；`main.go` 在 `cfg.BusinessTopology.Enabled` 分支照 traceSyncer 装配 flowSyncer；`configs/config.core.yaml` 加 `flowTopic: mutong_flow_01` / `flowGroup: mutong_flow_v01`。
 
-- [ ] **Step 6: deploy 侧配置**
+- [x] **Step 6: deploy 侧配置**（已落地：`deploy/helm-beyla-values.yaml` 的 `exports: [traces, metrics]` + `network.enable` + `cache_active_timeout: 5s`；`deploy/helm-otelcol-values.yaml` 的 `kafka/metrics` exporter（topic `mutong_flow_01`）与 metrics pipeline）
 
 `deploy/helm-beyla-values.yaml`：
 
@@ -933,12 +933,12 @@ service:
     metrics: {receivers: [otlp], processors: [batch], exporters: [kafka/metrics]}
 ```
 
-- [ ] **Step 7: 全量测试 + race**
+- [x] **Step 7: 全量测试 + race**（2026-11 复核：`go build ./...` exit 0，`services` 包拓扑相关测试全绿；flow 专项单测仍缺，见 Step 1）
 
 Run: `go test -race -count=1 ./services/ ./config/... 2>&1 | tail -20`
 Expected: PASS。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**（已提交：`b5f5429`，去重修复 `d918bb3`；实际未包含 `flow_topology_syncer_test.go`，该文件至今不存在）
 
 ```bash
 git add services/flow_topology_syncer.go services/flow_topology_syncer_test.go config/config_base.go config/config.go cmd/main.go configs/config.core.yaml deploy/helm-beyla-values.yaml deploy/helm-otelcol-values.yaml

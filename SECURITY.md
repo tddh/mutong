@@ -52,7 +52,7 @@
 - [ ] `server.enableSwagger` 保持 `false`；`/metrics` 未随意设为公开
 - [ ] `auth.rbac_mode` 为 `enforce`（`shadow` / `off` 仅用于灰度或应急）
 - [ ] `executor.enabled` / `executor.autoMode` 按需开启，审批流程已验证
-- [ ] 终端可达范围已确认：默认拒绝系统命名空间（`kube-system`/`kube-public`/`kube-node-lease`）。注意 `terminal.allowedNamespaces` 尚未在启动时注入，**无法靠该配置进一步收敛**，需要时用 RBAC / 网络策略补偿
+- [ ] 终端可达范围已确认：默认拒绝系统命名空间（`kube-system`/`kube-public`/`kube-node-lease`）。`terminal.allowedNamespaces` 已在启动时注入生效，可用该配置进一步收敛；需要时仍可用 RBAC / 网络策略补偿
 - [ ] kubeconfig 文件不提交到 Git，且权限最小化（平台需要 exec 权限，请单独评估）
 - [ ] 生产环境 `configs/*.yaml` 不包含真实凭据；镜像只包含 `*.example` 模板
 - [ ] LLM API Key 通过 `MUTONG_LLM_API_KEY` 设置；数据库密码通过 `MUTONG_DB_PASSWORD` 设置
@@ -99,8 +99,8 @@
 - **Token 不可逆存储**：PAT/SAT 以 `crypto/rand` 生成，只存 SHA-256 哈希，支持过期与撤销（`services/auth/token.go`）。
 - **Secret 脱敏**：资源详情与图谱接口返回前删除 Secret 的 `data` / `stringData`（`services/getResource.go` 的 `redactResourceDefineString`）。
 - **XSS 防护**：`/device` 页面 `html.EscapeString`（`controllers/oauth2/device.go`）；诊断 Markdown 经 `marked.parse` 后由 DOMPurify 清洗（`view/src/diagnosis/diagnosis.js`）。
-- **外部搜索脱敏**：出站查询做 PII 脱敏（占位符 + 内存映射账本）+ 泛化/截断 + 高 PII 与禁用词阻断，Tavily 入站结果做 prompt injection 过滤（`services/diagnosis/sanitizer.go`、`services/mcp/search_tools.go`）。**未闭合项**：GitHub 结果未过注入过滤；审计钩子 `AuditLogFunc` 在 `cmd/main.go` 传 nil，调用元数据不落库；`Restore()` 无调用方；`configs/config.diagnosis.yaml` 的 sanitizer 段用 snake_case 键而结构体标签是 camelCase，导致 `bannedTerms` / 注入模式实际为空。详见 [docs/external-search-plan.md §0](docs/external-search-plan.md)。
-- **静态资源收敛**：只服务构建产物目录（`artifacts/view` / `view/dist`），不暴露 `view/` 源码树（`cmd/main.go` 的 `registerStaticRoutes`）。
+- **外部搜索脱敏**：出站查询做 PII 脱敏（占位符 + 内存映射账本）+ 泛化/截断 + 高 PII 与禁用词阻断，Tavily 与 GitHub 入站结果均做 prompt injection 过滤（`services/diagnosis/sanitizer.go`、`services/mcp/search_tools.go`）。审计钩子 `AuditLogFunc` 在 `cmd/main.go` 传入日志闭包，调用元数据写服务端日志。**未闭合项**：审计元数据仍未落库（无 `external_search_audit` 表）；`Restore()` 无调用方。详见 [docs/external-search-plan.md §0](docs/external-search-plan.md)。
+- **静态资源收敛**：只服务前端构建产物目录（按二进制同级 `view/dist` 定位，候选目录须含 `index.html`，可用 `MUTONG_VIEW_DIR` 显式覆盖），不暴露 `view/` 源码树（`cmd/main.go` 的 `resolveViewDir` / `registerStaticRoutes`）。
 
 ### 执行与操作安全
 
@@ -109,7 +109,7 @@
 - **提案组强制人工审批**：改镜像 / 调资源 / 删 Pod / rollout undo 只生成待审批记录，任何情况下都不自动执行；强制携带告警指纹，无诊断支撑直接拒绝，同指纹去重（`services/mcp/exec_tools.go`）。
 - **执行后验证与自动回滚**：后台轮询 rollout / Pod Ready（最长 4 分钟），可回滚动作验证失败时恢复「最近已知健康版本」（`services/executor/verify.go`）。
 - **全量审计**：操作人、时间、目标资源、动作、结果、风险等级写入 PostgreSQL（`services/executor/pg_store.go`、`services/audit/`）。
-- **终端隔离与回收**：namespace 准入默认拒绝系统命名空间 + 会话/执行审计事件（当前写服务端日志，`SetAuditStore` 未注入故不落 `operation_audit_logs`）；连接关闭时回收 K8s exec 流与 goroutine，写操作串行化（`controllers/terminal_controller.go`、`services/terminal/session.go`）。
+- **终端隔离与回收**：namespace 准入默认拒绝系统命名空间，`terminal.allowedNamespaces` 白名单已在 `cmd/main.go` 经 `SetAllowedNamespaces` 注入生效；会话/执行审计事件写服务端日志，DB 可用时经 `SetAuditStore` 落 `operation_audit_logs`；连接关闭时回收 K8s exec 流与 goroutine，写操作串行化（`controllers/terminal_controller.go`、`services/terminal/session.go`）。
 
 ### 暴露面与供应链
 
@@ -132,8 +132,8 @@
 - **RBAC 粒度为角色级**，尚未支持按命名空间 / 资源实例的细粒度授权。
 - **用户/角色管理只有读接口**，账号变更需走数据库或 OIDC 侧，缺少管理 UI 与 API。
 - **`/healthz` 不探测下游依赖**，只表示进程存活；组件级健康请使用需鉴权的 `/api/v1/monitoring/health`。
-- **终端 namespace 白名单未接线**：`terminal.allowedNamespaces` 与 `TerminalController.SetAllowedNamespaces` 已实现，但 `cmd/main.go` 未注入，实际生效的只有「默认拒绝系统命名空间」；终端审计同样只写服务端日志（`SetAuditStore` 未注入）。
-- **外部搜索的审计与还原未接线**：见上文「数据保护」中的未闭合项与 [docs/external-search-plan.md §0](docs/external-search-plan.md)。
+- **终端审计落库依赖 DB**：`terminal.allowedNamespaces` 与 `SetAllowedNamespaces`、`SetAuditStore` 均已在 `cmd/main.go` 接线生效；但审计存储仅在 PostgreSQL 可用时注入，降级启动（无 DB）时终端审计只写服务端日志，不落 `operation_audit_logs`。
+- **外部搜索的审计落库与状态还原未闭合**：审计钩子已传日志闭包（元数据写服务端日志，未落库），`Restore()` 无调用方；见上文「数据保护」与 [docs/external-search-plan.md §0](docs/external-search-plan.md)。
 
 ## 相关文档
 

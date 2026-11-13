@@ -16,6 +16,16 @@
 
 **修复过程中新发现并已修复的问题**：默认配置 CORS 启动 panic、`Engine.Stop()` close(nil channel)、sanitizer 配置键 snake_case/camelCase 不匹配致注入模式加载为空、GitHub 搜索结果未过注入过滤、外部搜索审计钩子传 nil、终端审计存储未接线、inspection 配置重复键、deploy compose 单 storaged 与 replica_factor=2 冲突、init_postgres.sh 用户不匹配、3 个依赖漏洞（compress/quic-go/Go stdlib）。
 
+**2026-11-13 补充修复（部署后实测暴露的根因）**：
+
+| 问题 | 根因 | 修复 |
+| --- | --- | --- |
+| 整站 `/view/*` 404 | 前端目录解析只验目录存在，把包着 `dist/` 的外壳目录当 web root | 按二进制同级 `view/dist` 定位 + `index.html` 校验 + `MUTONG_VIEW_DIR` 覆盖 |
+| 物理拓扑点击资源不出图（业务拓扑正常） | `b30b066` 把 NGQL 字符串改单引号，违约 nGQL 双引号约定，`GO FROM` 查空 | `QuoteString` 恢复双引号 + 转义双引号 |
+| `graph/search` 返回 400 | `913d6e7` 旧路径 308 重定向用 `URL.Path` 丢 query，`resourceId` 丢失 | 重定向保留 RawQuery |
+| 抑制率 14802% | 收到总数按 payload 计、抑制按单告警计，口径错位 | `RecordReceived` 按告警数计，同口径 |
+| 拓扑错误文案误导 | 错误态副标题写死"检查 K8s 集群连接" | 改图数据库相关中性文案 + 空 uid 兜底 |
+
 **明确遗留（含原因）**：
 
 | 编号 | 状态 | 说明 |

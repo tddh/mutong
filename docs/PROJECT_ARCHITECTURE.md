@@ -129,7 +129,7 @@ AutoDiagnosisPipeline（executor.enabled 且 AlertService 就绪时装配）
 - 护栏：`maxRestartCount`（默认 5）、`coolDownMinutes`（默认 5）、`gracePeriodSec`（默认 30）、`maxReplicas`（默认 100）。
 - HTTP 侧二次门禁：`/api/v1/executor/execute|toggle|diagnose-and-execute|audit/:id/approve` 均要求 `X-Admin-Key`（`MUTONG_ADMIN_KEY`，常量时间比较）；未配置该密钥时要求 `admin` 角色（`controllers/executor_controller.go`）。
 - MCP 执行类工具分两组（`services/mcp/exec_tools.go`）：安全组 `restart_pod_safe`/`rollout_restart`/`scale_deployment` 走 autoMode+审批门禁；提案组 `update_deployment_image`/`adjust_resource_limits`/`delete_pod`/`rollout_undo` **只生成待审批记录，任何情况下不自动执行**，且强制携带告警指纹。
-- 审计落库：`NewK8sExecutor` 构造时只要 DB 可用就自动接线操作审计表（`executor.auditLog.operationTable`，默认 `operation_audit_logs`）；执行记录本身仅在 `executor.auditLog.type=postgres` 时落 `auditLog.table`，否则存内存。（终端的审计存储则尚未注入，见 §8。）
+- 审计落库：`NewK8sExecutor` 构造时只要 DB 可用就自动接线操作审计表（`executor.auditLog.operationTable`，默认 `operation_audit_logs`）；执行记录本身仅在 `executor.auditLog.type=postgres` 时落 `auditLog.table`，否则存内存。（终端审计存储已在 `main.go` 经 `SetAuditStore` 注入，DB 可用时落 `operation_audit_logs`。）
 
 ### 4.2 认证与授权链路
 
@@ -144,7 +144,7 @@ AutoDiagnosisPipeline（executor.enabled 且 AlertService 就绪时装配）
 | 7 | `WebhookSignatureMiddleware` | 告警签名/时间窗/重放/body 上限（见 §4.1） |
 | 8 | `RateLimitMiddleware` | 按 IP 令牌桶，`server.rateLimitPerSec`（默认 100） |
 | 9 | `BearerTokenMiddleware` | 解析身份，写入 `user_id`/`user_uuid`/`role`/`token_type` |
-| 10 |  legacy 重定向 | `/k8s/*`、`/users`、`/roles` → `/api/v1...`（308） |
+| 10 |  legacy 重定向 | `/k8s/*`、`/users`、`/roles` → `/api/v1...`（308，**保留 query string**） |
 | 11 | `RequireAuthMiddleware` | **默认拒绝**：非 `isPublicPath` 且无 `user_id` → 401 |
 | 12 | `CasbinMiddleware` | RBAC；无 `user_uuid` 一律 403（即使 shadow 模式） |
 
@@ -299,7 +299,7 @@ client-go SharedInformerFactory（dynamic informer，全命名空间，resync �
 | 统计 | `GET /api/v1/stats/overview`、`GET /resource-total`、`POST /sync`、`POST /backfill-relationships` | 总是 | `stats_controller.go` |
 | 状态 | `GET /api/v1/diagnosis/status`、`GET /alerts/suppression/status`、`GET /system/status` | AlertService + 诊断引擎就绪 | `status_controller.go` |
 | 业务拓扑 | `GET /api/v1/business-topology/{apps,calls,graph,app}` | 总是 | `business_topology_controller.go` |
-| 前端 | `GET /`→`/view/index.html`；`GET /view/*filepath`（只服务 `artifacts/view` 或 `view/dist`，未登录跳 `login.html`）；`GET /login`、`GET/POST /oidc/login` 兼容重定向；`GET /swagger/*any` | Swagger 仅 `server.enableSwagger=true` | `main.go` |
+| 前端 | `GET /`→`/view/index.html`；`GET /view/*filepath`（`resolveViewDir` 按二进制同级 `view/dist` 定位、候选须含 `index.html`、`MUTONG_VIEW_DIR` 可覆盖，未登录跳 `login.html`）；`GET /login`、`GET/POST /oidc/login` 兼容重定向；`GET /swagger/*any` | Swagger 仅 `server.enableSwagger=true` | `main.go` |
 
 ---
 
@@ -324,11 +324,7 @@ AutoMigrate 表清单见 `config.migrateDiagnosisTables` / `migrateAuthTables`�
 
 | 缺口 | 现状 | 影响 |
 |------|------|------|
-| 终端 namespace 白名单未接线 | `config.TerminalConf.AllowedNamespaces`（YAML `terminal.allowedNamespaces`）与 `TerminalController.SetAllowedNamespaces` 均已存在，但 `cmd/main.go` 未调用注入 | 实际生效的是默认策略：**拒绝系统命名空间** `kube-system`/`kube-public`/`kube-node-lease`，其余允许（`services/terminal/session.go`）。配置该项当前不改变行为 |
-| 终端操作审计未落库 | `SetAuditStore` 未在 `main.go` 注入 | 终端会话/拒绝事件只写服务端日志，不写 `operation_audit_logs` |
-| 外部搜索审计未接线 | `mcp.AuditLogFunc` 钩子已实现，`main.go` 传 `nil`；无 `external_search_audit` 表 | 调用元数据不落库，仅工具返回文本与服务端日志 |
-| sanitizer YAML 键名不匹配 | `config.SanitizerConfig` 标签为 camelCase（`highPIIBlockThreshold`/`maxQueryLength`/`bannedTerms`/`promptInjectionPatterns`），而 `configs/config.diagnosis.yaml` 用 snake_case | 这些键不会绑定：`bannedTerms` 与注入过滤模式为空（`rules` 非空时不会回落 `DefaultSanitizerConfig`），阈值/长度由 `NewSanitizer` 兜底为 0.5 / 200 |
-| GitHub 搜索结果未过注入过滤 | `handleSearchGitHubIssues` 未调用 `FilterResults`（Tavily 路径有） | 入站过滤覆盖不完整 |
+| 外部搜索审计未落库 | `mcp.AuditLogFunc` 钩子已实现，`main.go` 传日志闭包；无 `external_search_audit` 表 | 调用元数据仅写服务端日志，不落库 |
 | 搜索词提取器为截断实现 | `ExtractSearchFingerprint` 只按 `maxQueryLength` 截断，未实现 `external-search-plan.md` §5.2 的正则指纹提取 | 搜索词质量依赖 LLM 自身构造 |
 | 多集群按参数过滤 | 终端/执行器/诊断取集群 map 的第一个客户端 | 多集群下操作目标可能非预期，见 ROADMAP v0.3.0 |
 

@@ -101,7 +101,7 @@ func TestBusinessTopologyAppsAndGraph(t *testing.T) {
 	// Filters must be quoted into the query (sanitized), not concatenated raw.
 	found := false
 	for _, q := range db.queries {
-		if strings.Contains(q, "WHERE") && strings.Contains(q, "'bu-1'") {
+		if strings.Contains(q, "WHERE") && strings.Contains(q, "\"bu-1\"") {
 			found = true
 		}
 	}

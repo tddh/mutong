@@ -15,9 +15,10 @@ func TestSanitizer_EscapeString(t *testing.T) {
 	}{
 		{"empty", "", ""},
 		{"normal", "hello", "hello"},
-		{"single_quote", "hello'world", "hello\\'world"},
+		{"single_quote", "hello'world", "hello'world"},
+		{"double_quote", "hello\"world", "hello\\\"world"},
 		{"backslash", "hello\\world", "hello\\\\world"},
-		{"combined", "hello'world\\test", "hello\\'world\\\\test"},
+		{"combined", "hello\"world\\test", "hello\\\"world\\\\test"},
 		{"newline", "hello\nworld", "hello\\nworld"},
 		{"tab", "hello\tworld", "hello\\tworld"},
 		{"carriage_return", "hello\rworld", "hello\\rworld"},
@@ -42,10 +43,10 @@ func TestSanitizer_QuoteString(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"empty", "", "''"},
-		{"normal", "hello", "'hello'"},
-		{"with_quote", "hello'world", "'hello\\'world'"},
-		{"injection_attempt", "abc'}) RETURN 1; DROP TAG K8sResource; //", "'abc\\'}) RETURN 1; DROP TAG K8sResource; //'"},
+		{"empty", "", "\"\""},
+		{"normal", "hello", "\"hello\""},
+		{"with_quote", "hello\"world", "\"hello\\\"world\""},
+		{"injection_attempt", "abc\"}) RETURN 1; DROP TAG K8sResource; //", "\"abc\\\"}) RETURN 1; DROP TAG K8sResource; //\""},
 	}
 
 	for _, tt := range tests {

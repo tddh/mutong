@@ -51,13 +51,13 @@ func TestStatsOverviewAggregatesCounts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := &stubGraphDB{executeFn: func(query string) (*nebula.ResultSet, error) {
 		switch {
-		case strings.Contains(query, `'Pod'`):
+		case strings.Contains(query, `"Pod"`):
 			return countResultSet(t, 3), nil
-		case strings.Contains(query, `'Node'`):
+		case strings.Contains(query, `"Node"`):
 			return countResultSet(t, 2), nil
-		case strings.Contains(query, `'Service'`):
+		case strings.Contains(query, `"Service"`):
 			return countResultSet(t, 4), nil
-		case strings.Contains(query, `'Deployment'`):
+		case strings.Contains(query, `"Deployment"`):
 			return countResultSet(t, 1), nil
 		}
 		return nil, errors.New("unexpected query")

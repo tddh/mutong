@@ -15,7 +15,7 @@ func NewSanitizer() *Sanitizer {
 }
 
 // EscapeString 安全转义字符串用于 nGQL 查询
-// nGQL 字符串使用单引号，需要转义单引号和反斜杠
+// nGQL 字符串字面量使用双引号，需要转义双引号和反斜杠
 func (s *Sanitizer) EscapeString(str string) string {
 	if str == "" {
 		return ""
@@ -26,9 +26,9 @@ func (s *Sanitizer) EscapeString(str string) string {
 
 	for _, r := range str {
 		switch r {
-		case '\'':
-			// 单引号转义为 \'
-			builder.WriteString("\\'")
+		case '"':
+			// 双引号转义为 \"
+			builder.WriteString("\\\"")
 		case '\\':
 			// 反斜杠转义为 \\
 			builder.WriteString("\\\\")
@@ -50,9 +50,9 @@ func (s *Sanitizer) EscapeString(str string) string {
 }
 
 // QuoteString 安全地将字符串包装为 nGQL 字符串字面量
-// 返回带单引号的字符串，如 'escaped_string'
+// 返回带双引号的字符串，如 "escaped_string"（nGQL 字符串字面量约定双引号）
 func (s *Sanitizer) QuoteString(str string) string {
-	return "'" + s.EscapeString(str) + "'"
+	return "\"" + s.EscapeString(str) + "\""
 }
 
 // ValidateIdentifier 验证标识符是否安全

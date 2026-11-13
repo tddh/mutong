@@ -274,8 +274,8 @@ func TestProcessLabelsRelationship_SanitizesInjection(t *testing.T) {
 	}
 	svc := newTestK8sServiceWithMocks(mockDB, mockCache)
 
-	maliciousValue := `evil'; DELETE VERTEX 'x`
-	maliciousKey := `k\e'y`
+	maliciousValue := `evil"; DELETE VERTEX "x`
+	maliciousKey := `k\e"y`
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -301,20 +301,17 @@ func TestProcessLabelsRelationship_SanitizesInjection(t *testing.T) {
 	if labelQuery == "" {
 		t.Fatal("expected Label INSERT query")
 	}
-	if !containsStr(labelQuery, "VALUES '") {
+	if !containsStr(labelQuery, `VALUES "`) {
 		t.Errorf("label vertex must use sanitizer-quoted literals: %s", labelQuery)
 	}
-	if containsStr(labelQuery, `VALUES "`) {
-		t.Errorf("label vertex must not use raw double-quoted interpolation: %s", labelQuery)
+	// 双引号与反斜杠必须被转义，注入载荷不能闭合字面量
+	if !containsStr(labelQuery, `evil\"; DELETE VERTEX \"x`) {
+		t.Errorf("double quotes in label value must be escaped: %s", labelQuery)
 	}
-	// 单引号与反斜杠必须被转义，注入载荷不能闭合字面量
-	if !containsStr(labelQuery, `evil\'; DELETE VERTEX \'x`) {
-		t.Errorf("single quotes in label value must be escaped: %s", labelQuery)
-	}
-	if containsStr(labelQuery, `evil'; DELETE`) {
+	if containsStr(labelQuery, `evil"; DELETE`) {
 		t.Errorf("unescaped injection payload reached nGQL: %s", labelQuery)
 	}
-	if !containsStr(labelQuery, `k\\e\'y`) {
+	if !containsStr(labelQuery, `k\\e\"y`) {
 		t.Errorf("backslash and quote in label key must be escaped: %s", labelQuery)
 	}
 }

@@ -602,26 +602,24 @@ func registerHealthz(engine *gin.Engine) {
 	})
 }
 
-// resolveViewDir 定位前端构建产物。仅靠 CWD 相对路径在 systemd/容器部署下
-// 会因工作目录与安装目录不一致而整站 /view/* 404，因此同时探测可执行文件
-// 相对路径，并支持 MUTONG_VIEW_DIR 显式覆盖。只接受目录，不接受同名文件。
+// resolveViewDir 定位前端构建产物：二进制在哪，前端就在它旁边的 view/dist。
+// 候选目录必须含 index.html，避免把空目录或外壳目录当 web root。
+// 支持 MUTONG_VIEW_DIR 显式覆盖；不依赖 artifacts 目录。
 func resolveViewDir() (string, []string) {
 	var candidates []string
 	if d := os.Getenv("MUTONG_VIEW_DIR"); d != "" {
 		candidates = append(candidates, d)
 	}
-	candidates = append(candidates, "./artifacts/view", "./view/dist")
+	candidates = append(candidates, "./view/dist")
 	if exe, err := os.Executable(); err == nil {
 		base := filepath.Dir(exe)
 		candidates = append(candidates,
-			filepath.Join(base, "artifacts", "view"),
 			filepath.Join(base, "view", "dist"),
-			filepath.Join(base, "..", "artifacts", "view"),
 			filepath.Join(base, "..", "view", "dist"),
 		)
 	}
 	for _, dir := range candidates {
-		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		if info, err := os.Stat(filepath.Join(dir, "index.html")); err == nil && !info.IsDir() {
 			if abs, err := filepath.Abs(dir); err == nil {
 				return abs, candidates
 			}

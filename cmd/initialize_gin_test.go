@@ -252,9 +252,10 @@ func TestRegisterStaticRoutesAuthGuard(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	for name, content := range map[string]string{
-		"artifacts/view/login.html":     "<html>login</html>",
-		"artifacts/view/dashboard.html": "<html>secret</html>",
-		"artifacts/view/app.js":         "console.log(1)",
+		"view/dist/index.html":     "<html>index</html>",
+		"view/dist/login.html":     "<html>login</html>",
+		"view/dist/dashboard.html": "<html>secret</html>",
+		"view/dist/app.js":         "console.log(1)",
 	} {
 		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
 			t.Fatal(err)

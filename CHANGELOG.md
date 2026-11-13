@@ -72,7 +72,7 @@
 - 默认配置启动崩溃：`MUTONG_ALLOWED_ORIGINS` 未设置时 `cors.New` 对空 AllowOrigins panic；改为不挂 CORS 中间件（跨域默认拒绝语义不变）
 - `diagnosis.Engine.Stop()` close(nil channel) panic：`NewEngine` 未初始化 `stopCh`（停机链路修复后暴露）
 - 内存审计存储 `matchesAuditLog` 忽略 fingerprint 过滤（与 PG 存储行为对齐）
-- 前端目录解析加固：仅 CWD 相对路径在启动目录与安装目录不一致时整站 `/view/*` 404；新增 `MUTONG_VIEW_DIR` 覆盖、可执行文件相对路径探测、只接受目录，启动日志打印 CWD 与全部搜索路径便于定位
+- 前端目录解析修复：旧代码只验目录存在，把包着 dist/ 的外壳目录当 web root 致整站 `/view/*` 404；改为以二进制同级 `view/dist` 定位（不依赖 artifacts）、候选必须含 `index.html`、支持 `MUTONG_VIEW_DIR` 覆盖，启动日志打印 CWD 与搜索路径
 - Prometheus 未配置时 nil 适配器绕过判空导致 panic
 - `autoDiag` 与终端清理协程纳入应用 ctx 与优雅停机（新增 `StopCleanup`）
 - 根 docker-compose 缺 Nebula metad/storaged 导致一键启动失败；deploy compose 单 storaged 与 `replica_factor=2` 冲突且缺 `ADD HOSTS`

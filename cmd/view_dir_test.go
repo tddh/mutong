@@ -12,8 +12,19 @@ import (
 	"go.uber.org/zap"
 )
 
+func writeIndex(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>index</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestResolveViewDirEnvOverride(t *testing.T) {
 	dir := t.TempDir()
+	writeIndex(t, dir)
 	t.Setenv("MUTONG_VIEW_DIR", dir)
 	got, _ := resolveViewDir()
 	if got != dir {
@@ -38,9 +49,7 @@ func TestResolveViewDirFromCWD(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("MUTONG_VIEW_DIR", "")
 	want := filepath.Join(tmp, "view", "dist")
-	if err := os.MkdirAll(want, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeIndex(t, want)
 	t.Chdir(tmp)
 	got, _ := resolveViewDir()
 	if got != want {
@@ -51,6 +60,7 @@ func TestResolveViewDirFromCWD(t *testing.T) {
 func TestRegisterStaticRoutesServesLogin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tmp := t.TempDir()
+	writeIndex(t, tmp)
 	t.Setenv("MUTONG_VIEW_DIR", tmp)
 	if err := os.WriteFile(filepath.Join(tmp, "login.html"), []byte("<html>login</html>"), 0o644); err != nil {
 		t.Fatal(err)

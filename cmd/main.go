@@ -573,18 +573,24 @@ func setupMiddleware(engine *gin.Engine, cfg *config.Config, sessions *authsvc.S
 	// equivalents. The redirect itself exposes no data.
 	engine.Use(func(ctx *gin.Context) {
 		p := ctx.Request.URL.Path
+		// 重定向必须保留 query string，否则 graph/search 等接口的必填参数
+		// （resourceId）会在 308 跳转后丢失，导致 400。
+		redirect := func(target string) {
+			if ctx.Request.URL.RawQuery != "" {
+				target += "?" + ctx.Request.URL.RawQuery
+			}
+			ctx.Redirect(http.StatusPermanentRedirect, target)
+			ctx.Abort()
+		}
 		switch {
 		case strings.HasPrefix(p, "/k8s/"):
-			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1"+p)
-			ctx.Abort()
+			redirect("/api/v1" + p)
 			return
 		case p == "/users":
-			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1/users")
-			ctx.Abort()
+			redirect("/api/v1/users")
 			return
 		case p == "/roles":
-			ctx.Redirect(http.StatusPermanentRedirect, "/api/v1/roles")
-			ctx.Abort()
+			redirect("/api/v1/roles")
 			return
 		}
 		ctx.Next()

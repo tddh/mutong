@@ -39,8 +39,8 @@ COPY --from=go-builder /mutongctl /app/mutongctl
 # 配置文件模板
 COPY configs/ /app/configs/
 
-# 前端静态文件（挂载到 /view 路径）
-COPY --from=ui-builder /dist /app/view
+# 前端静态文件（二进制同级 view/dist，resolveViewDir 据此定位）
+COPY --from=ui-builder /dist /app/view/dist
 
 # 初始化脚本：首次启动时从 .example 复制配置
 COPY deploy/entrypoint.sh /app/entrypoint.sh

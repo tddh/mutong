@@ -57,6 +57,7 @@
 ### Changed
 
 - Go 工具链升级 1.27.4（CI/Dockerfile/go.mod 同步）；gin 升级 1.12
+- `just build-ui` 输出改为 `view/dist`（与前端目录解析统一）；两个 Dockerfile 前端产物 COPY 到 `view/dist`，修复镜像内前端 404
 - `just build` 不再内嵌 tidy/gofmt 改写工作区；`just run` 按宿主平台选择产物（macOS 不再执行 Linux 二进制）
 - 前端主题迁移收尾：复盘两页硬编码色值清零，拓扑图重复代码抽共享模块
 - `chat/ask` 从无状态改为自动创建/续接用户会话（登录后首次消息即创建，侧栏同步显示）

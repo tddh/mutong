@@ -112,8 +112,7 @@ dev-ui:
 
 # 前端构建
 build-ui:
-    mkdir -p {{output_dir}}/view
-    cd view && OUT_DIR=../{{output_dir}}/view bun run build
+    cd view && bun run build
 
 # 前端预览
 preview-ui:

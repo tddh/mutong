@@ -14,7 +14,17 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags="-s -w" -o mutong ./cmd/main.go
 
-# Stage 2: Runtime
+# Stage 2: 前端构建（静态产物与架构无关，固定构建平台执行）
+FROM --platform=$BUILDPLATFORM oven/bun:1-alpine AS ui-builder
+
+WORKDIR /ui
+COPY view/package.json view/bun.lock ./
+RUN bun install --frozen-lockfile
+
+COPY view/ ./
+RUN OUT_DIR=/dist bun run build
+
+# Stage 3: Runtime
 FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata curl && \
@@ -24,6 +34,7 @@ WORKDIR /app
 
 COPY --from=builder /app/mutong .
 COPY --from=builder /app/configs ./configs
+COPY --from=ui-builder /dist ./view/dist
 COPY deploy/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh && chown -R mutong:mutong /app
 

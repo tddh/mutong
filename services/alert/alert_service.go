@@ -306,7 +306,7 @@ func (s *AlertService) Process(ctx context.Context, payload *alert_models.Webhoo
 		zap.String("status", payload.Status),
 		zap.Int("alertCount", len(payload.Alerts)))
 
-	s.metrics.RecordReceived(payload.Status)
+	s.metrics.RecordReceived(payload.Status, int64(len(payload.Alerts)))
 	batchStart := time.Now()
 
 	n := len(payload.Alerts)
@@ -517,7 +517,7 @@ func (s *AlertService) ProcessExternal(ctx context.Context, alert *alert_models.
 		zap.String("strategy", string(source.EnrichmentStrategy)),
 		zap.String("fingerprint", alert.Fingerprint))
 
-	s.metrics.RecordReceived(alert.Status)
+	s.metrics.RecordReceived(alert.Status, 1)
 
 	enrichCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()

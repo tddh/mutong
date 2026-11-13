@@ -74,6 +74,7 @@
 - 内存审计存储 `matchesAuditLog` 忽略 fingerprint 过滤（与 PG 存储行为对齐）
 - 前端目录解析修复：旧代码只验目录存在，把包着 dist/ 的外壳目录当 web root 致整站 `/view/*` 404；改为以二进制同级 `view/dist` 定位（不依赖 artifacts）、候选必须含 `index.html`、支持 `MUTONG_VIEW_DIR` 覆盖，启动日志打印 CWD 与搜索路径
 - 旧路径 308 重定向丢失 query string：`/k8s/...?resourceId=x` 跳转到 `/api/v1/...` 时参数被丢弃，致 `graph/search` 必填参数缺失返回 400；重定向保留 RawQuery（`/k8s/`、`/users`、`/roles`）
+- 告警统计口径不一致：收到总数按 webhook payload 计数、抑制总数按单个告警计数，批量 payload 致抑制率虚高（如 14802%）；`RecordReceived` 改按告警数计，与抑制同口径
 - Prometheus 未配置时 nil 适配器绕过判空导致 panic
 - `autoDiag` 与终端清理协程纳入应用 ctx 与优雅停机（新增 `StopCleanup`）
 - 根 docker-compose 缺 Nebula metad/storaged 导致一键启动失败；deploy compose 单 storaged 与 `replica_factor=2` 冲突且缺 `ADD HOSTS`

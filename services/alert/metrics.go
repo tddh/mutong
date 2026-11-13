@@ -91,9 +91,12 @@ func (m *AlertMetrics) GetNotifiedTotal() int64   { return m.notifiedTotal.Load(
 func (m *AlertMetrics) GetActiveFiring() int64    { return m.activeFiring.Load() }
 func (m *AlertMetrics) GetActiveResolved() int64  { return m.activeResolved.Load() }
 
-func (m *AlertMetrics) RecordReceived(status string) {
-	m.receivedTotal.Add(1)
-	alertsReceivedTotal.WithLabelValues(status).Inc()
+func (m *AlertMetrics) RecordReceived(status string, count int64) {
+	if count <= 0 {
+		return
+	}
+	m.receivedTotal.Add(count)
+	alertsReceivedTotal.WithLabelValues(status).Add(float64(count))
 }
 
 func (m *AlertMetrics) RecordSuppressed(reason string) {

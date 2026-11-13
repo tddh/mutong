@@ -602,43 +602,68 @@ func registerHealthz(engine *gin.Engine) {
 	})
 }
 
+// resolveViewDir 定位前端构建产物。仅靠 CWD 相对路径在 systemd/容器部署下
+// 会因工作目录与安装目录不一致而整站 /view/* 404，因此同时探测可执行文件
+// 相对路径，并支持 MUTONG_VIEW_DIR 显式覆盖。只接受目录，不接受同名文件。
+func resolveViewDir() (string, []string) {
+	var candidates []string
+	if d := os.Getenv("MUTONG_VIEW_DIR"); d != "" {
+		candidates = append(candidates, d)
+	}
+	candidates = append(candidates, "./artifacts/view", "./view/dist")
+	if exe, err := os.Executable(); err == nil {
+		base := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(base, "artifacts", "view"),
+			filepath.Join(base, "view", "dist"),
+			filepath.Join(base, "..", "artifacts", "view"),
+			filepath.Join(base, "..", "view", "dist"),
+		)
+	}
+	for _, dir := range candidates {
+		if info, err := os.Stat(dir); err == nil && info.IsDir() {
+			if abs, err := filepath.Abs(dir); err == nil {
+				return abs, candidates
+			}
+			return dir, candidates
+		}
+	}
+	return "", candidates
+}
+
 // registerStaticRoutes serves the built frontend and the pre-login pages.
 func registerStaticRoutes(engine *gin.Engine, logger *zap.Logger) {
 	// Only serve build output. Serving the ./view source tree would expose
 	// frontend source files to unauthenticated static-asset requests.
-	viewDirs := []string{"./artifacts/view", "./view/dist"}
-	viewServed := false
-	for _, dir := range viewDirs {
-		if _, err := os.Stat(dir); err == nil {
-			fs := http.FileServer(http.Dir(dir))
-			handler := http.StripPrefix("/view", fs)
-			engine.GET("/view/*filepath", func(c *gin.Context) {
-				path := c.Request.URL.Path
-				// Public pages and static assets bypass the redirect.
-				if path == "/view/login.html" || path == "/view/consent.html" ||
-					strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") ||
-					strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".svg") ||
-					strings.HasSuffix(path, ".ico") || strings.HasSuffix(path, ".woff2") ||
-					strings.HasPrefix(path, "/view/src/") {
-					handler.ServeHTTP(c.Writer, c.Request)
-					return
-				}
-				_, hasUser := c.Get("user_id")
-				if !hasUser {
-					c.Redirect(http.StatusFound, "/view/login.html")
-					c.Abort()
-					return
-				}
-				handler.ServeHTTP(c.Writer, c.Request)
-			})
-			viewServed = true
-			logger.Info("Serving frontend from", zap.String("dir", dir))
-			break
+	dir, candidates := resolveViewDir()
+	if dir == "" {
+		cwd, _ := os.Getwd()
+		logger.Warn("No frontend build found, /view/* will return 404",
+			zap.String("cwd", cwd), zap.Strings("searched", candidates))
+		return
+	}
+	fs := http.FileServer(http.Dir(dir))
+	handler := http.StripPrefix("/view", fs)
+	engine.GET("/view/*filepath", func(c *gin.Context) {
+		path := c.Request.URL.Path
+		// Public pages and static assets bypass the redirect.
+		if path == "/view/login.html" || path == "/view/consent.html" ||
+			strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") ||
+			strings.HasSuffix(path, ".png") || strings.HasSuffix(path, ".svg") ||
+			strings.HasSuffix(path, ".ico") || strings.HasSuffix(path, ".woff2") ||
+			strings.HasPrefix(path, "/view/src/") {
+			handler.ServeHTTP(c.Writer, c.Request)
+			return
 		}
-	}
-	if !viewServed {
-		logger.Warn("No frontend build found, serving will fail")
-	}
+		_, hasUser := c.Get("user_id")
+		if !hasUser {
+			c.Redirect(http.StatusFound, "/view/login.html")
+			c.Abort()
+			return
+		}
+		handler.ServeHTTP(c.Writer, c.Request)
+	})
+	logger.Info("Serving frontend from", zap.String("dir", dir))
 }
 
 func initializeGin(ctx context.Context, ctrls *controllers.Controllers, userSvc interfaces.UserInterface, logger *zap.Logger, alertProcessor alert_interfaces.AlertProcessor, inspectionProcessor interfaces.InspectionProcessor, db interfaces.GraphDB, k8sSvc *services.K8sResoureService, cfg *config.Config, oauth2Provider fosite.OAuth2Provider, rdb *redis.Client, sessions *authsvc.SessionManager, oidcClient *authsvc.ZitadelOIDCClient) (*gin.Engine, *execService.K8sExecutor, *diagnosis_svc.Engine, *diagnosis_svc.ChatSessionManager, *execService.AutoDiagnosisPipeline, *terminal.TerminalSessionManager) {

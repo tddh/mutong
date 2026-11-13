@@ -151,7 +151,7 @@
                 <div v-if="error" class="no-data" style="color: var(--error-color);z-index:5;">
                     <div class="no-data-icon">⚠️</div>
                     <div style="font-weight: 500;">{{ error }}</div>
-                    <div style="font-size: 12px; margin-top: 8px; color: #aaa;">请检查 K8s 集群连接后刷新</div>
+                    <div style="font-size: 12px; margin-top: 8px; color: #aaa;">请刷新重试；若持续失败请确认图数据库服务正常</div>
                 </div>
                 <div v-if="!loading && !error && !selectedResourceUid && graphDataCount === 0" class="no-data">
                     <div class="no-data-icon">👆</div>

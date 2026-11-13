@@ -1031,12 +1031,13 @@ createApp({
     }
 
     const fetchTopology = async (uid, layers) => {
+      if (!uid) return
       loading.value = true
       try {
         const res = await fetch(
           `/api/v1/k8s/resources/graph/search?resourceId=${encodeURIComponent(uid)}&depth=${layers}`,
         )
-        if (!res.ok) throw new Error(`获取拓扑数据失败 (${res.status})`)
+        if (!res.ok) throw new Error(`图拓扑查询失败 (${res.status})`)
         const data = await res.json()
         const topoNodes = (data.nodes || [])
           .filter((n) => n.id)

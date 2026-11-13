@@ -83,6 +83,10 @@ func (ct *K8sResourceController) GetAllRelationships(c *gin.Context) {
 }
 
 func (ct *K8sResourceController) SearchResourceRelationship(c *gin.Context) {
+	if c.Query("resourceId") == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "resourceId is required"})
+		return
+	}
 	result, err := ct.K8sResourceSvc.SearchResourceRelationship(ct.reqCtx(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
